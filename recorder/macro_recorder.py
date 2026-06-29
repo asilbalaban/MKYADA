@@ -232,6 +232,86 @@ class ScreenPreview(tk.Canvas):
         self.create_oval(x - r, y - r, x + r, y + r, fill=color, outline="white")
 
 
+# ---------------------------------------------------------------- gercek ekran overlay
+class ScreenOverlay:
+    """Tum ekrani kaplayan, seffaf ve tiklamayi geciren (click-through) katman.
+    Hover edilen adimi GERCEK ekran koordinatlarinda 1:1 cizer (Windows).
+    Desteklenmezse sessizce devre disi kalir (kucuk harita yedek)."""
+    KEY = "#FE01FE"   # bu renk tamamen seffaf olur -> cizimlerde KULLANMA
+
+    def __init__(self, root):
+        self.ok = True
+        self.win = tk.Toplevel(root)
+        self.win.withdraw()
+        self.sw = root.winfo_screenwidth()
+        self.sh = root.winfo_screenheight()
+        try:
+            self.win.attributes("-fullscreen", True)
+            self.win.attributes("-topmost", True)
+            self.win.attributes("-transparentcolor", self.KEY)
+        except tk.TclError:
+            self.ok = False
+        self.win.config(bg=self.KEY)
+        self.canvas = tk.Canvas(self.win, bg=self.KEY, highlightthickness=0,
+                                width=self.sw, height=self.sh)
+        self.canvas.pack(fill="both", expand=True)
+        self._make_clickthrough()
+        self._visible = False
+
+    def _make_clickthrough(self):
+        try:
+            import ctypes
+            self.win.update_idletasks()
+            hwnd = ctypes.windll.user32.GetParent(self.win.winfo_id())
+            GWL_EXSTYLE, WS_EX_LAYERED, WS_EX_TRANSPARENT = -20, 0x80000, 0x20
+            st = ctypes.windll.user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+            ctypes.windll.user32.SetWindowLongW(hwnd, GWL_EXSTYLE,
+                                                st | WS_EX_LAYERED | WS_EX_TRANSPARENT)
+        except Exception:
+            pass   # Windows disi / desteklenmiyor
+
+    def show(self, it):
+        if not self.ok:
+            return
+        c = self.canvas
+        c.delete("all")
+        t = it.get("type")
+        if t == "movegroup":
+            pts = it["points"]
+            coords = []
+            for p in pts:
+                coords += [p["x"], p["y"]]
+            if len(coords) >= 4:
+                c.create_line(*coords, fill="#4dabf7", width=3, arrow=tk.LAST,
+                              arrowshape=(16, 20, 6), smooth=True)
+            self._marker(pts[0]["x"], pts[0]["y"], "#37b24d", "BAS")
+            self._marker(pts[-1]["x"], pts[-1]["y"], "#f03e3e", "SON")
+        elif t == "button" and it.get("x") is not None:
+            lbl = "SOL" if it.get("button") == "left" else str(it.get("button", "")).upper()
+            self._marker(it["x"], it["y"], "#f59f00", lbl)
+        elif t == "move" and it.get("x") is not None:
+            self._marker(it["x"], it["y"], "#4dabf7", "")
+        else:
+            return
+        if not self._visible:
+            self.win.deiconify(); self._visible = True
+        self.win.lift()
+
+    def _marker(self, x, y, color, label):
+        c, r = self.canvas, 14
+        c.create_oval(x - r, y - r, x + r, y + r, outline=color, width=3)
+        c.create_line(x - r - 6, y, x + r + 6, y, fill=color, width=2)
+        c.create_line(x, y - r - 6, x, y + r + 6, fill=color, width=2)
+        c.create_oval(x - 3, y - 3, x + 3, y + 3, fill=color, outline="")
+        if label:
+            c.create_text(x + r + 10, y - r - 8, text=label, anchor="w",
+                          fill="#ffffff", font=("Segoe UI", 11, "bold"))
+
+    def hide(self):
+        if self.ok and self._visible:
+            self.win.withdraw(); self._visible = False
+
+
 # ---------------------------------------------------------------- duzenleme penceresi
 GENERIC_FIELDS = {
     "key":    [("action", "Aksiyon (down/up)"), ("key", "Tus"), ("vk", "vk (sayi)")],
@@ -329,13 +409,22 @@ class App:
         self.tree.pack(fill="both", expand=True)
         self.tree.bind("<Double-1>", lambda e: self.edit_selected())
         self.tree.bind("<Motion>", self._on_hover)
+        self.tree.bind("<Leave>", lambda e: self._hide_overlay())
         self.tree.bind("<<TreeviewSelect>>", lambda e: self._preview_selected())
 
         right = ttk.Frame(main); right.pack(side="right", fill="y", padx=(10, 0))
-        ttk.Label(right, text="Ekran onizleme").pack(anchor="w")
+        ttk.Label(right, text="Mini harita").pack(anchor="w")
         self.preview = ScreenPreview(right); self.preview.pack()
         self.info = ttk.Label(right, text="Bir satirin uzerine gel", foreground="#666")
         self.info.pack(anchor="w", pady=(6, 0))
+        ttk.Label(right, text="(satir uzerine gelince gercek\nekranda da gosterilir)",
+                  foreground="#999", justify="left").pack(anchor="w", pady=(8, 0))
+
+        # gercek ekran uzerinde tam boy onizleme katmani
+        try:
+            self.overlay = ScreenOverlay(root)
+        except Exception:
+            self.overlay = None
 
         bot = ttk.Frame(root); bot.pack(fill="x", padx=8, pady=6)
         for txt, cmd in [("Duzenle", self.edit_selected), ("Sil", self.delete_selected),
@@ -378,10 +467,18 @@ class App:
 
     def _on_hover(self, e):
         row = self.tree.identify_row(e.y)
-        if row != "":
-            it = self.items[int(row)]
-            self.preview.show(it)
-            self.info.config(text=self._info_text(it))
+        if row == "":
+            self._hide_overlay()
+            return
+        it = self.items[int(row)]
+        self.preview.show(it)
+        if self.overlay:
+            self.overlay.show(it)
+        self.info.config(text=self._info_text(it))
+
+    def _hide_overlay(self):
+        if self.overlay:
+            self.overlay.hide()
 
     def _preview_selected(self):
         idx = self._sel()
@@ -399,6 +496,7 @@ class App:
     def edit_selected(self):
         idx = self._sel()
         if not idx: return
+        self._hide_overlay()   # topmost overlay dialogu ortmesin
         i = idx[0]
         dlg = EditDialog(self.root, self.items[i])
         self.root.wait_window(dlg)
