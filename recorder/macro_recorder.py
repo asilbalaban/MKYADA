@@ -18,7 +18,7 @@ Kayit:  F9 = baslat/durdur (toggle).
 Bagimlilik:  pip install pynput   (tkinter Python ile gelir)
 """
 
-import json, time, copy
+import json, time, copy, threading
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 
@@ -49,6 +49,7 @@ class Recorder:
         self._last_t = None
         self._last_move_t = 0.0
         self.just_stopped = False
+        self.locked = False   # oynatma sirasinda F9 toggle'i kilitle
 
     def _stamp(self):
         now = time.perf_counter()
@@ -62,7 +63,9 @@ class Recorder:
 
     def _on_press(self, key):
         if key == TOGGLE_KEY:
-            self.toggle(); return
+            if not self.locked:
+                self.toggle()
+            return
         if not self.recording: return
         label, vk = key_to_fields(key)
         self._add({"type": "key", "action": "down", "key": label, "vk": vk})
@@ -158,6 +161,69 @@ def straighten(g):
     if len(g["points"]) >= 2:
         dur = group_duration(g)
         g["points"] = [g["points"][0], {**g["points"][-1], "dt": dur}]
+
+
+# ---------------------------------------------------------- yerel oynatma (pynput)
+_K = keyboard.Key
+NAME_TO_KEY = {
+    "enter": _K.enter, "return": _K.enter, "esc": _K.esc, "escape": _K.esc,
+    "space": _K.space, "tab": _K.tab, "backspace": _K.backspace, "delete": _K.delete,
+    "up": _K.up, "down": _K.down, "left": _K.left, "right": _K.right,
+    "home": _K.home, "end": _K.end, "page_up": _K.page_up, "page_down": _K.page_down,
+    "insert": _K.insert, "caps_lock": _K.caps_lock,
+    "ctrl": _K.ctrl, "ctrl_l": _K.ctrl_l, "ctrl_r": _K.ctrl_r,
+    "shift": _K.shift, "shift_l": _K.shift, "shift_r": _K.shift_r,
+    "alt": _K.alt, "alt_l": _K.alt_l, "alt_r": _K.alt_r, "alt_gr": _K.alt_gr,
+    "cmd": _K.cmd, "cmd_l": _K.cmd_l, "cmd_r": _K.cmd_r, "win": _K.cmd,
+}
+for _f in range(1, 13):
+    NAME_TO_KEY[f"f{_f}"] = getattr(_K, f"f{_f}")
+
+
+def _resolve_local_key(ev):
+    label = (ev.get("key") or "").lower()
+    if label in NAME_TO_KEY:
+        return NAME_TO_KEY[label]
+    vk = ev.get("vk")
+    if vk:
+        try:
+            return keyboard.KeyCode.from_vk(int(vk))
+        except Exception:
+            pass
+    ch = ev.get("key")
+    return ch if ch and len(ch) == 1 else None
+
+
+def play_local(events, speed, should_stop):
+    """events (duz liste) -> Windows'ta pynput ile oynat. should_stop() True olunca durur."""
+    kb = keyboard.Controller()
+    ms = mouse.Controller()
+    btns = {"left": mouse.Button.left, "right": mouse.Button.right, "middle": mouse.Button.middle}
+    speed = max(0.05, speed)
+    for ev in events:
+        if should_stop():
+            return
+        d = ev.get("delay", 0) / 1000.0 / speed
+        if d > 0:
+            time.sleep(d)
+        t = ev.get("type")
+        try:
+            if t == "key":
+                k = _resolve_local_key(ev)
+                if k is not None:
+                    (kb.press if ev.get("action") == "down" else kb.release)(k)
+            elif t == "move":
+                ms.position = (ev.get("x", 0), ev.get("y", 0))
+            elif t == "button":
+                if ev.get("x") is not None:
+                    ms.position = (ev["x"], ev["y"])
+                b = btns.get(ev.get("button"), mouse.Button.left)
+                (ms.press if ev.get("action") == "down" else ms.release)(b)
+            elif t == "scroll":
+                ms.scroll(0, ev.get("dy", 0))
+            # "wait": sadece bekleme (yukarida yapildi)
+        except Exception:
+            pass
 
 
 # ---------------------------------------------------------------- gosterim
@@ -467,6 +533,27 @@ class App:
         ttk.Button(top, text="Ac (JSON)", command=self.load_json).pack(side="right")
         ttk.Button(top, text="Kaydet (JSON)", command=self.save_json).pack(side="right", padx=4)
 
+        # --- oynatma cubugu ---
+        self.playing = False
+        self.stop_play = False
+        play = ttk.Frame(root); play.pack(fill="x", padx=8, pady=(0, 4))
+        self.play_btn = ttk.Button(play, text="▶ Oynat", command=self.play_clicked)
+        self.play_btn.pack(side="left")
+        ttk.Label(play, text="Hiz (x):").pack(side="left", padx=(12, 2))
+        self.speed_var = tk.StringVar(value="1.0")
+        ttk.Spinbox(play, from_=0.1, to=10, increment=0.1, width=5,
+                    textvariable=self.speed_var).pack(side="left")
+        ttk.Label(play, text="Tekrar:").pack(side="left", padx=(12, 2))
+        self.repeat_var = tk.StringVar(value="1")
+        ttk.Spinbox(play, from_=1, to=99999, width=6,
+                    textvariable=self.repeat_var).pack(side="left")
+        ttk.Label(play, text="Baslangic gecikmesi (sn):").pack(side="left", padx=(12, 2))
+        self.startdelay_var = tk.StringVar(value="3")
+        ttk.Spinbox(play, from_=0, to=30, width=4,
+                    textvariable=self.startdelay_var).pack(side="left")
+        ttk.Label(play, text="(Oynat'a basinca hedef pencereye gec)",
+                  foreground="#999").pack(side="left", padx=8)
+
         main = ttk.Frame(root); main.pack(fill="both", expand=True, padx=8, pady=4)
 
         left = ttk.Frame(main); left.pack(side="left", fill="both", expand=True)
@@ -555,6 +642,46 @@ class App:
 
     def _toggle_ontop(self):
         self.root.attributes("-topmost", self.ontop.get())
+
+    # ---- yerel oynatma ----
+    def play_clicked(self):
+        if self.playing:                 # oynarken bas -> durdur
+            self.stop_play = True
+            return
+        events = flatten_items(self.items)
+        if not events:
+            messagebox.showinfo("Oynat", "Once kaydet ya da adim ekle."); return
+        try:
+            speed = float(self.speed_var.get())
+            repeat = max(1, int(float(self.repeat_var.get())))
+            start_delay = max(0, int(float(self.startdelay_var.get())))
+        except ValueError:
+            messagebox.showerror("Hata", "Hiz/Tekrar/Gecikme sayi olmali"); return
+        self.playing = True
+        self.stop_play = False
+        self.rec.locked = True           # oynatma sirasinda F9 toggle kapali
+        self.play_btn.config(text="■ Durdur")
+        threading.Thread(target=self._play_thread,
+                         args=(events, speed, repeat, start_delay), daemon=True).start()
+
+    def _play_thread(self, events, speed, repeat, start_delay):
+        try:
+            for n in range(start_delay, 0, -1):
+                if self.stop_play:
+                    break
+                self.root.after(0, lambda n=n: self.status.config(text=f"Oynatma {n} sn sonra..."))
+                time.sleep(1)
+            for r in range(repeat):
+                if self.stop_play:
+                    break
+                self.root.after(0, lambda r=r: self.status.config(
+                    text=f"Oynatiliyor... ({r + 1}/{repeat})"))
+                play_local(events, speed, lambda: self.stop_play)
+        finally:
+            self.playing = False
+            self.rec.locked = False
+            self.root.after(0, lambda: self.play_btn.config(text="▶ Oynat"))
+            self.root.after(0, lambda: self.status.config(text="Oynatma bitti."))
 
     def _preview_selected(self):
         idx = self._sel()
