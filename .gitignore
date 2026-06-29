@@ -1,0 +1,11 @@
+# Python
+__pycache__/
+*.pyc
+
+# PyInstaller cikti
+build/
+dist/
+*.spec
+
+# JSON makro ciktilari (istege bagli)
+*.macro.json
