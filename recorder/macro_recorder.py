@@ -18,7 +18,7 @@ Kayit:  F9 = baslat/durdur (toggle).
 Bagimlilik:  pip install pynput   (tkinter Python ile gelir)
 """
 
-import json, time
+import json, time, copy
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 
@@ -173,12 +173,14 @@ def describe(it):
         return f"{a}  {it.get('button')}  ({it.get('x')},{it.get('y')})"
     if t == "scroll":
         return f"tekerlek dy={it.get('dy')}"
+    if t == "wait":
+        return "(bekleme)"
     return str(it)
 
 
 def row_type_label(it):
-    return {"movegroup": "🖱 Hareket", "key": "⌨ Tus",
-            "button": "🖱 Tik", "scroll": "🖲 Tekerlek"}.get(it.get("type"), it.get("type"))
+    return {"movegroup": "🖱 Hareket", "key": "⌨ Tus", "button": "🖱 Tik",
+            "scroll": "🖲 Tekerlek", "wait": "⏱ Bekle"}.get(it.get("type"), it.get("type"))
 
 
 def row_delay(it):
@@ -339,8 +341,14 @@ class EditDialog(tk.Toplevel):
 
         if it.get("type") == "movegroup":
             p0, p1 = it["points"][0], it["points"][-1]
-            ttk.Label(self, text=f"Baslangic: ({p0['x']}, {p0['y']})").grid(row=r, column=0, columnspan=2, sticky="w", padx=6); r += 1
-            ttk.Label(self, text=f"Bitis: ({p1['x']}, {p1['y']})   •   {len(it['points'])} nokta").grid(row=r, column=0, columnspan=2, sticky="w", padx=6); r += 1
+            self.mg = {}
+            for key, label, val in [("sx", "Baslangic X", p0["x"]), ("sy", "Baslangic Y", p0["y"]),
+                                    ("ex", "Bitis X", p1["x"]), ("ey", "Bitis Y", p1["y"])]:
+                ttk.Label(self, text=label + ":").grid(row=r, column=0, sticky="e", padx=6, pady=3)
+                v = tk.StringVar(value=str(val))
+                ttk.Entry(self, textvariable=v, width=16).grid(row=r, column=1, padx=6, pady=3)
+                self.mg[key] = v; r += 1
+            ttk.Label(self, text=f"({len(it['points'])} nokta)").grid(row=r, column=0, columnspan=2, sticky="w", padx=6); r += 1
             ttk.Label(self, text="Toplam hareket suresi (ms):").grid(row=r, column=0, sticky="e", padx=6, pady=4)
             self.dur_var = tk.StringVar(value=str(group_duration(it)))
             ttk.Entry(self, textvariable=self.dur_var, width=16).grid(row=r, column=1, padx=6, pady=4); r += 1
@@ -368,6 +376,18 @@ class EditDialog(tk.Toplevel):
             if self.straight.get():
                 straighten(it)
             try:
+                sx, sy = int(float(self.mg["sx"].get())), int(float(self.mg["sy"].get()))
+                ex, ey = int(float(self.mg["ex"].get())), int(float(self.mg["ey"].get()))
+            except ValueError:
+                messagebox.showerror("Hata", "Koordinatlar sayi olmali"); return
+            pts = it["points"]
+            pts[0]["x"], pts[0]["y"] = sx, sy
+            if len(pts) == 1:
+                if (ex, ey) != (sx, sy):
+                    pts.append({"x": ex, "y": ey, "dt": 0})
+            else:
+                pts[-1]["x"], pts[-1]["y"] = ex, ey
+            try:
                 set_group_duration(it, max(0, int(float(self.dur_var.get()))))
             except ValueError:
                 messagebox.showerror("Hata", "Sure sayi olmali"); return
@@ -376,6 +396,52 @@ class EditDialog(tk.Toplevel):
                 val = v.get().strip()
                 it[f] = (int(val) if val not in ("", "None") else None) if f in ("x", "y", "dx", "dy", "vk") else val
         self.result = it
+        self.destroy()
+
+
+# ---------------------------------------------------------------- kucuk form / toplu
+class FormDialog(tk.Toplevel):
+    def __init__(self, master, title, fields):
+        super().__init__(master)
+        self.title(title); self.transient(master); self.grab_set()
+        self.result = None; self.vars = {}
+        for r, (k, label, default) in enumerate(fields):
+            ttk.Label(self, text=label + ":").grid(row=r, column=0, sticky="e", padx=6, pady=4)
+            v = tk.StringVar(value=str(default))
+            ttk.Entry(self, textvariable=v, width=18).grid(row=r, column=1, padx=6, pady=4)
+            self.vars[k] = v
+        b = ttk.Frame(self); b.grid(row=len(fields), column=0, columnspan=2, pady=8)
+        ttk.Button(b, text="Tamam", command=self._ok).pack(side="left", padx=4)
+        ttk.Button(b, text="Iptal", command=self.destroy).pack(side="left", padx=4)
+
+    def _ok(self):
+        self.result = {k: v.get().strip() for k, v in self.vars.items()}
+        self.destroy()
+
+
+class BulkDialog(tk.Toplevel):
+    def __init__(self, master):
+        super().__init__(master)
+        self.title("Toplu duzenle"); self.transient(master); self.grab_set()
+        self.result = None
+        ttk.Label(self, text="Alan:").grid(row=0, column=0, sticky="e", padx=6, pady=6)
+        self.field = tk.StringVar(value="Gecikme (ms)")
+        ttk.Combobox(self, textvariable=self.field, state="readonly", width=28,
+                     values=["Gecikme (ms)", "Sure (ms) - sadece hareketler"]
+                     ).grid(row=0, column=1, padx=6, pady=6)
+        ttk.Label(self, text="Yeni deger:").grid(row=1, column=0, sticky="e", padx=6, pady=6)
+        self.val = tk.StringVar(value="100")
+        ttk.Entry(self, textvariable=self.val, width=16).grid(row=1, column=1, padx=6, pady=6)
+        b = ttk.Frame(self); b.grid(row=2, column=0, columnspan=2, pady=8)
+        ttk.Button(b, text="Secililere uygula", command=self._ok).pack(side="left", padx=4)
+        ttk.Button(b, text="Iptal", command=self.destroy).pack(side="left", padx=4)
+
+    def _ok(self):
+        try:
+            v = max(0, int(float(self.val.get())))
+        except ValueError:
+            messagebox.showerror("Hata", "Sayi gir"); return
+        self.result = ("delay" if self.field.get().startswith("Gecikme") else "dur", v)
         self.destroy()
 
 
@@ -427,8 +493,12 @@ class App:
             self.overlay = None
 
         bot = ttk.Frame(root); bot.pack(fill="x", padx=8, pady=6)
-        for txt, cmd in [("Duzenle", self.edit_selected), ("Sil", self.delete_selected),
-                         ("Yukari", lambda: self.move(-1)), ("Asagi", lambda: self.move(1))]:
+        self.add_btn = ttk.Button(bot, text="Ekle ▾", command=self.show_add_menu)
+        self.add_btn.pack(side="left", padx=3)
+        for txt, cmd in [("Kopyala", self.copy_selected), ("Duzenle", self.edit_selected),
+                         ("Sil", self.delete_selected), ("Yukari", lambda: self.move(-1)),
+                         ("Asagi", lambda: self.move(1)), ("Toplu duzenle", self.bulk_edit),
+                         ("Tumunu sec", self.select_all)]:
             ttk.Button(bot, text=txt, command=cmd).pack(side="left", padx=3)
         self.status = ttk.Label(bot, text="Hazir. F9 ile kayda basla.")
         self.status.pack(side="right")
@@ -516,6 +586,98 @@ class App:
         if 0 <= j < len(self.items):
             self.items[i], self.items[j] = self.items[j], self.items[i]
             self.refresh(); self.tree.selection_set(str(j))
+
+    # ---- secim / kopyalama / ekleme / toplu ----
+    def select_all(self):
+        self.tree.selection_set([str(i) for i in range(len(self.items))])
+
+    def copy_selected(self):
+        idx = self._sel()
+        if not idx: return
+        for i in reversed(idx):
+            self.items.insert(i + 1, copy.deepcopy(self.items[i]))
+        self.refresh()
+        self.tree.selection_set([str(i + 1) for i in idx])
+
+    def _insert_items(self, new_items):
+        idx = self._sel()
+        pos = (idx[-1] + 1) if idx else len(self.items)
+        for k, it in enumerate(new_items):
+            self.items.insert(pos + k, it)
+        self.refresh()
+        self.tree.selection_set(str(pos))
+        self.tree.see(str(pos))
+
+    def _form(self, title, fields):
+        d = FormDialog(self.root, title, fields)
+        self.root.wait_window(d)
+        return d.result
+
+    @staticmethod
+    def _int(s, default=0):
+        try:
+            return int(float(s))
+        except (ValueError, TypeError):
+            return default
+
+    def show_add_menu(self):
+        m = tk.Menu(self.root, tearoff=0)
+        m.add_command(label="⏱ Bekle", command=self.add_wait)
+        m.add_command(label="⌨ Tus (tam basis)", command=self.add_key)
+        m.add_command(label="🖱 Tiklama", command=self.add_click)
+        m.add_command(label="🖱 Hareket", command=self.add_move)
+        m.tk_popup(self.add_btn.winfo_rootx(),
+                   self.add_btn.winfo_rooty() + self.add_btn.winfo_height())
+
+    def add_wait(self):
+        r = self._form("Bekle ekle", [("ms", "Sure (ms)", "500")])
+        if r:
+            self._insert_items([{"type": "wait", "delay": self._int(r["ms"], 500)}])
+
+    def add_key(self):
+        r = self._form("Tus ekle", [("key", "Tus (a, enter, space, ...)", "a"),
+                                     ("delay", "Once bekle (ms)", "100")])
+        if r:
+            k, d = r["key"], self._int(r["delay"], 100)
+            self._insert_items([{"delay": d, "type": "key", "action": "down", "key": k, "vk": None},
+                                {"delay": 40, "type": "key", "action": "up", "key": k, "vk": None}])
+
+    def add_click(self):
+        r = self._form("Tiklama ekle", [("button", "Buton (left/right/middle)", "left"),
+                                         ("x", "X", "960"), ("y", "Y", "540"),
+                                         ("delay", "Once bekle (ms)", "100")])
+        if r:
+            b = r["button"] or "left"; x = self._int(r["x"]); y = self._int(r["y"]); d = self._int(r["delay"], 100)
+            self._insert_items([{"delay": d, "type": "button", "action": "down", "button": b, "x": x, "y": y},
+                                {"delay": 40, "type": "button", "action": "up", "button": b, "x": x, "y": y}])
+
+    def add_move(self):
+        r = self._form("Hareket ekle", [("x1", "Baslangic X", "100"), ("y1", "Baslangic Y", "100"),
+                                         ("x2", "Bitis X", "800"), ("y2", "Bitis Y", "600"),
+                                         ("dur", "Sure (ms)", "500"), ("delay", "Once bekle (ms)", "100")])
+        if r:
+            pts = [{"x": self._int(r["x1"]), "y": self._int(r["y1"]), "dt": 0},
+                   {"x": self._int(r["x2"]), "y": self._int(r["y2"]), "dt": self._int(r["dur"], 500)}]
+            self._insert_items([{"type": "movegroup", "delay": self._int(r["delay"], 100), "points": pts}])
+
+    def bulk_edit(self):
+        idx = self._sel()
+        if not idx:
+            messagebox.showinfo("Toplu duzenle", "Once satir sec (Ctrl/Shift ile coklu, ya da 'Tumunu sec').")
+            return
+        d = BulkDialog(self.root)
+        self.root.wait_window(d)
+        if not d.result:
+            return
+        field, val = d.result
+        for i in idx:
+            it = self.items[i]
+            if field == "delay":
+                it["delay"] = val
+            elif field == "dur" and it.get("type") == "movegroup":
+                set_group_duration(it, val)
+        self.refresh()
+        self.tree.selection_set([str(i) for i in idx])
 
     # ---- JSON ----
     def save_json(self):
