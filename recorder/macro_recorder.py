@@ -461,6 +461,9 @@ class App:
         ttk.Entry(top, textvariable=self.name_var, width=22).pack(side="left", padx=(4, 12))
         self.rec_btn = ttk.Button(top, text="● Kayit (F9)", command=self.rec.toggle)
         self.rec_btn.pack(side="left")
+        self.ontop = tk.BooleanVar(value=False)
+        ttk.Checkbutton(top, text="📌 Her zaman ustte", variable=self.ontop,
+                        command=self._toggle_ontop).pack(side="left", padx=10)
         ttk.Button(top, text="Ac (JSON)", command=self.load_json).pack(side="right")
         ttk.Button(top, text="Kaydet (JSON)", command=self.save_json).pack(side="right", padx=4)
 
@@ -549,6 +552,9 @@ class App:
     def _hide_overlay(self):
         if self.overlay:
             self.overlay.hide()
+
+    def _toggle_ontop(self):
+        self.root.attributes("-topmost", self.ontop.get())
 
     def _preview_selected(self):
         idx = self._sel()
