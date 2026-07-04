@@ -38,10 +38,12 @@ Unlike most DIY macro pads that just remap keys, MKYADA plays back **full record
 
 ## Status
 
-**v0.1.0** — firmware verified on real hardware; desktop app with onboarding, key
-assignments, macro recorder/editor and per-app profiles; Windows installer built
-by CI (macOS/Linux packages coming next). The app checks GitHub for new releases
-on launch.
+**v0.1.1** — firmware verified on real hardware; desktop app with onboarding, key
+assignments, macro recorder/editor and per-app profiles. CI builds a Windows
+installer and a macOS universal DMG (see [docs/macos-install.md](docs/macos-install.md)
+for Gatekeeper + permission setup — the app guides you through it on first
+launch); Linux packages coming next. The app checks GitHub for new releases on
+launch.
 
 > **Note:** automating input in online games may violate their Terms of Service. You are responsible for how you use this device.
 

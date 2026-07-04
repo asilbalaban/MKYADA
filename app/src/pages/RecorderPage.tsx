@@ -14,9 +14,12 @@ import { captureScreen, thinForDevice } from "../lib/recorder-model";
 import { macroFileName, migrateMacro } from "../lib/macro-model";
 import { Badge, Button, Card, Field, Input, Select } from "../components/ui";
 import { MacroEditor } from "../components/MacroEditor";
+import { usePermissions } from "../components/Permissions";
 
 export function RecorderPage() {
   const { hello, drive, send } = useDevice();
+  const { status: perms } = usePermissions();
+  const canRecord = !perms || perms.platform !== "macos" || perms.input_monitoring === "granted";
   const [recording, setRecording] = useState(false);
   const [count, setCount] = useState(0);
   const [macro, setMacro] = useState<MacroFile | null>(null);
@@ -141,9 +144,12 @@ export function RecorderPage() {
               ■ Stop (F8)
             </Button>
           ) : (
-            <Button variant="primary" onClick={() => void startRecording()}>
+            <Button variant="primary" onClick={() => void startRecording()} disabled={!canRecord}>
               ● Record (F8)
             </Button>
+          )}
+          {!canRecord && (
+            <Badge tone="amber">grant Input Monitoring in Settings to record</Badge>
           )}
           {recording && <Badge tone="red">REC · {count} events</Badge>}
           <Button onClick={() => void importJson()}>Import JSON…</Button>

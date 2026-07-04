@@ -14,8 +14,14 @@ jobs:
       matrix:
         include:
           - platform: windows-latest
-          # macOS / Linux packages planned right after the Windows-first release:
-          # - platform: macos-latest
+            args: ""
+            targets: ""
+          # universal .app/.dmg for Intel + Apple Silicon (unsigned — see
+          # docs/macos-install.md for the Gatekeeper bypass)
+          - platform: macos-latest
+            args: "--target universal-apple-darwin"
+            targets: "aarch64-apple-darwin,x86_64-apple-darwin"
+          # Linux packages planned next:
           # - platform: ubuntu-22.04
     runs-on: ${{ matrix.platform }}
     steps:
@@ -24,6 +30,8 @@ jobs:
         with:
           node-version: 22
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.targets }}
       - uses: swatinem/rust-cache@v2
         with:
           workspaces: app/src-tauri
@@ -35,12 +43,15 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           projectPath: app
+          args: ${{ matrix.args }}
           tagName: ${{ github.ref_name }}
           releaseName: "MKYADA ${{ github.ref_name }}"
           releaseBody: |
             MKYADA — Macro Keyboard You Always Dream About.
 
-            **Desktop app installers** are attached below.
+            **Desktop app installers** are attached below (Windows `.exe`/`.msi`,
+            macOS universal `.dmg` — unsigned, see
+            [docs/macos-install.md](https://github.com/asilbalaban/MKYADA/blob/main/docs/macos-install.md)).
             **Firmware**: download `mkyada-firmware-*.zip` and follow
             [docs/firmware-install.md](https://github.com/asilbalaban/MKYADA/blob/main/docs/firmware-install.md).
           releaseDraft: true

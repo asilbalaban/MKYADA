@@ -1,4 +1,5 @@
 mod device;
+mod permissions;
 mod player;
 mod profiles;
 mod recorder;
@@ -114,6 +115,17 @@ fn foreground_start(app: AppHandle) {
     profiles::foreground::ensure_watcher(app);
 }
 
+#[tauri::command]
+fn permissions_status() -> permissions::PermissionsStatus {
+    permissions::status()
+}
+
+/// Trigger the system prompt / open the right System Settings pane.
+#[tauri::command]
+fn permissions_request(kind: String) {
+    permissions::request(&kind);
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -142,6 +154,8 @@ pub fn run() {
             preview_play,
             preview_stop,
             foreground_start,
+            permissions_status,
+            permissions_request,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

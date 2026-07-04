@@ -4,6 +4,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { ipc } from "../lib/ipc";
 import type { UpdateInfo } from "../lib/types";
 import { Badge, Button, Card } from "../components/ui";
+import { PermissionsCard } from "../components/Permissions";
 
 export function SettingsPage() {
   const [version, setVersion] = useState("");
@@ -29,6 +30,7 @@ export function SettingsPage() {
 
   return (
     <div className="flex flex-col gap-4 max-w-xl">
+      <PermissionsCard />
       <Card title="About">
         <div className="flex flex-col gap-2 text-sm text-slate-300">
           <p>
