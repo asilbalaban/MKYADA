@@ -1,6 +1,6 @@
 [package]
 name = "mkyada"
-version = "0.1.1"
+version = "0.1.2"
 description = "MKYADA — Macro Keyboard You Always Dream About"
 authors = ["Asil Balaban"]
 license = "MIT"
@@ -27,9 +27,15 @@ serde_json = "1"
 serialport = "4"
 semver = "1"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
-rdev = "0.5"
 enigo = "0.3"
 active-win-pos-rs = "0.9"
+
+# rdev's macOS keyboard handling calls TSM (input-source) APIs from the event-
+# tap thread, which crashes on modern macOS (dispatch_assert_queue in
+# HIToolbox). On macOS we use our own minimal CGEventTap (recorder/
+# capture_macos.rs) that never touches TSM; rdev stays for Windows/Linux.
+[target.'cfg(not(target_os = "macos"))'.dependencies]
+rdev = "0.5"
 
 [profile.release]
 strip = true
