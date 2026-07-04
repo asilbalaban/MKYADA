@@ -64,14 +64,11 @@ function Shell() {
     <NavContext.Provider value={setPage}>
       <div className="flex h-screen">
         <aside className="w-48 shrink-0 border-r border-line bg-panel flex flex-col">
-          <div className="px-4 py-4 border-b border-line flex items-center gap-2.5">
-            <img src="/mkyada-logo.png" alt="" className="w-8 h-8 rounded-lg" />
-            <div>
-              <h1 className="font-black tracking-widest text-accent leading-none">MKYADA</h1>
-              <p className="text-[9px] text-fg-faint leading-tight mt-1">
-                Macro Keyboard You Always Dream About
-              </p>
-            </div>
+          <div className="px-4 py-4 border-b border-line flex items-center gap-3">
+            <img src="/mkyada-logo.png" alt="MKYADA" className="w-11 h-11 rounded-xl shrink-0" />
+            <p className="text-[11px] text-fg-muted leading-snug font-medium">
+              Macro Keyboard You Always Dream About
+            </p>
           </div>
           <nav className="flex-1 py-2" aria-label="Main">
             {NAV.map((n) => {
