@@ -33,8 +33,9 @@ class Proto:
             i = self.buf.find(b"\n")
             if i < 0:
                 break
-            line = bytes(self.buf[: i]).strip()
-            del self.buf[: i + 1]
+            # CircuitPython bytearrays don't support `del buf[:i]`
+            line = bytes(self.buf[:i]).strip()
+            self.buf = self.buf[i + 1 :]
             if line:
                 try:
                     msg = json.loads(line)

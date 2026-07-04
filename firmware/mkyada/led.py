@@ -8,7 +8,11 @@
 import time
 
 import board
-import neopixel
+
+try:
+    import neopixel
+except ImportError:
+    neopixel = None  # lib missing: run without a status LED
 
 LAYER_COLORS = ((0, 255, 0), (0, 80, 255), (170, 0, 255), (0, 255, 180))
 AMBER = (255, 120, 0)
@@ -20,7 +24,7 @@ IDLE, PLAYING, LOOPING, HOST = 0, 1, 2, 3
 class Led:
     def __init__(self):
         try:
-            self.px = neopixel.NeoPixel(board.GP16, 1, brightness=0.15, auto_write=True)
+            self.px = neopixel.NeoPixel(board.GP16, 1, brightness=0.15, auto_write=True) if neopixel else None
         except Exception:
             self.px = None
         self.state = IDLE
