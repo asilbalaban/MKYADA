@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/images/mkyada-logo.png" alt="MKYADA logo" width="120">
+</p>
+
 # MKYADA
 
 **M**acro **K**eyboard **Y**ou **A**lways **D**ream **A**bout — an open-source, DIY 6-key macro keypad built on the RP2040-Zero, with a cross-platform desktop configurator.
