@@ -63,7 +63,21 @@ export type Assignment =
   | { kind: "combo"; mods: string[]; key: string }
   | { kind: "text"; text: string }
   | { kind: "media"; usage: string }
-  | { kind: "recorded"; name: string; macro: MacroFile };
+  | { kind: "recorded"; name: string; macro: MacroFile }
+  // host-mode only: cannot be expressed as HID, runs on the computer
+  | { kind: "launch"; target: string };
+
+export interface Profile {
+  id: string;
+  name: string;
+  match: { exe: string; title_contains?: string | null };
+  keys: Record<string, Assignment>; // key number -> action
+}
+
+export interface ForegroundInfo {
+  exe: string;
+  title: string;
+}
 
 export interface BtnEvent {
   t: "btn";

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { DeviceProvider, useDevice } from "./lib/device";
+import { ProfilesProvider } from "./lib/profiles";
 import { ipc } from "./lib/ipc";
 import type { UpdateInfo } from "./lib/types";
 import { Badge, Button } from "./components/ui";
@@ -8,6 +9,7 @@ import { DevicesPage } from "./pages/DevicesPage";
 import { SetupPage } from "./pages/SetupPage";
 import { KeysPage } from "./pages/KeysPage";
 import { RecorderPage } from "./pages/RecorderPage";
+import { ProfilesPage } from "./pages/ProfilesPage";
 import { SettingsPage } from "./pages/SettingsPage";
 
 type Page = "devices" | "setup" | "keys" | "recorder" | "profiles" | "settings";
@@ -85,11 +87,7 @@ function Shell() {
           {page === "setup" && <SetupPage onDone={() => setPage("keys")} />}
           {page === "keys" && <KeysPage />}
           {page === "recorder" && <RecorderPage />}
-          {page === "profiles" && (
-            <p className="text-slate-500 text-sm">
-              Per-application profiles — coming in the next milestone.
-            </p>
-          )}
+          {page === "profiles" && <ProfilesPage />}
           {page === "settings" && <SettingsPage />}
         </main>
       </div>
@@ -100,7 +98,9 @@ function Shell() {
 export default function App() {
   return (
     <DeviceProvider>
-      <Shell />
+      <ProfilesProvider>
+        <Shell />
+      </ProfilesProvider>
     </DeviceProvider>
   );
 }

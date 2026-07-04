@@ -1,5 +1,6 @@
 mod device;
 mod player;
+mod profiles;
 mod recorder;
 mod updater;
 
@@ -108,6 +109,11 @@ fn preview_stop(preview: State<Preview>) {
     preview.stop();
 }
 
+#[tauri::command]
+fn foreground_start(app: AppHandle) {
+    profiles::foreground::ensure_watcher(app);
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -135,6 +141,7 @@ pub fn run() {
             recorder_state,
             preview_play,
             preview_stop,
+            foreground_start,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

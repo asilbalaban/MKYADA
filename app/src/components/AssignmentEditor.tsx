@@ -8,13 +8,14 @@ import type { Assignment, MacroFile } from "../lib/types";
 import { MEDIA_USAGES, MODIFIERS, SPECIAL_KEYS, migrateMacro } from "../lib/macro-model";
 import { Button, Field, Input, Select } from "./ui";
 
-const KINDS: { value: Assignment["kind"]; label: string }[] = [
+const KINDS: { value: Assignment["kind"]; label: string; launchOnly?: boolean }[] = [
   { value: "none", label: "Not assigned" },
   { value: "keystroke", label: "Single key" },
   { value: "combo", label: "Key combination" },
   { value: "text", label: "Type text" },
   { value: "media", label: "Media key" },
   { value: "recorded", label: "Recorded macro (JSON)" },
+  { value: "launch", label: "Open app / URL (app running only)", launchOnly: true },
 ];
 
 const ALL_KEYS = [..."abcdefghijklmnopqrstuvwxyz0123456789", ...SPECIAL_KEYS];
@@ -22,9 +23,12 @@ const ALL_KEYS = [..."abcdefghijklmnopqrstuvwxyz0123456789", ...SPECIAL_KEYS];
 export function AssignmentEditor({
   value,
   onChange,
+  allowLaunch = false,
 }: {
   value: Assignment;
   onChange: (a: Assignment) => void;
+  /** "Open app/URL" needs the desktop app running — only offered in profiles. */
+  allowLaunch?: boolean;
 }) {
   const [importError, setImportError] = useState("");
 
@@ -58,10 +62,11 @@ export function AssignmentEditor({
             else if (kind === "combo") onChange({ kind: "combo", mods: ["CTRL"], key: "a" });
             else if (kind === "text") onChange({ kind: "text", text: "" });
             else if (kind === "media") onChange({ kind: "media", usage: "play_pause" });
+            else if (kind === "launch") onChange({ kind: "launch", target: "" });
             else importMacro();
           }}
         >
-          {KINDS.map((k) => (
+          {KINDS.filter((k) => allowLaunch || !k.launchOnly).map((k) => (
             <option key={k.value} value={k.value}>
               {k.label}
             </option>
@@ -134,6 +139,16 @@ export function AssignmentEditor({
               </option>
             ))}
           </Select>
+        </Field>
+      )}
+
+      {value.kind === "launch" && (
+        <Field label="URL or file/app path">
+          <Input
+            value={value.target}
+            placeholder="https://… or C:\\Program Files\\…\\app.exe"
+            onChange={(e) => onChange({ ...value, target: e.target.value })}
+          />
         </Field>
       )}
 

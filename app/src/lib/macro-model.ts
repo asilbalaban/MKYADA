@@ -124,6 +124,8 @@ export function compileAssignment(a: Assignment, name?: string): MacroFile | nul
       };
     case "recorded":
       return { ...migrateMacro(a.macro), name: name ?? a.name };
+    case "launch":
+      return null; // host-mode only, never written to the device
   }
 }
 
@@ -165,7 +167,14 @@ export function describeAssignment(a: Assignment): string {
       return a.usage.replace(/_/g, " ");
     case "recorded":
       return `▶ ${a.name}`;
+    case "launch":
+      return `↗ ${a.target.length > 20 ? a.target.slice(0, 20) + "…" : a.target}`;
   }
+}
+
+/** File name for a profile-scoped macro synced to the device drive. */
+export function profileMacroFileName(profileId: string, keyNo: number): string {
+  return `macros/p_${profileId}_key${keyNo}.json`;
 }
 
 export function defaultConfig(): DeviceConfig {
