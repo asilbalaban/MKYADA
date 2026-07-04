@@ -74,6 +74,21 @@ pub fn candidate_ports() -> Vec<String> {
         })
         .collect();
 
+    // macOS lists every serial device twice: /dev/cu.X (callout) and
+    // /dev/tty.X (dial-in). Both reach the same board, so keep only the cu.
+    // twin — otherwise one keypad shows up as two and breaks auto-connect.
+    let cu_names: std::collections::HashSet<String> = usb
+        .iter()
+        .filter_map(|(name, _, _)| name.strip_prefix("/dev/cu.").map(str::to_string))
+        .collect();
+    let usb: Vec<(String, u16, String)> = usb
+        .into_iter()
+        .filter(|(name, _, _)| {
+            name.strip_prefix("/dev/tty.")
+                .map_or(true, |suffix| !cu_names.contains(suffix))
+        })
+        .collect();
+
     let by_name: Vec<String> = usb
         .iter()
         .filter(|(_, _, product)| product.contains(PRODUCT_MARKER))
@@ -117,11 +132,20 @@ pub fn probe(port: &str) -> Option<Value> {
 }
 
 /// Probe every candidate port (skipping an already-open connection).
+/// Results are deduplicated by board UID — if two ports reach the same
+/// board, only the first responder is kept.
 pub fn scan(skip: Option<&str>) -> Vec<DeviceInfo> {
+    let mut seen_uids = std::collections::HashSet::new();
     candidate_ports()
         .into_iter()
         .filter(|p| Some(p.as_str()) != skip)
         .filter_map(|p| probe(&p).map(|hello| DeviceInfo { port: p, hello }))
+        .filter(|d| {
+            match d.hello.get("uid").and_then(Value::as_str) {
+                Some(uid) => seen_uids.insert(uid.to_lowercase()),
+                None => true,
+            }
+        })
         .collect()
 }
 
