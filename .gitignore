@@ -9,3 +9,4 @@ dist/
 
 # JSON makro ciktilari (istege bagli)
 *.macro.json
+.DS_Store
