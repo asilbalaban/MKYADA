@@ -1,6 +1,6 @@
 [package]
 name = "mkyada"
-version = "0.1.5"
+version = "0.1.6"
 description = "MKYADA — Macro Keyboard You Always Dream About"
 authors = ["Asil Balaban"]
 license = "MIT"
@@ -18,7 +18,8 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+# macos-private-api: transparent overlay window on macOS
+tauri = { version = "2", features = ["macos-private-api"] }
 tauri-plugin-opener = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-store = "2"

@@ -164,6 +164,11 @@ class App:
             self.led.set(layer=0)
             self.proto.send({"t": "ok", "re": "reload"})
             self.proto.send(self.hello())
+        elif t == "reset":
+            # Hard reset: re-runs boot.py (needed after firmware updates).
+            self.proto.send({"t": "ok", "re": "reset"})
+            time.sleep(0.1)
+            microcontroller.reset()
         elif t == "set_layer":
             name = str(msg.get("layer", "a"))
             if name in LAYER_NAMES[: self.config["layer_count"]]:

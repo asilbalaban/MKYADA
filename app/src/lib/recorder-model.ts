@@ -3,6 +3,7 @@
 // Ramer–Douglas–Peucker thinning for the device's RAM budget.
 
 import type { MacroEvent, MacroFile } from "./types";
+import { IS_MAC } from "./macro-model";
 
 export interface MovePoint {
   x: number;
@@ -185,9 +186,42 @@ export function macroStats(m: MacroFile): { events: number; bytes: number; tooBi
   return { events: m.events.length, bytes, tooBig: m.events.length > 2000 || bytes > 120_000 };
 }
 
+/**
+ * Screen size in the same coordinate space the capture hooks report:
+ * Windows low-level hooks give physical pixels; macOS CGEvent locations are
+ * points (CSS pixels). Mixing them up makes device playback land at the
+ * wrong position on HiDPI screens.
+ */
 export function captureScreen(): { width: number; height: number } {
+  const scale = IS_MAC ? 1 : devicePixelRatio;
   return {
-    width: Math.round(screen.width * devicePixelRatio),
-    height: Math.round(screen.height * devicePixelRatio),
+    width: Math.round(screen.width * scale),
+    height: Math.round(screen.height * scale),
+  };
+}
+
+/**
+ * 4-coordinate movegroup editing (port of the old recorder): give the path a
+ * new start and end; every point is translated/scaled linearly per axis so
+ * the shape is preserved.
+ */
+export function remapGroup(
+  g: MoveGroup,
+  newStart: { x: number; y: number },
+  newEnd: { x: number; y: number },
+): MoveGroup {
+  const first = g.points[0];
+  const last = g.points[g.points.length - 1];
+  const axis = (p: number, s: number, e: number, ns: number, ne: number) => {
+    if (e === s) return ns + (p - s); // degenerate: pure translation
+    return ns + ((p - s) * (ne - ns)) / (e - s);
+  };
+  return {
+    ...g,
+    points: g.points.map((p) => ({
+      ...p,
+      x: Math.round(axis(p.x, first.x, last.x, newStart.x, newEnd.x)),
+      y: Math.round(axis(p.y, first.y, last.y, newStart.y, newEnd.y)),
+    })),
   };
 }

@@ -26,7 +26,7 @@ const MOD_TO_LABEL: Record<string, string> = {
   WIN: "cmd_l",
 };
 
-const IS_MAC = navigator.platform.toUpperCase().includes("MAC");
+export const IS_MAC = navigator.platform.toUpperCase().includes("MAC");
 
 /**
  * Display name for a canonical modifier. Stored mods stay canonical

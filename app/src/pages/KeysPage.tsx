@@ -2,6 +2,7 @@
 // save. Every assignment is compiled to a macro JSON on the device drive.
 
 import { useCallback, useEffect, useState } from "react";
+import { message } from "@tauri-apps/plugin-dialog";
 import { useDevice } from "../lib/device";
 import { ipc } from "../lib/ipc";
 import type { Assignment, DeviceConfig, MacroFile } from "../lib/types";
@@ -95,15 +96,26 @@ export function KeysPage() {
     if (selected === null || !draft || !cfg || !drive) return;
     const file = macroFileName(selected, layer);
     const macro = compileAssignment(draft);
-    if (macro) {
-      macro.screen = cfg.screen;
-      await ipc.driveWrite(drive.path, file, JSON.stringify(macro));
-    } else {
-      try {
-        await ipc.driveDelete(drive.path, file);
-      } catch {
-        // was already unassigned
+    try {
+      if (macro) {
+        macro.screen = cfg.screen;
+        await ipc.driveWrite(drive.path, file, JSON.stringify(macro));
+        // verify the write landed before claiming success
+        const back = await ipc.driveRead(drive.path, file);
+        if (!back.includes("mkyada-macro")) throw new Error("verification read failed");
+      } else {
+        try {
+          await ipc.driveDelete(drive.path, file);
+        } catch {
+          // was already unassigned
+        }
       }
+    } catch (e) {
+      await message(
+        `Could not write to the device:\n${e}\n\nCheck that the CIRCUITPY drive is mounted and writable (unplug/replug the keypad if needed).`,
+        { title: "Save failed", kind: "error" },
+      );
+      return;
     }
     const next = new Map(assignments);
     if (macro && draft.kind !== "none") next.set(slotKey(selected, layer), draft);
@@ -111,6 +123,12 @@ export function KeysPage() {
     setAssignments(next);
     setDraft(null);
     setStatus(macro ? `Saved ${file}` : `Cleared ${file}`);
+    await message(
+      macro
+        ? `Saved to the device ✓\n\nKey ${selected} → ${file}\nPress the key (or ▶ Test) to try it.`
+        : `Cleared key ${selected} (${file} removed).`,
+      { title: macro ? "Saved to device" : "Assignment cleared", kind: "info" },
+    );
   }
 
   async function testPlay(keyNo: number) {

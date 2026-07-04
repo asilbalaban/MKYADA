@@ -11,6 +11,7 @@ import {
   useState,
 } from "react";
 import { ipc, onDeviceDisconnected, onDeviceMsg } from "./ipc";
+import { rememberDevice } from "./devnames";
 import type { BtnEvent, DeviceInfo, DriveInfo, Hello } from "./types";
 
 interface DeviceState {
@@ -19,7 +20,7 @@ interface DeviceState {
   port: string | null;
   hello: Hello | null;
   drive: DriveInfo | null;
-  scan: () => Promise<void>;
+  scan: () => Promise<DeviceInfo[]>;
   connect: (info: DeviceInfo) => Promise<void>;
   disconnect: () => Promise<void>;
   send: (msg: Record<string, unknown>) => Promise<void>;
@@ -60,7 +61,12 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
   const scan = useCallback(async () => {
     setScanning(true);
     try {
-      setDevices(await ipc.scanDevices());
+      const found = await ipc.scanDevices();
+      setDevices(found);
+      for (const d of found) {
+        void rememberDevice(d.hello.uid, { fw: d.hello.fw });
+      }
+      return found;
     } finally {
       setScanning(false);
     }
@@ -70,12 +76,38 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
     await ipc.connectDevice(info.port);
     setPort(info.port);
     setHello(info.hello);
+    void rememberDevice(info.hello.uid, { fw: info.hello.fw });
     // Match the CIRCUITPY volume by the UID reported in hello.
     const drives = await ipc.listDrives();
     const match = drives.find((d) => d.uid.toLowerCase() === info.hello.uid.toLowerCase());
     setDrive(match ?? drives[0] ?? null);
     await ipc.deviceSend({ t: "identify" });
   }, []);
+
+  // Auto-connect: scan on launch and every few seconds while disconnected;
+  // if exactly one keypad is plugged in, connect to it without asking.
+  const portRef = useRef<string | null>(null);
+  portRef.current = port;
+  useEffect(() => {
+    let cancelled = false;
+    async function tick() {
+      if (cancelled || portRef.current) return;
+      try {
+        const found = await ipc.scanDevices();
+        if (cancelled || portRef.current) return;
+        setDevices(found);
+        if (found.length === 1) await connect(found[0]);
+      } catch {
+        // scan errors are non-fatal; retry on the next tick
+      }
+    }
+    void tick();
+    const t = setInterval(() => void tick(), 6000);
+    return () => {
+      cancelled = true;
+      clearInterval(t);
+    };
+  }, [connect]);
 
   const disconnect = useCallback(async () => {
     await ipc.disconnectDevice();

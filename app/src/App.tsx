@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { OverlayView } from "./components/OverlayView";
 import { DeviceProvider, useDevice } from "./lib/device";
 import { ProfilesProvider } from "./lib/profiles";
 import { ipc } from "./lib/ipc";
@@ -98,6 +100,11 @@ function Shell() {
 }
 
 export default function App() {
+  // The transparent path-overlay window runs the same bundle with a
+  // different window label and renders only the overlay view.
+  if (getCurrentWindow().label === "overlay") {
+    return <OverlayView />;
+  }
   return (
     <DeviceProvider>
       <ProfilesProvider>

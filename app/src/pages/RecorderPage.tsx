@@ -5,7 +5,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { open, save } from "@tauri-apps/plugin-dialog";
+import { message, open, save } from "@tauri-apps/plugin-dialog";
 import { readTextFile } from "../lib/fs";
 import { ipc } from "../lib/ipc";
 import { useDevice } from "../lib/device";
@@ -131,9 +131,20 @@ export function RecorderPage() {
     if (!macro || !drive) return;
     const out = { ...macro, events: thinForDevice(macro.events) };
     const file = macroFileName(assignKey, assignLayer);
-    await ipc.driveWrite(drive.path, file, JSON.stringify(out));
-    await send({ t: "reload" });
-    setStatus(`Assigned to ${file}`);
+    try {
+      await ipc.driveWrite(drive.path, file, JSON.stringify(out));
+      await send({ t: "reload" });
+      setStatus(`Assigned to ${file}`);
+      await message(
+        `Macro saved to the device ✓\n\nKey ${assignKey} → ${file} (${out.events.length} events)`,
+        { title: "Assigned to key", kind: "info" },
+      );
+    } catch (e) {
+      await message(`Could not write to the device:\n${e}`, {
+        title: "Assign failed",
+        kind: "error",
+      });
+    }
   }
 
   return (

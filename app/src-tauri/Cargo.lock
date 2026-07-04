@@ -2334,7 +2334,7 @@ dependencies = [
 
 [[package]]
 name = "mkyada"
-version = "0.1.5"
+version = "0.1.6"
 dependencies = [
  "active-win-pos-rs",
  "enigo",

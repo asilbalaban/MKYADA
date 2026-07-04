@@ -9,7 +9,7 @@ use device::drive::{self, DriveInfo};
 use device::serial::{self, DeviceInfo, DeviceManager};
 use player::Preview;
 use serde_json::Value;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 
 #[tauri::command]
 fn scan_devices(mgr: State<DeviceManager>) -> Vec<DeviceInfo> {
@@ -133,12 +133,95 @@ fn app_restart(app: AppHandle) {
     app.restart();
 }
 
+/// Version of the firmware bundled with this app build.
+#[tauri::command]
+fn firmware_bundled_version(app: AppHandle) -> Result<String, String> {
+    let dir = app
+        .path()
+        .resolve("firmware", tauri::path::BaseDirectory::Resource)
+        .map_err(|e| e.to_string())?;
+    std::fs::read_to_string(dir.join("VERSION"))
+        .map(|s| s.trim().to_string())
+        .map_err(|e| e.to_string())
+}
+
+/// Copy the bundled firmware onto the device drive. Never touches the user's
+/// config.json, macros/ or lib/ — only code + modules + VERSION.
+#[tauri::command]
+fn firmware_update(app: AppHandle, drive: String) -> Result<Vec<String>, String> {
+    let src = app
+        .path()
+        .resolve("firmware", tauri::path::BaseDirectory::Resource)
+        .map_err(|e| e.to_string())?;
+    let mut written = Vec::new();
+    for name in ["boot.py", "code.py", "VERSION"] {
+        let content = std::fs::read_to_string(src.join(name)).map_err(|e| e.to_string())?;
+        drive::write_file(&drive, name, &content)?;
+        written.push(name.to_string());
+    }
+    let modules = std::fs::read_dir(src.join("mkyada")).map_err(|e| e.to_string())?;
+    for entry in modules.flatten() {
+        let file = entry.file_name().to_string_lossy().into_owned();
+        if !file.ends_with(".py") {
+            continue;
+        }
+        let content = std::fs::read_to_string(entry.path()).map_err(|e| e.to_string())?;
+        drive::write_file(&drive, &format!("mkyada/{file}"), &content)?;
+        written.push(format!("mkyada/{file}"));
+    }
+    Ok(written)
+}
+
+/// Full-screen, click-through, transparent overlay window used to draw the
+/// recorded mouse path on the real screen (port of the old tkinter overlay).
+#[tauri::command]
+fn overlay_show(app: AppHandle) -> Result<(), String> {
+    use tauri::{WebviewUrl, WebviewWindowBuilder};
+    if let Some(w) = app.get_webview_window("overlay") {
+        w.show().map_err(|e| e.to_string())?;
+        return Ok(());
+    }
+    let monitor = app
+        .primary_monitor()
+        .map_err(|e| e.to_string())?
+        .ok_or("no monitor")?;
+    let scale = monitor.scale_factor();
+    let size = monitor.size().to_logical::<f64>(scale);
+    let w = WebviewWindowBuilder::new(&app, "overlay", WebviewUrl::App("index.html".into()))
+        .title("MKYADA overlay")
+        .decorations(false)
+        .transparent(true)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .focused(false)
+        .shadow(false)
+        .position(0.0, 0.0)
+        .inner_size(size.width, size.height)
+        .build()
+        .map_err(|e| e.to_string())?;
+    w.set_ignore_cursor_events(true).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn overlay_hide(app: AppHandle) {
+    if let Some(w) = app.get_webview_window("overlay") {
+        let _ = w.close();
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_store::Builder::new().build())
+        .setup(|app| {
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.set_title(&format!("MKYADA v{}", env!("CARGO_PKG_VERSION")));
+            }
+            Ok(())
+        })
         .manage(DeviceManager::default())
         .manage(Preview::default())
         .invoke_handler(tauri::generate_handler![
@@ -164,6 +247,10 @@ pub fn run() {
             permissions_status,
             permissions_request,
             app_restart,
+            firmware_bundled_version,
+            firmware_update,
+            overlay_show,
+            overlay_hide,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
