@@ -4,6 +4,7 @@
 
 import type { MacroEvent, MacroFile } from "./types";
 import { IS_MAC } from "./macro-model";
+import { displayKey } from "./layout";
 
 export interface MovePoint {
   x: number;
@@ -167,7 +168,7 @@ export function describeItem(item: EditorItem): string {
   }
   switch (item.type) {
     case "key":
-      return `Key ${item.action}: ${item.key}`;
+      return `Key ${item.action}: ${displayKey(item.key)}`;
     case "button":
       return `${item.button} ${item.action} @ (${item.x},${item.y})`;
     case "scroll":

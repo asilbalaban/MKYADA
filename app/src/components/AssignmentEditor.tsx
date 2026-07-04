@@ -9,11 +9,13 @@ import type { Assignment, MacroFile } from "../lib/types";
 import {
   MEDIA_USAGES,
   MODIFIERS,
+  MODIFIER_CODE_TO_KEY,
   keyFromEvent,
   migrateMacro,
   modifierDisplay,
   modsFromEvent,
 } from "../lib/macro-model";
+import { displayKey } from "../lib/layout";
 import { Button, Field, Input, Select } from "./ui";
 
 const KINDS: { value: Assignment["kind"]; label: string; launchOnly?: boolean }[] = [
@@ -31,13 +33,16 @@ const KINDS: { value: Assignment["kind"]; label: string; launchOnly?: boolean }[
  * With `withMods`, modifiers held during the press are captured too, so the
  * user just performs the shortcut (e.g. hold Ctrl+Shift, press S).
  */
-function KeyCapture({
+export function KeyCapture({
   value,
   withMods = false,
+  captureModifiers = false,
   onCapture,
 }: {
   value: string;
   withMods?: boolean;
+  /** Accept a bare modifier press as the key itself (macro row editing). */
+  captureModifiers?: boolean;
   onCapture: (key: string, mods: string[]) => void;
 }) {
   const [armed, setArmed] = useState(false);
@@ -47,7 +52,8 @@ function KeyCapture({
     const onKey = (e: KeyboardEvent) => {
       e.preventDefault();
       e.stopPropagation();
-      const key = keyFromEvent(e);
+      const key =
+        keyFromEvent(e) ?? (captureModifiers ? MODIFIER_CODE_TO_KEY[e.code] ?? null : null);
       if (!key) return; // bare modifier press — keep waiting for the real key
       onCapture(key, withMods ? modsFromEvent(e) : []);
       setArmed(false);
@@ -145,7 +151,7 @@ export function AssignmentEditor({
       {value.kind === "keystroke" && (
         <Field label="Key">
           <KeyCapture
-            value={value.key}
+            value={displayKey(value.key)}
             onCapture={(key) => onChange({ ...value, key })}
           />
         </Field>
@@ -157,7 +163,7 @@ export function AssignmentEditor({
             <KeyCapture
               value={
                 value.key
-                  ? [...value.mods.map(modifierDisplay), value.key.toUpperCase()].join(" + ")
+                  ? [...value.mods.map(modifierDisplay), displayKey(value.key).toUpperCase()].join(" + ")
                   : ""
               }
               withMods
@@ -191,7 +197,7 @@ export function AssignmentEditor({
       )}
 
       {value.kind === "text" && (
-        <Field label="Text to type (US layout)">
+        <Field label="Text to type">
           <Input
             value={value.text}
             placeholder="e.g. your@email.com"

@@ -125,7 +125,7 @@ npx tsx tests/model_test.ts
 
 ## Status
 
-**v0.2.1** — firmware and app verified on real hardware (two boards). Light/dark themed app with onboarding, press-to-capture key assignment, macro recorder/editor with on-screen path overlay, per-app profiles, in-app firmware updates and release checks. CI publishes a Windows installer + macOS universal DMG per release; Linux packages are next.
+**v0.2.5** — firmware and app verified on real hardware (two boards). Light/dark themed app with onboarding, press-to-capture key assignment, macro recorder/editor with on-screen path overlay, per-app profiles, playback policies (stop/restart, hold-to-repeat), full keyboard-layout awareness (Turkish and any other layout), in-app firmware updates and release checks. CI publishes a Windows installer + macOS universal DMG per release; Linux packages are next.
 
 > **Note:** automating input in online games may violate their Terms of Service. You are responsible for how you use this device.
 

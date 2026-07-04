@@ -1,4 +1,5 @@
 mod device;
+mod layout;
 mod permissions;
 mod player;
 mod profiles;
@@ -93,6 +94,14 @@ fn recorder_stop() {
 fn recorder_state(app: AppHandle) -> bool {
     recorder::capture::ensure_listener(app);
     recorder::capture::is_capturing()
+}
+
+/// What each positional key label types on the user's current keyboard
+/// layout. Deliberately sync: Tauri runs sync commands on the main thread,
+/// which macOS requires for the TIS/UCKeyTranslate calls inside.
+#[tauri::command]
+fn keyboard_layout() -> std::collections::HashMap<String, layout::KeyChars> {
+    layout::layout_map()
 }
 
 #[tauri::command]
@@ -257,6 +266,7 @@ pub fn run() {
             recorder_start,
             recorder_stop,
             recorder_state,
+            keyboard_layout,
             preview_play,
             preview_stop,
             foreground_start,

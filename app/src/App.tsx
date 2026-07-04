@@ -16,6 +16,7 @@ import { OverlayView } from "./components/OverlayView";
 import { DeviceProvider, useDevice } from "./lib/device";
 import { ProfilesProvider } from "./lib/profiles";
 import { deviceName, onDevnamesChanged } from "./lib/devnames";
+import { useLayoutVersion } from "./lib/layout";
 import { NavContext, Page } from "./lib/nav";
 import { ipc } from "./lib/ipc";
 import type { UpdateInfo } from "./lib/types";
@@ -45,6 +46,9 @@ function Shell() {
   const [pinned, setPinned] = useState(false);
   const [nickname, setNickname] = useState("");
   const { hello, port, layer } = useDevice();
+  // key labels everywhere show what they type on the user's real keyboard
+  // layout; re-render the tree when that map loads or changes
+  useLayoutVersion();
 
   // Sidebar shows the keypad's nickname (set on the Devices page) and follows
   // renames live.

@@ -40,7 +40,9 @@ import {
   straighten,
 } from "../lib/recorder-model";
 import { IS_MAC } from "../lib/macro-model";
+import { displayKey } from "../lib/layout";
 import { Button, Card, Field, Input, Select } from "./ui";
+import { KeyCapture } from "./AssignmentEditor";
 import { useToast } from "./toast";
 
 interface Props {
@@ -437,7 +439,11 @@ function RowFields({ item, onChange }: { item: EditorItem; onChange: (i: EditorI
         <div className="flex flex-wrap gap-3">
           {delayField}
           <Field label="Key">
-            <Input className="w-24" value={ev.key} onChange={(e) => onChange({ ...ev, key: e.target.value })} />
+            <KeyCapture
+              value={displayKey(ev.key)}
+              captureModifiers
+              onCapture={(key) => onChange({ ...ev, key })}
+            />
           </Field>
           <Field label="Action">
             <Select value={ev.action} onChange={(e) => onChange({ ...ev, action: e.target.value as "down" | "up" })}>

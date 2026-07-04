@@ -52,6 +52,7 @@ Every event has `delay` — milliseconds to wait **before** executing it.
 ```
 
 - `key`: `key` is a pynput-style label (`"a"`, `"ctrl_l"`, `"f5"`, `"enter"`, …); `vk` is the optional Windows virtual-key code. Resolution order: modifier tables → `vk` → name → character (see `firmware/mkyada/hidmap.py`).
+- **Labels are positional (US physical keys)**, because HID keycodes are positional too — the OS renders them through the active keyboard layout. Recording the "." key on a Turkish-Q keyboard stores `"/"` (its US position) and still types "." on playback. The app *displays* labels through your real layout, so you never see the raw US name.
 - `button`: `left` | `right` | `middle`. Optional `x`/`y` moves the pointer first.
 - `consumer` usages: `play_pause`, `next_track`, `prev_track`, `stop`, `mute`, `volume_up`, `volume_down`, `brightness_up`, `brightness_down`.
 - `wait`: pure delay, no action.

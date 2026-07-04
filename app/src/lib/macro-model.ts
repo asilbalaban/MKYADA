@@ -4,6 +4,7 @@
 
 import type { Assignment, DeviceConfig, MacroEvent, MacroFile } from "./types";
 import { LAYER_NAMES } from "./types";
+import { charToKeystroke, displayKey } from "./layout";
 
 export const MEDIA_USAGES = [
   "play_pause",
@@ -39,22 +40,6 @@ export function modifierDisplay(mod: string): string {
   return { CTRL: "⌃ CTRL", SHIFT: "⇧ SHIFT", ALT: "⌥ OPT", WIN: "⌘ CMD" }[mod] ?? mod;
 }
 
-// US-layout: shifted symbol -> base key
-const SHIFT_MAP: Record<string, string> = {
-  "!": "1", "@": "2", "#": "3", "$": "4", "%": "5", "^": "6", "&": "7",
-  "*": "8", "(": "9", ")": "0", "_": "-", "+": "=", "{": "[", "}": "]",
-  "|": "\\", ":": ";", '"': "'", "<": ",", ">": ".", "?": "/", "~": "`",
-};
-
-const DIRECT_CHARS = new Set("abcdefghijklmnopqrstuvwxyz0123456789-=[]\\;'`,./");
-
-/** Special keys assignable as a single keystroke. */
-export const SPECIAL_KEYS = [
-  "enter", "esc", "tab", "space", "backspace", "delete", "insert",
-  "home", "end", "page_up", "page_down", "up", "down", "left", "right",
-  "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12",
-];
-
 // KeyboardEvent.code -> macro key label (layout-independent physical keys).
 const CODE_TO_KEY: Record<string, string> = {
   Enter: "enter", Escape: "esc", Tab: "tab", Space: "space",
@@ -64,6 +49,16 @@ const CODE_TO_KEY: Record<string, string> = {
   Minus: "-", Equal: "=", BracketLeft: "[", BracketRight: "]",
   Backslash: "\\", Semicolon: ";", Quote: "'", Backquote: "`",
   Comma: ",", Period: ".", Slash: "/",
+};
+
+/** KeyboardEvent.code -> modifier label, for contexts (macro row editing)
+ * where a bare modifier press is itself the key being set. */
+export const MODIFIER_CODE_TO_KEY: Record<string, string> = {
+  ShiftLeft: "shift_l", ShiftRight: "shift_r",
+  ControlLeft: "ctrl_l", ControlRight: "ctrl_r",
+  AltLeft: "alt_l", AltRight: "alt_r",
+  MetaLeft: "cmd_l", MetaRight: "cmd_r",
+  CapsLock: "caps_lock",
 };
 
 /**
@@ -119,22 +114,23 @@ function textEvents(text: string): MacroEvent[] {
   const events: MacroEvent[] = [];
   for (const ch of text) {
     let base = ch;
-    let shifted = false;
+    let mods: string[] = [];
     if (ch === "\n") base = "enter";
     else if (ch === "\t") base = "tab";
     else if (ch === " ") base = "space";
-    else if (ch >= "A" && ch <= "Z") {
-      base = ch.toLowerCase();
-      shifted = true;
-    } else if (SHIFT_MAP[ch]) {
-      base = SHIFT_MAP[ch];
-      shifted = true;
-    } else if (!DIRECT_CHARS.has(ch)) {
-      continue; // not representable on a US-layout HID report
+    else {
+      // layout-aware: on a Turkish keyboard "ç" compiles to the physical key
+      // that types it there (US "." position) and "@" to AltGr+Q, so the
+      // keypad reproduces exactly what the user's layout renders
+      const ks = charToKeystroke(ch);
+      if (!ks) continue; // needs dead keys — not reachable via plain HID
+      base = ks.key;
+      if (ks.shift) mods.push("shift_l");
+      if (ks.altgr) mods.push("alt_gr");
     }
-    if (shifted) events.push({ delay: 10, type: "key", action: "down", key: "shift_l" });
-    events.push(...keyTap(base, shifted ? 5 : 10, 20));
-    if (shifted) events.push({ delay: 5, type: "key", action: "up", key: "shift_l" });
+    for (const m of mods) events.push({ delay: 10, type: "key", action: "down", key: m });
+    events.push(...keyTap(base, mods.length ? 5 : 10, 20));
+    for (const m of [...mods].reverse()) events.push({ delay: 5, type: "key", action: "up", key: m });
   }
   if (events.length) events[0] = { ...events[0], delay: 0 };
   return events;
@@ -242,9 +238,9 @@ export function describeAssignment(a: Assignment): string {
     case "none":
       return "Not assigned";
     case "keystroke":
-      return a.key.toUpperCase();
+      return displayKey(a.key).toUpperCase();
     case "combo":
-      return [...a.mods.map(modifierDisplay), a.key.toUpperCase()].join(" + ");
+      return [...a.mods.map(modifierDisplay), displayKey(a.key).toUpperCase()].join(" + ");
     case "text":
       return `Type "${a.text.length > 18 ? a.text.slice(0, 18) + "…" : a.text}"`;
     case "media":
