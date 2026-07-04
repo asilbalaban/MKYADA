@@ -1,13 +1,15 @@
 # Wiring & soldering guide
 
 How to solder a MKYADA keypad: **every switch shares one common GND**, and the
-switches connect to **GP0…GP5 in key order**. That's the whole circuit — no
-diodes, no resistors, no matrix.
+switches connect to **GP0, GP1, GP2… in key order**. That's the whole circuit —
+no diodes, no resistors, no matrix. The reference build is 6 keys, but the
+firmware supports **any count up to 20** — one key per castellated GPIO on the
+board's edge.
 
 ## Parts
 
 - 1 × Waveshare **RP2040-Zero** (USB-C)
-- Up to 6 × mechanical switches (Cherry MX or compatible)
+- 1–20 × mechanical switches (Cherry MX or compatible) — 6 is the reference build
 - Thin stranded wire (~24–28 AWG), solder, flux
 - USB-C **data** cable (some charge-only cables won't enumerate)
 - 3D-printed case — STLs and print notes in [case/](case/) (a Stream Cheap
@@ -35,8 +37,10 @@ Hold the board **USB-C connector up, component side facing you**:
               GP14 … GP9   GP8
 ```
 
-- The six key pins are the **top six pads on the right edge**, top → bottom:
-  GP0, GP1, GP2, GP3, GP4, GP5.
+- Key pins follow the board's perimeter: **GP0…GP8 down the right edge**,
+  GP9…GP14 along the bottom, then GP15 and GP26…GP29 up the left — 20 usable
+  key pins in total. A 6-key build uses just the top six on the right
+  (GP0…GP5).
 - **GND is the second pad from the top on the left edge** (between 5V and 3V3).
 - The onboard WS2812 RGB LED (GP16) is the status light — nothing to wire.
 - BOOT/RESET buttons are on the face; you'll use BOOT once when flashing
@@ -57,12 +61,13 @@ just a contact:
  All keys ─ GND (one shared wire)
 ```
 
-- Key numbering follows the GPIO order: **GP0 = key 1 … GP5 = key 6**.
+- Key numbering follows the GPIO order: **GP0 = key 1, GP1 = key 2, …**
   Decide now which physical position is "key 1" (top-left is the convention).
 - No pull-ups or diodes: the firmware enables internal pull-ups, so a pressed
   key simply shorts its GPIO to GND.
-- Building fewer than 6 keys? Solder GP0…GP(n-1) and the setup wizard will set
-  `key_count` for you.
+- Any key count from 1 to 20 works: solder GP0…GP(n-1) — keys 7+ continue past
+  GP5 onto GP6, GP7, GP8 and around the board — then set the count in the
+  setup wizard. (GP16 is skipped: it drives the onboard LED.)
 
 ## Soldering, step by step
 
@@ -99,7 +104,9 @@ standalone mode uses it too.
 ## Türkçe özet
 
 Devre çok basit: **her tuşun bir bacağı ortak GND'ye** (tek zincir hâlinde),
-**diğer bacağı sırasıyla GP0…GP5'e** lehimlenir. GND pad'i USB üstteyken sol
+**diğer bacağı sırasıyla GP0, GP1, GP2…'ye** lehimlenir. 6 tuş referans tasarım;
+firmware kartın kenarındaki 20 GPIO'ya kadar her sayıyı destekler (GP16 hariç —
+o LED'in). GND pad'i USB üstteyken sol
 kenarda üstten ikinci; GP0–GP5 sağ kenarda üstten ilk altı pad. Direnç/diyot
 gerekmez (firmware dahili pull-up kullanır). Lehim sonrası uygulamadaki
 **Setup → canlı tuş testi** ile her tuşu doğrula; tuşları yanlış sırayla

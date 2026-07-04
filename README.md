@@ -4,7 +4,7 @@
 
 # MKYADA
 
-**M**acro **K**eyboard **Y**ou **A**lways **D**ream **A**bout — an open-source, DIY **6-key macro keypad** built on the Waveshare **RP2040-Zero**, with a cross-platform desktop configurator. It records your mouse and keyboard, then replays them as **real hardware HID input** — so your macros work even in games that ignore software automation.
+**M**acro **K**eyboard **Y**ou **A**lways **D**ream **A**bout — an open-source, DIY **macro keypad** (6 keys in the reference build, up to 20 supported) built on the Waveshare **RP2040-Zero**, with a cross-platform desktop configurator. It records your mouse and keyboard, then replays them as **real hardware HID input** — so your macros work even in games that ignore software automation.
 
 <p align="center">
   <img src="docs/images/mkyada-topview.jpg" alt="MKYADA — 6-key macro keypad with backlit mechanical keys and USB-C" width="560">
@@ -43,11 +43,11 @@ Unlike most DIY macro pads that just remap keys, MKYADA plays back **full record
 |---|---|
 | Microcontroller | [Waveshare RP2040-Zero](https://www.waveshare.com/wiki/RP2040-Zero) — dual-core Cortex-M0+ @ 133 MHz, 264 KB RAM, 2 MB flash, USB-C |
 | Firmware | [CircuitPython](https://circuitpython.org/board/waveshare_rp2040_zero/) 10.x + MKYADA firmware ([firmware/](firmware/)) |
-| Switches | up to 6 × Cherry MX-compatible, one leg each to **GP0…GP5**, other legs daisy-chained to a common **GND** — no diodes, no resistors |
+| Switches | 1–20 × Cherry MX-compatible (6 = reference build), one leg each to **GP0, GP1, GP2…** in key order, other legs daisy-chained to a common **GND** — no diodes, no resistors |
 | Status LED | onboard WS2812 (GP16), nothing to wire |
 | Case | 3D-printed **Stream Cheap** remix — STLs + print notes in [hardware/case/](hardware/case/) |
 
-Full soldering walkthrough with the board pinout photo: **[hardware/wiring.md](hardware/wiring.md)**. Fewer than 6 keys is fine — the setup wizard adapts. Soldered the keys in the wrong order? The app remaps them in software.
+Full soldering walkthrough with the board pinout photo: **[hardware/wiring.md](hardware/wiring.md)**. Any key count from 1 to 20 works — the setup wizard adapts. Soldered the keys in the wrong order? The app remaps them in software.
 
 ## How it works
 
@@ -116,11 +116,11 @@ STLs and print notes live in [hardware/case/](hardware/case/).
 
 ## Türkçe
 
-**MKYADA** (Macro Keyboard You Always Dream About), Waveshare RP2040-Zero üzerine kurulu, açık kaynak, kendin-yap 6 tuşlu bir makro klavyedir ve çok platformlu bir masaüstü yapılandırma uygulamasıyla gelir.
+**MKYADA** (Macro Keyboard You Always Dream About), Waveshare RP2040-Zero üzerine kurulu, açık kaynak, kendin-yap bir makro klavyedir (referans tasarım 6 tuş, 20 tuşa kadar desteklenir) ve çok platformlu bir masaüstü yapılandırma uygulamasıyla gelir.
 
 Çoğu DIY makro pad sadece tuş atar; MKYADA ise kaydedilmiş **mouse hareketleri + tıklamalar + tuş vuruşlarını gerçek donanım HID girdisi olarak** kartın kendisinden oynatır. Yazılımsal makro araçları girdiyi işletim sistemi seviyesinde enjekte ettiği için oyunlarda çoğu zaman çalışmaz; MKYADA'nın girdisi elektriksel olarak gerçek bir klavye/mouse olduğundan ayırt edilemez.
 
-**Donanım:** Waveshare RP2040-Zero (USB-C) + en fazla 6 mekanik switch. Her switch'in bir bacağı sırasıyla **GP0…GP5**'e, diğer bacağı **ortak GND** zincirine lehimlenir — diyot/direnç yok. Kart üzerindeki RGB LED durum ışığıdır. Lehim rehberi (fotoğraflı, Türkçe özetli): [hardware/wiring.md](hardware/wiring.md) · 3D baskı kutu: [hardware/case/](hardware/case/).
+**Donanım:** Waveshare RP2040-Zero (USB-C) + 1–20 mekanik switch (referans tasarım 6 tuş). Her switch'in bir bacağı sırasıyla **GP0…GP5**'e, diğer bacağı **ortak GND** zincirine lehimlenir — diyot/direnç yok. Kart üzerindeki RGB LED durum ışığıdır. Lehim rehberi (fotoğraflı, Türkçe özetli): [hardware/wiring.md](hardware/wiring.md) · 3D baskı kutu: [hardware/case/](hardware/case/).
 
 - **Uygulamasız çalışır** — `key1.json` dosyasını kartın USB sürücüsüne at, tuşa bas.
 - **Her şey JSON** — basit bir Ctrl+A ataması bile küçük bir makro dosyasıdır; başka karta kopyalayınca aynı davranır.

@@ -180,7 +180,7 @@ export function SetupPage({ onDone }: { onDone: () => void }) {
       {step === 0 && (
         <Card title="How is your keypad built?">
           <div className="flex flex-col gap-4">
-            <Field label="Number of soldered keys (GP0…GP5)">
+            <Field label="Number of soldered keys — GP0…GP(n-1), up to 20">
               <Select
                 value={cfg.key_count}
                 onChange={(e) => {
@@ -192,7 +192,7 @@ export function SetupPage({ onDone }: { onDone: () => void }) {
                   });
                 }}
               >
-                {[1, 2, 3, 4, 5, 6].map((n) => (
+                {Array.from({ length: 20 }, (_, i) => i + 1).map((n) => (
                   <option key={n} value={n}>
                     {n}
                   </option>

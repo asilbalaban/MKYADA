@@ -31,7 +31,7 @@ usb_cdc.data = None
 sys.modules["usb_cdc"] = usb_cdc
 
 board = types.ModuleType("board")
-for i in list(range(6)) + [16]:
+for i in list(range(16)) + [16] + list(range(26, 30)):
     setattr(board, "GP%d" % i, "GP%d" % i)
 sys.modules["board"] = board
 
@@ -208,6 +208,28 @@ check("remap gpio1 -> key1", played[-1] == "/macros/key1.json", str(played))
 # key_map validation: bad map falls back to identity
 app.config = dict(app.config)
 del app.play_file  # restore real method
+
+# more than 6 keys: key_count 8 survives load_config; 13 clamps to the pin count
+import builtins as _b, io as _io
+_real_open = _b.open
+def _cfg_open(payload):
+    def fake(path, *a, **k):
+        if str(path) == "/config.json":
+            return _io.StringIO(json.dumps(payload))
+        return _real_open(path, *a, **k)
+    return fake
+_b.open = _cfg_open({"key_count": 8})
+app.load_config()
+check("8 keys allowed", app.config["key_count"] == 8, str(app.config["key_count"]))
+check("8-key identity map", app.config["key_map"] == list(range(1, 9)), str(app.config["key_map"]))
+_b.open = _cfg_open({"key_count": 99})
+app.load_config()
+check("key_count clamped to pins", app.config["key_count"] == 20, str(app.config["key_count"]))
+_b.open = _real_open
+_b.open = _cfg_open({"key_count": 6})
+app.load_config()
+_b.open = _real_open
+app.config["key_map"] = [3, 1, 2, 4, 5, 6]
 
 # host mode: btn events carry logical key + physical pin
 outbox = []

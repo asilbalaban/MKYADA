@@ -19,7 +19,17 @@ from mkyada.engine import Engine, StopPlayback
 from mkyada.led import Led
 from mkyada.proto import Proto
 
-PIN_ORDER = (board.GP0, board.GP1, board.GP2, board.GP3, board.GP4, board.GP5)
+# Key pins in solder order — every castellated GPIO on the RP2040-Zero's
+# edge, walking the perimeter: GP0-GP8 down the right side, GP9-GP14 along
+# the bottom, GP15 + GP26-GP29 up the left. (GP16 drives the onboard
+# WS2812; GP17-GP25 are rear test pads, not edge pins.) 6 keys is the
+# reference build; solder GP0..GP(n-1) for any n up to 20 and set key_count.
+PIN_ORDER = (
+    board.GP0, board.GP1, board.GP2, board.GP3, board.GP4, board.GP5,
+    board.GP6, board.GP7, board.GP8, board.GP9, board.GP10, board.GP11,
+    board.GP12, board.GP13, board.GP14, board.GP15,
+    board.GP26, board.GP27, board.GP28, board.GP29,
+)
 DEBOUNCE_S = 0.02
 PING_TIMEOUT_S = 5.0
 PROTO_VERSION = 1

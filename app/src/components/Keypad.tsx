@@ -33,7 +33,10 @@ export function Keypad({ config, selected, onSelect, assignments }: Props) {
   );
 
   const keys = Array.from({ length: config.key_count }, (_, i) => i + 1);
-  const cols = config.key_count <= 3 ? config.key_count : 3;
+  // Grid shape: small counts stay one row, 3x2 stays the reference layout,
+  // bigger builds get wider rows (8 → 4×2, 9 → 3×3, 12 → 4×3, 20 → 5×4).
+  const n = config.key_count;
+  const cols = n <= 3 ? n : n <= 6 ? 3 : n === 9 ? 3 : n <= 12 ? 4 : 5;
 
   // Roving tabindex: the grid is one tab stop; arrows move between keys.
   function onKeyDown(e: React.KeyboardEvent, n: number) {
