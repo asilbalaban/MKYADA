@@ -10,7 +10,8 @@ diodes, no resistors, no matrix.
 - Up to 6 × mechanical switches (Cherry MX or compatible)
 - Thin stranded wire (~24–28 AWG), solder, flux
 - USB-C **data** cable (some charge-only cables won't enumerate)
-- 3D-printed case — files in [case/](case/) *(coming soon)*
+- 3D-printed case — STLs and print notes in [case/](case/) (a Stream Cheap
+  remix; credits in [case/README.md](case/README.md))
 
 ## Know your board
 

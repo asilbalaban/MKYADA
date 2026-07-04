@@ -72,6 +72,16 @@ launch.
 
 ---
 
+## Credits
+
+The 3D-printed case is a **Stream Cheap** remix — huge thanks to the makers:
+
+- [Stream Cheap (Mini Macro Keyboard)](https://www.printables.com/model/157035-stream-cheap-mini-macro-keyboard) by **dmadison** — the original design.
+- [Stream Cheap 3x2 RP2040 Zero](https://www.printables.com/model/989881-stream-cheap-3x2-rp2040-zero) by **schichtbude** — the RP2040-Zero fork whose body we print.
+- [Stream Cheap (3x2, 4x2, 5x2) Remixed with reset button](https://www.thingiverse.com/thing:4497991) by **hartk1213** (CC BY 4.0) — source of the 3×2 face plate. Tip: scale the plate's thickness up ~20% in your slicer; it's a little thin as published.
+
+STLs and print notes live in [hardware/case/](hardware/case/).
+
 ## Türkçe
 
 **MKYADA** (Macro Keyboard You Always Dream About), RP2040-Zero üzerine kurulu, açık kaynak, kendin-yap 6 tuşlu bir makro klavyedir ve çok platformlu bir masaüstü yapılandırma uygulamasıyla gelir.
