@@ -9,6 +9,7 @@ import { ipc } from "../lib/ipc";
 import type { Assignment, DeviceConfig, MacroFile } from "../lib/types";
 import { layerLabel } from "../lib/types";
 import {
+  assignmentComplete,
   compileAssignment,
   defaultConfig,
   macroFileName,
@@ -238,7 +239,12 @@ export function KeysPage() {
               <Button onClick={() => setDraft(null)} disabled={!draft}>
                 Revert
               </Button>
-              <Button variant="primary" onClick={() => void saveDraft()} disabled={!draft} loading={saving}>
+              <Button
+                variant="primary"
+                onClick={() => void saveDraft()}
+                disabled={!draft || !assignmentComplete(draft)}
+                loading={saving}
+              >
                 Save to keypad
               </Button>
             </div>

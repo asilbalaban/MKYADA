@@ -6,7 +6,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open, save } from "@tauri-apps/plugin-dialog";
-import { Circle, FileDown, FileUp, Play, Square } from "lucide-react";
+import { Circle, FileDown, FileUp, HardDriveDownload, Play, Square } from "lucide-react";
 import { readTextFile } from "../lib/fs";
 import { ipc } from "../lib/ipc";
 import { useDevice } from "../lib/device";
@@ -26,6 +26,7 @@ export function RecorderPage() {
   const canRecord = !perms || perms.platform !== "macos" || perms.input_monitoring === "granted";
   const [recording, setRecording] = useState(false);
   const [count, setCount] = useState(0);
+  const [countdown, setCountdown] = useState(0);
   const [macro, setMacro] = useState<MacroFile | null>(null);
   const [status, setStatus] = useState("");
   const [startDelay, setStartDelay] = useState(3);
@@ -33,6 +34,7 @@ export function RecorderPage() {
   const [assignLayer, setAssignLayer] = useState(0);
   const raw = useRef<MacroEvent[]>([]);
   const recordingRef = useRef(false);
+  const countdownTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const stopRecording = useCallback(async () => {
     await invoke("recorder_stop");
@@ -65,6 +67,30 @@ export function RecorderPage() {
     setStatus("Recording… press F8 to stop.");
   }, []);
 
+  const cancelCountdown = useCallback(() => {
+    if (countdownTimer.current) clearInterval(countdownTimer.current);
+    countdownTimer.current = null;
+    setCountdown(0);
+  }, []);
+
+  /** Record button: honor the start delay so the user can get in position.
+   *  (F8 skips it — you're already where you want to be.) */
+  const armRecording = useCallback(() => {
+    if (startDelay <= 0) return void startRecording();
+    cancelCountdown();
+    let left = startDelay;
+    setCountdown(left);
+    setStatus("Get ready…");
+    countdownTimer.current = setInterval(() => {
+      left -= 1;
+      setCountdown(left);
+      if (left <= 0) {
+        cancelCountdown();
+        void startRecording();
+      }
+    }, 1000);
+  }, [startDelay, startRecording, cancelCountdown]);
+
   useEffect(() => {
     const un1 = listen("record:event", (e) => {
       raw.current.push(e.payload as MacroEvent);
@@ -79,6 +105,7 @@ export function RecorderPage() {
     return () => {
       un1.then((f) => f());
       un2.then((f) => f());
+      if (countdownTimer.current) clearInterval(countdownTimer.current);
       void invoke("recorder_stop");
     };
   }, [startRecording, stopRecording]);
@@ -150,20 +177,20 @@ export function RecorderPage() {
   return (
     <div className="flex flex-col gap-4">
       <Card title="Recorder">
-        <div className="flex items-center gap-3 flex-wrap">
+        <div className="flex items-end gap-3 flex-wrap">
           {recording ? (
             <Button variant="danger" onClick={() => void stopRecording()}>
               <Square size={14} aria-hidden /> Stop (F8)
             </Button>
+          ) : countdown > 0 ? (
+            <Button variant="danger" onClick={cancelCountdown}>
+              <Square size={14} aria-hidden /> Starting in {countdown}… (cancel)
+            </Button>
           ) : (
-            <Button variant="primary" onClick={() => void startRecording()} disabled={!canRecord}>
+            <Button variant="primary" onClick={armRecording} disabled={!canRecord}>
               <Circle size={14} aria-hidden /> Record (F8)
             </Button>
           )}
-          {!canRecord && (
-            <Badge tone="amber">grant Input Monitoring in Settings to record</Badge>
-          )}
-          {recording && <Badge tone="red">REC · {count} events</Badge>}
           <Button onClick={() => void importJson()}>
             <FileUp size={14} aria-hidden /> Import JSON…
           </Button>
@@ -174,11 +201,18 @@ export function RecorderPage() {
               onChange={(e) => setStartDelay(Math.max(0, parseInt(e.target.value) || 0))}
             />
           </Field>
-          <p className="text-xs text-fg-faint max-w-sm">
-            F8 starts/stops recording even while another window is focused.
-            Mouse moves, clicks, scrolls and keys are captured globally.
-          </p>
+          <div className="flex items-center gap-2 pb-1">
+            {!canRecord && (
+              <Badge tone="amber">grant Input Monitoring in Settings to record</Badge>
+            )}
+            {recording && <Badge tone="red">REC · {count} events</Badge>}
+          </div>
         </div>
+        <p className="text-xs text-fg-faint mt-3">
+          The Record button waits for the start delay so you can get in position; F8 starts and
+          stops instantly, even while another window is focused. Mouse moves, clicks, scrolls
+          and keys are captured globally.
+        </p>
         {status && <p className="text-xs text-fg-muted mt-2">{status}</p>}
         {captureError && (
           <p className="text-xs text-danger mt-2">⚠ {captureError}</p>
@@ -189,53 +223,77 @@ export function RecorderPage() {
         <>
           <MacroEditor macro={macro} onChange={setMacro} />
 
-          <Card title="Play & save">
-            <div className="flex items-center gap-2 flex-wrap">
-              <Button variant="primary" onClick={() => void playOnDevice()} disabled={!drive}>
-                <Play size={14} aria-hidden /> Play on device (hardware HID)
-              </Button>
-              <Button onClick={() => void previewLocally()}>
-                Preview locally (may not work in games)
-              </Button>
-              <Button onClick={() => void invoke("preview_stop").then(() => send({ t: "stop" }))}>
-                <Square size={14} aria-hidden /> Stop
-              </Button>
-              <span className="mx-2 border-l border-line h-6" />
-              <Button onClick={() => void exportJson(false)}>
-                <FileDown size={14} aria-hidden /> Export JSON…
-              </Button>
-              <Button onClick={() => void exportJson(true)}>
-                <FileDown size={14} aria-hidden /> Export optimized…
-              </Button>
-              {hello && drive && (
-                <>
-                  <span className="mx-2 border-l border-line h-6" />
-                  <Select value={assignKey} onChange={(e) => setAssignKey(Number(e.target.value))}>
-                    {Array.from({ length: hello.key_count }, (_, i) => i + 1)
-                      .filter((n) => n !== hello.layer_key)
-                      .map((n) => (
-                        <option key={n} value={n}>Key {n}</option>
-                      ))}
-                  </Select>
-                  {hello.layer_key && (
-                    <Select value={assignLayer} onChange={(e) => setAssignLayer(Number(e.target.value))}>
-                      {Array.from({ length: hello.layer_count }, (_, i) => (
-                        <option key={i} value={i}>Layer {"ABCDEFGH"[i]}</option>
-                      ))}
-                    </Select>
-                  )}
+          <div className="grid md:grid-cols-3 gap-3">
+            <Card title="1 · Try it">
+              <div className="flex flex-col gap-2">
+                <Button variant="primary" onClick={() => void playOnDevice()} disabled={!drive}>
+                  <Play size={14} aria-hidden /> Play on device (hardware HID)
+                </Button>
+                <Button onClick={() => void previewLocally()}>
+                  Preview locally
+                </Button>
+                <Button onClick={() => void invoke("preview_stop").then(() => send({ t: "stop" }))}>
+                  <Square size={14} aria-hidden /> Stop playback
+                </Button>
+                <p className="text-xs text-fg-faint">
+                  Device playback is real hardware input — it works in games. Local preview may
+                  not. Both wait for the start delay ({startDelay}s).
+                </p>
+              </div>
+            </Card>
+
+            <Card title="2 · Put it on a key">
+              {hello && drive ? (
+                <div className="flex flex-col gap-2">
+                  <div className="flex gap-2">
+                    <Field label="Key">
+                      <Select value={assignKey} onChange={(e) => setAssignKey(Number(e.target.value))}>
+                        {Array.from({ length: hello.key_count }, (_, i) => i + 1)
+                          .filter((n) => n !== hello.layer_key)
+                          .map((n) => (
+                            <option key={n} value={n}>Key {n}</option>
+                          ))}
+                      </Select>
+                    </Field>
+                    {hello.layer_key && (
+                      <Field label="Layer">
+                        <Select value={assignLayer} onChange={(e) => setAssignLayer(Number(e.target.value))}>
+                          {Array.from({ length: hello.layer_count }, (_, i) => (
+                            <option key={i} value={i}>Layer {"ABCDEFGH"[i]}</option>
+                          ))}
+                        </Select>
+                      </Field>
+                    )}
+                  </div>
                   <Button variant="primary" onClick={() => void assignToKey()}>
-                    Assign to key
+                    <HardDriveDownload size={14} aria-hidden /> Save to key {assignKey}
                   </Button>
-                </>
+                  <p className="text-xs text-fg-faint">
+                    Writes the macro to the keypad — it then works standalone, no app needed.
+                  </p>
+                </div>
+              ) : (
+                <p className="text-sm text-fg-faint">
+                  Connect your keypad to save this macro onto a key.
+                </p>
               )}
-            </div>
-            {!hello && (
-              <p className="text-xs text-fg-faint mt-2">
-                Connect a device to play through hardware or assign to a key.
-              </p>
-            )}
-          </Card>
+            </Card>
+
+            <Card title="3 · Share it">
+              <div className="flex flex-col gap-2">
+                <Button onClick={() => void exportJson(false)}>
+                  <FileDown size={14} aria-hidden /> Export JSON…
+                </Button>
+                <Button onClick={() => void exportJson(true)}>
+                  <FileDown size={14} aria-hidden /> Export optimized…
+                </Button>
+                <p className="text-xs text-fg-faint">
+                  A macro file works on any MKYADA — drop it onto another keypad's USB drive or
+                  share it with a friend.
+                </p>
+              </div>
+            </Card>
+          </div>
         </>
       )}
     </div>

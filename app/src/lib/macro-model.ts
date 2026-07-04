@@ -55,6 +55,41 @@ export const SPECIAL_KEYS = [
   "f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12",
 ];
 
+// KeyboardEvent.code -> macro key label (layout-independent physical keys).
+const CODE_TO_KEY: Record<string, string> = {
+  Enter: "enter", Escape: "esc", Tab: "tab", Space: "space",
+  Backspace: "backspace", Delete: "delete", Insert: "insert",
+  Home: "home", End: "end", PageUp: "page_up", PageDown: "page_down",
+  ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right",
+  Minus: "-", Equal: "=", BracketLeft: "[", BracketRight: "]",
+  Backslash: "\\", Semicolon: ";", Quote: "'", Backquote: "`",
+  Comma: ",", Period: ".", Slash: "/",
+};
+
+/**
+ * Map a captured keydown to a macro key label, or null for events we can't
+ * assign (bare modifier presses, media keys, …). Uses e.code so the physical
+ * key wins regardless of the OS keyboard layout — matching what the keypad
+ * will send as a US-layout HID report.
+ */
+export function keyFromEvent(e: KeyboardEvent): string | null {
+  const c = e.code;
+  if (/^Key[A-Z]$/.test(c)) return c.slice(3).toLowerCase();
+  if (/^Digit[0-9]$/.test(c)) return c.slice(5);
+  if (/^F([1-9]|1[0-2])$/.test(c)) return c.toLowerCase();
+  return CODE_TO_KEY[c] ?? null;
+}
+
+/** Canonical modifiers held during a captured keydown. */
+export function modsFromEvent(e: KeyboardEvent): string[] {
+  const mods: string[] = [];
+  if (e.ctrlKey) mods.push("CTRL");
+  if (e.shiftKey) mods.push("SHIFT");
+  if (e.altKey) mods.push("ALT");
+  if (e.metaKey) mods.push("WIN");
+  return mods;
+}
+
 export function macroFileName(keyNo: number, layerIndex: number): string {
   const suffix = layerIndex > 0 ? `-${LAYER_NAMES[layerIndex]}` : "";
   return `macros/key${keyNo}${suffix}.json`;
@@ -103,6 +138,21 @@ function textEvents(text: string): MacroEvent[] {
   }
   if (events.length) events[0] = { ...events[0], delay: 0 };
   return events;
+}
+
+/** True when the assignment has everything it needs to be saved. */
+export function assignmentComplete(a: Assignment): boolean {
+  switch (a.kind) {
+    case "keystroke":
+    case "combo":
+      return !!a.key;
+    case "text":
+      return a.text.length > 0;
+    case "launch":
+      return a.target.length > 0;
+    default:
+      return true;
+  }
 }
 
 /** Compile an assignment to a macro file, or null when the key is unassigned. */

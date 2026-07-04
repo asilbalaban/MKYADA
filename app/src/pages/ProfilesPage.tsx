@@ -5,7 +5,7 @@ import { useState } from "react";
 import { useDevice } from "../lib/device";
 import { useProfiles } from "../lib/profiles";
 import type { Assignment, Profile } from "../lib/types";
-import { describeAssignment } from "../lib/macro-model";
+import { assignmentComplete, describeAssignment } from "../lib/macro-model";
 import { AssignmentEditor } from "../components/AssignmentEditor";
 import { Crosshair } from "lucide-react";
 import { Badge, Button, Card, Field, Input } from "../components/ui";
@@ -177,7 +177,7 @@ export function ProfilesPage() {
                       />
                       <div className="flex justify-end gap-2">
                         <Button onClick={() => setDraft(null)} disabled={!draft}>Revert</Button>
-                        <Button variant="primary" onClick={saveKeyAssignment} disabled={!draft}>
+                        <Button variant="primary" onClick={saveKeyAssignment} disabled={!draft || !assignmentComplete(draft)}>
                           Save
                         </Button>
                       </div>

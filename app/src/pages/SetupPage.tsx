@@ -2,9 +2,10 @@
 // Ends with a live key test that doubles as a solder-joint check.
 
 import { useEffect, useState } from "react";
-import { Usb } from "lucide-react";
+import { Pencil, Usb } from "lucide-react";
 import { useDevice } from "../lib/device";
 import { useNav } from "../lib/nav";
+import { ipc } from "../lib/ipc";
 import { Button, Card, EmptyState, Field, Input, Select, Stepper } from "../components/ui";
 import { defaultConfig, macroSlots } from "../lib/macro-model";
 import type { DeviceConfig } from "../lib/types";
@@ -21,6 +22,8 @@ export function SetupPage({ onDone }: { onDone: () => void }) {
   const [step, setStep] = useState(0);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  // Already-configured keypads get a summary first; the wizard is opt-in.
+  const [view, setView] = useState<"loading" | "summary" | "wizard">("loading");
 
   // Try to preload the device's existing config so re-running setup edits it.
   useEffect(() => {
@@ -34,6 +37,28 @@ export function SetupPage({ onDone }: { onDone: () => void }) {
       key_map: hello.key_map ?? null,
     }));
   }, [hello]);
+
+  // If the drive already holds a config, show the summary instead of the wizard.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!drive) {
+        setView("wizard");
+        return;
+      }
+      try {
+        const stored = JSON.parse(await ipc.driveRead(drive.path, "config.json"));
+        if (cancelled) return;
+        setCfg((c) => ({ ...c, ...stored }));
+        setView("summary");
+      } catch {
+        if (!cancelled) setView("wizard");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [drive]);
 
   if (!hello) {
     return (
@@ -65,6 +90,83 @@ export function SetupPage({ onDone }: { onDone: () => void }) {
     } finally {
       setSaving(false);
     }
+  }
+
+  if (view === "loading") {
+    return <p className="text-fg-muted text-sm">Reading the keypad's setup…</p>;
+  }
+
+  if (view === "summary") {
+    const identity = cfg.key_map == null || cfg.key_map.every((v, i) => v === i + 1);
+    return (
+      <div className="flex flex-col gap-4 max-w-3xl mx-auto w-full">
+        <Card
+          title="This keypad is set up"
+          actions={
+            <Button
+              variant="primary"
+              onClick={() => {
+                setStep(0);
+                setView("wizard");
+              }}
+            >
+              <Pencil size={14} aria-hidden /> Change setup
+            </Button>
+          }
+        >
+          <div className="grid grid-cols-2 gap-x-6 gap-y-1.5 text-sm text-fg-muted max-w-md">
+            <span>Keys</span>
+            <span className="text-fg">{cfg.key_count}</span>
+            <span>Layers</span>
+            <span className="text-fg">
+              {cfg.layer_key
+                ? `Key ${cfg.layer_key} switches ${cfg.layer_count} layers (${cfg.layer_mode})`
+                : "None — every key is a macro"}
+            </span>
+            <span>Macro slots</span>
+            <span className="text-fg">{macroSlots(cfg)}</span>
+            <span>Screen (mouse macros)</span>
+            <span className="text-fg">
+              {cfg.screen.width} × {cfg.screen.height}
+            </span>
+            <span>Key order</span>
+            <span className="text-fg">
+              {identity ? "Default (GP0…GP5)" : `Remapped (${cfg.key_map!.join(" ")})`}
+            </span>
+          </div>
+          <p className="text-xs text-fg-faint mt-3">
+            Key assignments live on the Keys page — this only covers how the keypad itself is
+            built.
+          </p>
+        </Card>
+
+        <Card title="Live key test — press your physical keys">
+          <div className="flex flex-col gap-4">
+            <p className="text-sm text-fg-muted">
+              Pressing a key should light it up below. If a key doesn't react, check its solder
+              joint.
+            </p>
+            <TestPad cfg={cfg} send={send} />
+            <div className="flex justify-end">
+              <Button variant="primary" onClick={() => nav("keys")}>
+                Assign keys
+              </Button>
+            </div>
+          </div>
+        </Card>
+
+        <RemapPanel
+          cfg={cfg}
+          onApply={async (key_map) => {
+            const next = { ...cfg, key_map };
+            setCfg(next);
+            await writeAndReload([
+              { path: "config.json", content: JSON.stringify(next, null, 2) },
+            ]);
+          }}
+        />
+      </div>
+    );
   }
 
   return (

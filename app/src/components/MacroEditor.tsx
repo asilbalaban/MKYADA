@@ -40,6 +40,7 @@ import {
   straighten,
 } from "../lib/recorder-model";
 import { Button, Card, Field, Input, Select } from "./ui";
+import { useToast } from "./toast";
 
 interface Props {
   macro: MacroFile;
@@ -51,9 +52,11 @@ export function MacroEditor({ macro, onChange }: Props) {
   const [selected, setSelected] = useState<number | null>(null);
   const [bulkFactor, setBulkFactor] = useState("1.0");
   const [overlayOn, setOverlayOn] = useState(false);
+  const [overlayOnlySelected, setOverlayOnlySelected] = useState(false);
   const stats = macroStats(macro);
   const overlayRef = useRef(overlayOn);
   overlayRef.current = overlayOn;
+  const toast = useToast();
 
   function commit(newItems: EditorItem[]) {
     onChange({ ...macro, events: flattenItems(newItems) });
@@ -102,8 +105,8 @@ export function MacroEditor({ macro, onChange }: Props) {
   // keep the on-screen overlay in sync while it's open
   useEffect(() => {
     if (!overlayOn) return;
-    void emit("overlay:data", { macro, selected });
-  }, [overlayOn, macro, selected]);
+    void emit("overlay:data", { macro, selected, onlySelected: overlayOnlySelected });
+  }, [overlayOn, macro, selected, overlayOnlySelected]);
 
   useEffect(
     () => () => {
@@ -119,7 +122,27 @@ export function MacroEditor({ macro, onChange }: Props) {
     } else {
       await invoke("overlay_show");
       setOverlayOn(true);
-      setTimeout(() => void emit("overlay:data", { macro, selected }), 400);
+      setTimeout(
+        () => void emit("overlay:data", { macro, selected, onlySelected: overlayOnlySelected }),
+        400,
+      );
+    }
+  }
+
+  /** Thin mouse paths so the macro fits the keypad's RAM; report the result. */
+  function optimizeForDevice() {
+    const before = macroStats(macro);
+    const next = items.map((it) => (isMoveGroup(it) ? rdpSimplify(resample(it, 30), 3) : it));
+    const events = flattenItems(next);
+    onChange({ ...macro, events });
+    const after = macroStats({ ...macro, events });
+    if (after.events === before.events) {
+      toast.info("Already optimized", "Mouse paths are as small as they can get.");
+    } else {
+      toast.success(
+        "Optimized for the keypad",
+        `${before.events} → ${after.events} events (${(before.bytes / 1024).toFixed(1)} → ${(after.bytes / 1024).toFixed(1)} KB). The path shape is preserved.`,
+      );
     }
   }
 
@@ -161,9 +184,35 @@ export function MacroEditor({ macro, onChange }: Props) {
         <Card
           title={`Events (${items.length} rows / ${stats.events} events)`}
           actions={
-            <Button onClick={() => commit([...items, { type: "wait", delay: 500 } as MacroEvent])}>
-              + Add wait
-            </Button>
+            <div className="flex gap-1.5">
+              <Button
+                variant={overlayOn ? "primary" : "default"}
+                title="Draw the mouse path 1:1 on your real monitor (click-through)"
+                onClick={() => void toggleOverlay()}
+              >
+                {overlayOn ? (
+                  <>
+                    <MonitorOff size={14} aria-hidden /> Hide overlay
+                  </>
+                ) : (
+                  <>
+                    <Monitor size={14} aria-hidden /> Show on screen
+                  </>
+                )}
+              </Button>
+              {overlayOn && (
+                <Button
+                  variant={overlayOnlySelected ? "primary" : "default"}
+                  title="Draw only the selected row instead of the whole macro"
+                  onClick={() => setOverlayOnlySelected(!overlayOnlySelected)}
+                >
+                  Selected row only
+                </Button>
+              )}
+              <Button onClick={() => commit([...items, { type: "wait", delay: 500 } as MacroEvent])}>
+                + Add wait
+              </Button>
+            </div>
           }
         >
           <div className="max-h-96 overflow-y-auto flex flex-col gap-1 pr-1">
@@ -182,9 +231,19 @@ export function MacroEditor({ macro, onChange }: Props) {
             ))}
             {items.length === 0 && <p className="text-fg-faint text-sm">No events.</p>}
           </div>
-          <div className={`text-xs mt-2 ${stats.tooBig ? "text-warning" : "text-fg-faint"}`}>
-            {stats.events} events · {(stats.bytes / 1024).toFixed(1)} KB
-            {stats.tooBig && " — large for the device; use Optimize below."}
+          <div className="flex items-center justify-between gap-3 mt-2 border-t border-line pt-2">
+            <div className={`text-xs ${stats.tooBig ? "text-warning" : "text-fg-faint"}`}>
+              {stats.events} events · {(stats.bytes / 1024).toFixed(1)} KB
+              {stats.tooBig
+                ? " — too large for the keypad's memory. Optimize to shrink it."
+                : " — fits on the keypad."}
+            </div>
+            <Button
+              title="Thins dense mouse paths (max 30 points/second) while keeping their shape, so the macro fits the keypad's memory"
+              onClick={optimizeForDevice}
+            >
+              <Scissors size={14} aria-hidden /> Optimize for device
+            </Button>
           </div>
         </Card>
 
@@ -213,32 +272,6 @@ export function MacroEditor({ macro, onChange }: Props) {
             )}
           </Card>
 
-          <Card title="Whole macro">
-            <div className="flex flex-wrap gap-2">
-              <Button variant="primary" onClick={() => void toggleOverlay()}>
-                {overlayOn ? (
-                  <>
-                    <MonitorOff size={14} aria-hidden /> Hide screen overlay
-                  </>
-                ) : (
-                  <>
-                    <Monitor size={14} aria-hidden /> Show path on real screen
-                  </>
-                )}
-              </Button>
-              <Button
-                onClick={() =>
-                  commit(items.map((it) => (isMoveGroup(it) ? rdpSimplify(resample(it, 30), 3) : it)))
-                }
-              >
-                <Scissors size={14} aria-hidden /> Optimize for device
-              </Button>
-            </div>
-            <p className="text-[11px] text-fg-faint mt-2">
-              The overlay draws the mouse path 1:1 on your monitor (click-through). The selected
-              row is highlighted amber.
-            </p>
-          </Card>
         </div>
       </div>
     </div>

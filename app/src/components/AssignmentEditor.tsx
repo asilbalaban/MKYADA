@@ -1,12 +1,19 @@
 // Per-key assignment form. Whatever the user picks compiles to a macro JSON
 // file on the device ("everything is JSON").
 
-import { useState } from "react";
-import { Play } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Keyboard, Play } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { readTextFile } from "../lib/fs";
 import type { Assignment, MacroFile } from "../lib/types";
-import { MEDIA_USAGES, MODIFIERS, SPECIAL_KEYS, migrateMacro, modifierDisplay } from "../lib/macro-model";
+import {
+  MEDIA_USAGES,
+  MODIFIERS,
+  keyFromEvent,
+  migrateMacro,
+  modifierDisplay,
+  modsFromEvent,
+} from "../lib/macro-model";
 import { Button, Field, Input, Select } from "./ui";
 
 const KINDS: { value: Assignment["kind"]; label: string; launchOnly?: boolean }[] = [
@@ -19,7 +26,67 @@ const KINDS: { value: Assignment["kind"]; label: string; launchOnly?: boolean }[
   { value: "launch", label: "Open app / URL (app running only)", launchOnly: true },
 ];
 
-const ALL_KEYS = [..."abcdefghijklmnopqrstuvwxyz0123456789", ...SPECIAL_KEYS];
+/**
+ * "Press the key you want" capture control — replaces the 60-option dropdown.
+ * With `withMods`, modifiers held during the press are captured too, so the
+ * user just performs the shortcut (e.g. hold Ctrl+Shift, press S).
+ */
+function KeyCapture({
+  value,
+  withMods = false,
+  onCapture,
+}: {
+  value: string;
+  withMods?: boolean;
+  onCapture: (key: string, mods: string[]) => void;
+}) {
+  const [armed, setArmed] = useState(false);
+
+  useEffect(() => {
+    if (!armed) return;
+    const onKey = (e: KeyboardEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const key = keyFromEvent(e);
+      if (!key) return; // bare modifier press — keep waiting for the real key
+      onCapture(key, withMods ? modsFromEvent(e) : []);
+      setArmed(false);
+    };
+    const disarm = () => setArmed(false);
+    window.addEventListener("keydown", onKey, true);
+    window.addEventListener("blur", disarm);
+    return () => {
+      window.removeEventListener("keydown", onKey, true);
+      window.removeEventListener("blur", disarm);
+    };
+  }, [armed, onCapture, withMods]);
+
+  return (
+    <button
+      type="button"
+      onClick={() => setArmed(!armed)}
+      aria-label={armed ? "Listening — press the key to assign" : "Set key"}
+      className={`flex items-center gap-2 rounded-md border px-3 py-2 text-sm transition-colors self-start
+        ${armed
+          ? "border-accent bg-accent/10 text-accent"
+          : "border-line border-dashed bg-panel2 text-fg hover:border-accent/60"}`}
+    >
+      <Keyboard size={14} aria-hidden className={armed ? "animate-pulse" : ""} />
+      {armed ? (
+        withMods ? "Press the shortcut now — hold the modifiers, hit the key…" : "Press the key now…"
+      ) : (
+        <>
+          {value ? (
+            <span className="font-mono font-semibold uppercase">{value}</span>
+          ) : (
+            "Set key"
+          )}
+          <span className="text-fg-faint text-xs font-normal">click, then press a key</span>
+        </>
+      )}
+    </button>
+  );
+}
 
 export function AssignmentEditor({
   value,
@@ -59,8 +126,8 @@ export function AssignmentEditor({
           onChange={(e) => {
             const kind = e.target.value as Assignment["kind"];
             if (kind === "none") onChange({ kind: "none" });
-            else if (kind === "keystroke") onChange({ kind: "keystroke", key: "a" });
-            else if (kind === "combo") onChange({ kind: "combo", mods: ["CTRL"], key: "a" });
+            else if (kind === "keystroke") onChange({ kind: "keystroke", key: "" });
+            else if (kind === "combo") onChange({ kind: "combo", mods: [], key: "" });
             else if (kind === "text") onChange({ kind: "text", text: "" });
             else if (kind === "media") onChange({ kind: "media", usage: "play_pause" });
             else if (kind === "launch") onChange({ kind: "launch", target: "" });
@@ -77,19 +144,29 @@ export function AssignmentEditor({
 
       {value.kind === "keystroke" && (
         <Field label="Key">
-          <Select value={value.key} onChange={(e) => onChange({ ...value, key: e.target.value })}>
-            {ALL_KEYS.map((k) => (
-              <option key={k} value={k}>
-                {k}
-              </option>
-            ))}
-          </Select>
+          <KeyCapture
+            value={value.key}
+            onCapture={(key) => onChange({ ...value, key })}
+          />
         </Field>
       )}
 
       {value.kind === "combo" && (
         <>
-          <Field label="Modifiers">
+          <Field label="Shortcut">
+            <KeyCapture
+              value={
+                value.key
+                  ? [...value.mods.map(modifierDisplay), value.key.toUpperCase()].join(" + ")
+                  : ""
+              }
+              withMods
+              onCapture={(key, mods) =>
+                onChange({ ...value, key, mods: mods.length ? mods : value.mods })
+              }
+            />
+          </Field>
+          <Field label="Modifiers (tap to adjust)">
             <div className="flex gap-2">
               {MODIFIERS.map((m) => (
                 <Button
@@ -109,15 +186,6 @@ export function AssignmentEditor({
                 </Button>
               ))}
             </div>
-          </Field>
-          <Field label="Key">
-            <Select value={value.key} onChange={(e) => onChange({ ...value, key: e.target.value })}>
-              {ALL_KEYS.map((k) => (
-                <option key={k} value={k}>
-                  {k}
-                </option>
-              ))}
-            </Select>
           </Field>
         </>
       )}
