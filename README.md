@@ -17,6 +17,23 @@
 └──────────────┘ ────────────────────────► └───────────────┘                └───────────┘
 ```
 
+**One repo for everything.** Build the hardware, flash the firmware, create macros, load them onto your keypad, fine-tune your recordings, and keep both the app and the firmware up to date — it all lives here.
+
+## What do you want to do?
+
+| I want to… | Where |
+|---|---|
+| **Build the keypad** (solder switches, print the case) | [hardware/wiring.md](hardware/wiring.md) · [hardware/case/](hardware/case/) |
+| **Flash the firmware** on a fresh board | [docs/firmware-install.md](docs/firmware-install.md) |
+| **Update the firmware** later | one click in the app (*Devices → Update firmware*) — it ships inside the app |
+| **Put an action on a key** (key, combo, text, media) | app → *Keys*: click the key, press the shortcut, save |
+| **Record a full mouse + keyboard macro** | app → *Recorder*: F8 to record, assign to a key |
+| **Fine-tune a recording** | app → *Recorder*: edit every event, multi-select rows, draw the path 1:1 on your screen, pin the app above your game |
+| **Different actions per application** | app → *Profiles* (e.g. Save As in Photoshop, inventory macro in your game) |
+| **Configure without installing anything** | drop `macros/key1.json` onto the keypad's USB drive — [format](docs/macro-format.md) |
+| **Update the app** | *Settings → Check for updates* (it also checks on launch) |
+| **Share or grab ready-made macros** | [community-macros/](community-macros/) — PRs welcome |
+
 ## Why MKYADA?
 
 Unlike most DIY macro pads that just remap keys, MKYADA plays back **full recorded macros — mouse movements, clicks, scrolls and keystrokes — as real hardware HID input** from the device itself. Software macro tools inject input at the OS level and often don't work inside games; MKYADA's input is indistinguishable from a physical keyboard and mouse because, electrically, that's what it is.
@@ -127,6 +144,8 @@ STLs and print notes live in [hardware/case/](hardware/case/).
 ## Türkçe
 
 **MKYADA** (Macro Keypad You Always Dream About), Waveshare RP2040-Zero üzerine kurulu, açık kaynak, kendin-yap bir makro klavyedir (referans tasarım 6 tuş, 20 tuşa kadar desteklenir) ve çok platformlu bir masaüstü yapılandırma uygulamasıyla gelir.
+
+**Macro oluşturmak, keypad'inize yüklemek, kaydettiğiniz makroyu düzenlemek, sürüm güncellemek — her şey için ihtiyacınız olan tek repo burası:** donanımı kur ([hardware/](hardware/)), firmware'i yükle/güncelle (uygulamadan tek tık), tuşlara aksiyon ata (*Keys*), makro kaydet ve ince ayar yap (*Recorder*), uygulamaya özel profiller kur (*Profiles*), hazır makroları paylaş ([community-macros/](community-macros/)).
 
 Çoğu DIY makro pad sadece tuş atar; MKYADA ise kaydedilmiş **mouse hareketleri + tıklamalar + tuş vuruşlarını gerçek donanım HID girdisi olarak** kartın kendisinden oynatır. Yazılımsal makro araçları girdiyi işletim sistemi seviyesinde enjekte ettiği için oyunlarda çoğu zaman çalışmaz; MKYADA'nın girdisi elektriksel olarak gerçek bir klavye/mouse olduğundan ayırt edilemez.
 
