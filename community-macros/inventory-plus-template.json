@@ -1,0 +1,16 @@
+{
+  "format": "mkyada-macro",
+  "version": 2,
+  "name": "Inventory + spam (template)",
+  "kind": "recorded",
+  "screen": { "width": 1920, "height": 1080 },
+  "settings": { "speed": 1.0, "repeat": 0 },
+  "events": [
+    { "delay": 0, "type": "move", "x": 1520, "y": 640 },
+    { "delay": 120, "type": "button", "action": "down", "button": "right", "x": 1520, "y": 640 },
+    { "delay": 60, "type": "button", "action": "up", "button": "right", "x": 1520, "y": 640 },
+    { "delay": 350, "type": "key", "action": "down", "key": "+", "vk": 187 },
+    { "delay": 40, "type": "key", "action": "up", "key": "+", "vk": 187 },
+    { "delay": 500, "type": "wait" }
+  ]
+}

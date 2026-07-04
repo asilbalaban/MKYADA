@@ -28,6 +28,7 @@ Unlike most DIY macro pads that just remap keys, MKYADA plays back **full record
 | [firmware/](firmware/) | CircuitPython firmware for the RP2040-Zero |
 | [hardware/](hardware/) | Wiring & soldering guide, 3D-printable case files |
 | [docs/](docs/) | Macro format, serial protocol, firmware install guide |
+| [community-macros/](community-macros/) | Macro gallery — contributions welcome via PR |
 
 ## Quick start
 
@@ -37,7 +38,10 @@ Unlike most DIY macro pads that just remap keys, MKYADA plays back **full record
 
 ## Status
 
-Actively being rebuilt from the Raspberry Pi prototype (which proved the hardware-HID playback concept). Milestones: firmware → device management → recorder/editor → per-app profiles → v1.0.0 release.
+**v0.1.0** — firmware verified on real hardware; desktop app with onboarding, key
+assignments, macro recorder/editor and per-app profiles; Windows installer built
+by CI (macOS/Linux packages coming next). The app checks GitHub for new releases
+on launch.
 
 > **Note:** automating input in online games may violate their Terms of Service. You are responsible for how you use this device.
 

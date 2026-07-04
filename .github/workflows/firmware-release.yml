@@ -1,0 +1,44 @@
+name: Firmware release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+env:
+  # Pinned CircuitPython library versions bundled into the firmware zip
+  NEOPIXEL_REF: "6.4.2"
+
+jobs:
+  bundle:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Stamp firmware version from tag
+        if: startsWith(github.ref, 'refs/tags/')
+        run: echo "${GITHUB_REF_NAME#v}" > firmware/VERSION
+      - name: Fetch bundled libraries
+        run: |
+          mkdir -p firmware/lib
+          curl -sfL "https://raw.githubusercontent.com/adafruit/Adafruit_CircuitPython_NeoPixel/${NEOPIXEL_REF}/neopixel.py" \
+            -o firmware/lib/neopixel.py
+      - name: Prepare default config
+        run: cp firmware/config.example.json firmware/config.json
+      - name: Zip firmware
+        run: |
+          cd firmware
+          zip -r "../mkyada-firmware-${GITHUB_REF_NAME}.zip" . -x "*.pyc"
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          files: mkyada-firmware-*.zip
+      - name: Upload artifact (manual runs)
+        if: "!startsWith(github.ref, 'refs/tags/')"
+        uses: actions/upload-artifact@v4
+        with:
+          name: mkyada-firmware
+          path: mkyada-firmware-*.zip

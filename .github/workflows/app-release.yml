@@ -1,0 +1,47 @@
+name: App release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows-latest
+          # macOS / Linux packages planned right after the Windows-first release:
+          # - platform: macos-latest
+          # - platform: ubuntu-22.04
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: app/src-tauri
+      - name: Install frontend deps
+        working-directory: app
+        run: npm ci
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: app
+          tagName: ${{ github.ref_name }}
+          releaseName: "MKYADA ${{ github.ref_name }}"
+          releaseBody: |
+            MKYADA — Macro Keyboard You Always Dream About.
+
+            **Desktop app installers** are attached below.
+            **Firmware**: download `mkyada-firmware-*.zip` and follow
+            [docs/firmware-install.md](https://github.com/asilbalaban/MKYADA/blob/main/docs/firmware-install.md).
+          releaseDraft: true
+          prerelease: false

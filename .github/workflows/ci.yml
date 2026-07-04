@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  firmware:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Syntax-check firmware
+        run: python3 -m py_compile firmware/boot.py firmware/code.py firmware/mkyada/*.py
+      - name: Firmware simulation tests
+        run: python3 tests/firmware_sim_test.py
+
+  app:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install Tauri Linux deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libudev-dev \
+            libayatana-appindicator3-dev librsvg2-dev libxdo-dev libxi-dev libxtst-dev
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: app/src-tauri
+      - name: Frontend build (type-check included)
+        working-directory: app
+        run: |
+          npm ci
+          npm run build
+      - name: Recorder model tests
+        run: npx -y tsx tests/model_test.ts
+      - name: Rust check
+        working-directory: app/src-tauri
+        run: cargo check --locked
