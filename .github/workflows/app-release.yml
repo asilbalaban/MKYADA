@@ -50,8 +50,18 @@ jobs:
             MKYADA — Macro Keyboard You Always Dream About.
 
             **Desktop app installers** are attached below (Windows `.exe`/`.msi`,
-            macOS universal `.dmg` — unsigned, see
-            [docs/macos-install.md](https://github.com/asilbalaban/MKYADA/blob/main/docs/macos-install.md)).
+            macOS universal `.dmg`).
+
+            **macOS users:** the app is unsigned — after installing, clear the
+            quarantine flag once, then open normally:
+
+            ```sh
+            xattr -cr /Applications/MKYADA.app
+            ```
+
+            (Alternative: System Settings → Privacy & Security → **Open Anyway**.
+            Details: [docs/macos-install.md](https://github.com/asilbalaban/MKYADA/blob/main/docs/macos-install.md).)
+
             **Firmware**: download `mkyada-firmware-*.zip` and follow
             [docs/firmware-install.md](https://github.com/asilbalaban/MKYADA/blob/main/docs/firmware-install.md).
           releaseDraft: true

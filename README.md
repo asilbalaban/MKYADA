@@ -36,6 +36,17 @@ Unlike most DIY macro pads that just remap keys, MKYADA plays back **full record
 2. Install the MKYADA app from the [latest release](https://github.com/asilbalaban/MKYADA/releases/latest) and follow the onboarding wizard, **or** just copy macro JSON files (`macros/key1.json` …) onto the drive by hand.
 3. Press a key.
 
+> **macOS:** the app is not notarized, so the first launch is blocked with
+> *"Apple could not verify MKYADA…"*. Clear the quarantine flag once and open
+> it normally:
+>
+> ```sh
+> xattr -cr /Applications/MKYADA.app
+> ```
+>
+> (Alternative: System Settings → Privacy & Security → **Open Anyway**.
+> Details in [docs/macos-install.md](docs/macos-install.md).)
+
 ## Status
 
 **v0.1.1** — firmware verified on real hardware; desktop app with onboarding, key
