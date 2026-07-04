@@ -31,6 +31,8 @@ DEFAULT_CONFIG = {
     "layer_key": None,   # 1-based key number, or null
     "layer_count": 2,
     "layer_mode": "toggle",  # "toggle" cycles a->b->..., "hold" = momentary layer b
+    "key_map": None,     # per-GPIO logical key numbers, e.g. [3,1,2] when the
+                         # solder order differs; null = identity (GP0 = key 1)
     "screen": {"width": 1920, "height": 1080},
 }
 
@@ -103,15 +105,19 @@ class App:
         lk = cfg.get("layer_key")
         cfg["layer_key"] = int(lk) if lk and 1 <= int(lk) <= cfg["key_count"] else None
         cfg["layer_count"] = max(2, min(len(LAYER_NAMES), int(cfg.get("layer_count") or 2)))
+        km = cfg.get("key_map")
+        if not (isinstance(km, list) and len(km) == cfg["key_count"]
+                and sorted(km) == list(range(1, cfg["key_count"] + 1))):
+            km = list(range(1, cfg["key_count"] + 1))  # identity
+        cfg["key_map"] = km
         self.config = cfg
         self.engine.set_screen(cfg["screen"].get("width", 1920),
                                cfg["screen"].get("height", 1080))
 
-    def macro_path(self, key_index):
-        n = key_index + 1
+    def macro_path(self, key_no):
         if self.layer == 0:
-            return "/macros/key%d.json" % n
-        return "/macros/key%d-%s.json" % (n, LAYER_NAMES[self.layer])
+            return "/macros/key%d.json" % key_no
+        return "/macros/key%d-%s.json" % (key_no, LAYER_NAMES[self.layer])
 
     # --- serial ---
     def hello(self):
@@ -120,6 +126,7 @@ class App:
                 "format": "mkyada", "uid": uid_hex(),
                 "key_count": c["key_count"], "layer_key": c["layer_key"],
                 "layer_count": c["layer_count"], "layer_mode": c["layer_mode"],
+                "key_map": c["key_map"],
                 "layer": LAYER_NAMES[self.layer], "mode": self.mode}
 
     def handle_msg(self, msg, in_playback=False):
@@ -238,9 +245,9 @@ class App:
     # --- key handling ---
     def on_edge(self, i, pressed):
         c = self.config
-        key_no = i + 1
+        key_no = c["key_map"][i]  # logical key; i is the GPIO (solder) index
         if self.mode == "host":
-            self.proto.send({"t": "btn", "key": key_no,
+            self.proto.send({"t": "btn", "key": key_no, "phys": i + 1,
                              "layer": LAYER_NAMES[self.layer],
                              "edge": "down" if pressed else "up"})
             return
@@ -252,7 +259,7 @@ class App:
             self.led.set(layer=self.layer)
             return
         if pressed:
-            self.play_file(self.macro_path(i), trigger=i)
+            self.play_file(self.macro_path(key_no), trigger=i)
 
     # --- main loop ---
     def run(self):

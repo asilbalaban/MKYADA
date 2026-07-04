@@ -28,6 +28,7 @@ export function SetupPage({ onDone }: { onDone: () => void }) {
       layer_key: hello.layer_key,
       layer_count: hello.layer_count,
       layer_mode: hello.layer_mode,
+      key_map: hello.key_map ?? null,
     }));
   }, [hello]);
 
@@ -186,28 +187,127 @@ export function SetupPage({ onDone }: { onDone: () => void }) {
       )}
 
       {step === 2 && (
-        <Card title="Live key test — press your physical keys">
-          <div className="flex flex-col gap-4">
-            <p className="text-sm text-slate-400">
-              Pressing a key should light it up below. If a key doesn't react, check its solder
-              joint (GP{"{n-1}"} and GND).
-            </p>
-            <TestPad cfg={cfg} send={send} />
-            <div className="flex justify-end">
-              <Button
-                variant="primary"
-                onClick={() => {
-                  void send({ t: "host_leave" });
-                  onDone();
-                }}
-              >
-                Finish — assign keys
-              </Button>
+        <>
+          <Card title="Live key test — press your physical keys">
+            <div className="flex flex-col gap-4">
+              <p className="text-sm text-slate-400">
+                Pressing a key should light it up below. If a key doesn't react, check its solder
+                joint (GP{"{n-1}"} and GND).
+              </p>
+              <TestPad cfg={cfg} send={send} />
+              <div className="flex justify-end">
+                <Button
+                  variant="primary"
+                  onClick={() => {
+                    void send({ t: "host_leave" });
+                    onDone();
+                  }}
+                >
+                  Finish — assign keys
+                </Button>
+              </div>
             </div>
-          </div>
-        </Card>
+          </Card>
+          <RemapPanel
+            cfg={cfg}
+            onApply={async (key_map) => {
+              const next = { ...cfg, key_map };
+              setCfg(next);
+              await writeAndReload([
+                { path: "config.json", content: JSON.stringify(next, null, 2) },
+              ]);
+            }}
+          />
+        </>
       )}
     </div>
+  );
+}
+
+/**
+ * Fix mismatched solder order: press the physical keys in the order they
+ * should be numbered (top-left = 1, ...). Builds config.key_map so both the
+ * app and standalone playback use the corrected numbering.
+ */
+function RemapPanel({
+  cfg,
+  onApply,
+}: {
+  cfg: DeviceConfig;
+  onApply: (keyMap: number[]) => Promise<void>;
+}) {
+  const { hello, onBtn } = useDevice();
+  const [active, setActive] = useState(false);
+  const [order, setOrder] = useState<number[]>([]); // GPIO numbers in press order
+  const supported = hello?.key_map !== undefined;
+  const identity = Array.from({ length: cfg.key_count }, (_, i) => i + 1);
+  const current = cfg.key_map ?? identity;
+  const isIdentity = current.every((v, i) => v === i + 1);
+
+  useEffect(() => {
+    if (!active) return;
+    return onBtn((e) => {
+      if (e.edge !== "down") return;
+      const phys = e.phys;
+      if (!phys) return;
+      setOrder((o) => (o.includes(phys) ? o : [...o, phys]));
+    });
+  }, [active, onBtn]);
+
+  useEffect(() => {
+    if (!active || order.length < cfg.key_count) return;
+    // pressed 1st -> logical 1: key_map[gpio-1] = press position
+    const map = Array<number>(cfg.key_count).fill(0);
+    order.forEach((phys, idx) => {
+      map[phys - 1] = idx + 1;
+    });
+    setActive(false);
+    setOrder([]);
+    void onApply(map);
+  }, [order, active, cfg.key_count, onApply]);
+
+  return (
+    <Card title="Key order (remap)">
+      <div className="flex flex-col gap-3 text-sm">
+        {!supported ? (
+          <p className="text-amber-400 text-xs">
+            This firmware doesn't support remapping — update the firmware on the drive first.
+          </p>
+        ) : active ? (
+          <>
+            <p className="text-slate-300">
+              Press the physical key that should be{" "}
+              <span className="text-accent font-bold text-lg">#{order.length + 1}</span> of{" "}
+              {cfg.key_count} …
+            </p>
+            <p className="text-xs text-slate-500">
+              Pressed so far (GPIO order): {order.join(", ") || "—"}
+            </p>
+            <div>
+              <Button onClick={() => { setActive(false); setOrder([]); }}>Cancel</Button>
+            </div>
+          </>
+        ) : (
+          <>
+            <p className="text-slate-400 text-xs">
+              Keys lighting up in the wrong order? Your solder order differs from GP0…GP5.
+              Remap fixes the numbering everywhere — including standalone mode.
+              {!isIdentity && (
+                <> Current map (GP0…): <span className="font-mono text-slate-300">{current.join(" ")}</span></>
+              )}
+            </p>
+            <div className="flex gap-2">
+              <Button variant="primary" onClick={() => { setOrder([]); setActive(true); }}>
+                Start remap — press keys in order
+              </Button>
+              {!isIdentity && (
+                <Button onClick={() => void onApply(identity)}>Reset to default</Button>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+    </Card>
   );
 }
 

@@ -44,6 +44,7 @@ Edit `config.json` (see `config.example.json`):
 | `layer_key` | Key number that switches layers, or `null` |
 | `layer_count` | Number of layers (2+) when `layer_key` is set |
 | `layer_mode` | `"toggle"` (press cycles A→B→…) or `"hold"` (hold = layer B) |
+| `key_map` | Fixes a mismatched solder order: logical key number per GPIO, e.g. `[3, 1, 2]` = GP0 acts as key 3. `null` = GP0 is key 1. Easiest set via the app: **Setup → Key order (remap)** |
 | `screen` | Default target resolution for mouse macros |
 
 Then drop macro files into `macros/` (`key1.json`, `key1-b.json`, …) — see

@@ -167,9 +167,10 @@ exec(compile(src, "code.py", "exec"), code_mod.__dict__)
 
 app = code_mod.App()
 check("default key_count", app.config["key_count"] == 6)
-check("macro path layer a", app.macro_path(0) == "/macros/key1.json")
+check("default key_map identity", app.config["key_map"] == [1, 2, 3, 4, 5, 6])
+check("macro path layer a", app.macro_path(1) == "/macros/key1.json")
 app.layer = 1
-check("macro path layer b", app.macro_path(2) == "/macros/key3-b.json")
+check("macro path layer b", app.macro_path(3) == "/macros/key3-b.json")
 app.layer = 0
 
 hello = app.hello()
@@ -193,13 +194,29 @@ check("hold down -> b", app.layer == 1)
 app.on_edge(5, False)
 check("hold up -> a", app.layer == 0)
 
-# host mode: btn events instead of playback
+# key_map remap: GPIO 0 -> logical key 3
+app.config["layer_key"] = None
+app.config["layer_mode"] = "toggle"
+app.config["key_map"] = [3, 1, 2, 4, 5, 6]
+played = []
+app.play_file = lambda path, trigger=None, **kw: played.append(path)
+app.on_edge(0, True)
+check("remap gpio0 -> key3", played == ["/macros/key3.json"], str(played))
+app.on_edge(1, True)
+check("remap gpio1 -> key1", played[-1] == "/macros/key1.json", str(played))
+
+# key_map validation: bad map falls back to identity
+app.config = dict(app.config)
+del app.play_file  # restore real method
+
+# host mode: btn events carry logical key + physical pin
 outbox = []
 app.proto.send = lambda obj: outbox.append(obj)
 app.handle_msg({"t": "host_enter"})
 check("mode host", app.mode == "host")
 app.on_edge(1, True)
-check("btn streamed", any(m.get("t") == "btn" and m["key"] == 2 for m in outbox), str(outbox))
+check("btn streamed logical", any(m.get("t") == "btn" and m["key"] == 1 for m in outbox), str(outbox))
+check("btn has phys", any(m.get("t") == "btn" and m.get("phys") == 2 for m in outbox), str(outbox))
 
 # play command with missing file -> err not_found
 outbox.clear()

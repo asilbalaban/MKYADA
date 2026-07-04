@@ -38,8 +38,8 @@ STANDALONE ──(host_enter)──► HOST ──(host_leave | CDC disconnect |
 
 | Message | When |
 |---|---|
-| `{"t":"hello","fw":"1.0.0","proto":1,"format":"mkyada","uid":"e66...","key_count":6,"layer_key":null,"layer_count":2,"layer_mode":"toggle","layer":"a","mode":"standalone"}` | Reply to `identify`, and after `reload` |
-| `{"t":"btn","key":2,"layer":"a","edge":"down"}` | Host mode only; every press/release |
+| `{"t":"hello","fw":"0.1.4","proto":1,"format":"mkyada","uid":"e66...","key_count":6,"layer_key":null,"layer_count":2,"layer_mode":"toggle","key_map":[1,2,3,4,5,6],"layer":"a","mode":"standalone"}` | Reply to `identify`, and after `reload` |
+| `{"t":"btn","key":2,"phys":4,"layer":"a","edge":"down"}` | Host mode only; every press/release. `key` = logical (after `key_map`), `phys` = GPIO number |
 | `{"t":"play_start","file":"/macros/key1.json"}` | Playback began |
 | `{"t":"play_done","file":"/macros/key1.json","stopped":false}` | Playback ended (`stopped: true` = aborted) |
 | `{"t":"config", ...config.json fields...}` | Reply to `get_config` |

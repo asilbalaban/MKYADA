@@ -10,6 +10,8 @@ export interface Hello {
   layer_key: number | null;
   layer_count: number;
   layer_mode: "toggle" | "hold";
+  /** per-GPIO logical key numbers; absent on firmware < 0.1.4 */
+  key_map?: number[];
   layer: string;
   mode: "standalone" | "host";
 }
@@ -32,6 +34,8 @@ export interface DeviceConfig {
   layer_key: number | null;
   layer_count: number;
   layer_mode: "toggle" | "hold";
+  /** per-GPIO logical key numbers ([3,1,2] = GP0 acts as key 3); null = identity */
+  key_map?: number[] | null;
   screen: { width: number; height: number };
 }
 
@@ -81,7 +85,10 @@ export interface ForegroundInfo {
 
 export interface BtnEvent {
   t: "btn";
+  /** logical key number (after key_map) */
   key: number;
+  /** physical GPIO number (1 = GP0); absent on firmware < 0.1.4 */
+  phys?: number;
   layer: string;
   edge: "down" | "up";
 }

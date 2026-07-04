@@ -185,6 +185,7 @@ export function defaultConfig(): DeviceConfig {
     layer_key: null,
     layer_count: 2,
     layer_mode: "toggle",
+    key_map: null,
     screen: { width: screen.width, height: screen.height },
   };
 }
