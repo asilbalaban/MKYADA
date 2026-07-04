@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import {
@@ -6,6 +7,7 @@ import {
   Keyboard,
   LayoutGrid,
   LucideIcon,
+  Pin,
   Settings,
   SlidersHorizontal,
   Wand2,
@@ -39,7 +41,16 @@ const NAV: { id: Page; label: string; icon: LucideIcon; needsDevice?: boolean }[
 function Shell() {
   const [page, setPage] = useState<Page>("devices");
   const [update, setUpdate] = useState<UpdateInfo | null>(null);
+  const [pinned, setPinned] = useState(false);
   const { hello, port } = useDevice();
+
+  // "Always on top": keep MKYADA above the game while fine-tuning macro
+  // coordinates — no alt-tab round trips after every small edit.
+  function togglePin() {
+    const next = !pinned;
+    setPinned(next);
+    void invoke("window_set_pin", { pinned: next });
+  }
 
   // Non-blocking update check on launch.
   useEffect(() => {
@@ -92,7 +103,19 @@ function Shell() {
               );
             })}
           </nav>
-          <div className="px-4 py-3 border-t border-line">
+          <div className="px-4 py-3 border-t border-line flex flex-col gap-2">
+            <button
+              onClick={togglePin}
+              aria-pressed={pinned}
+              title="Keep MKYADA above other windows (games) while fine-tuning macros"
+              className={`flex items-center gap-2 text-xs rounded-md px-2 py-1.5 border transition-colors
+                ${pinned
+                  ? "border-accent text-accent bg-accent/10"
+                  : "border-line text-fg-muted hover:text-fg"}`}
+            >
+              <Pin size={13} aria-hidden className={pinned ? "" : "rotate-45"} />
+              {pinned ? "Always on top: ON" : "Always on top"}
+            </button>
             {port && hello ? (
               <Badge tone="green">● {hello.key_count}-key connected</Badge>
             ) : (

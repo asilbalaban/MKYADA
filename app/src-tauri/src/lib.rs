@@ -187,6 +187,10 @@ fn overlay_show(app: AppHandle) -> Result<(), String> {
         .ok_or("no monitor")?;
     let scale = monitor.scale_factor();
     let size = monitor.size().to_logical::<f64>(scale);
+    // Build hidden, make it click-through FIRST, then show. If the window
+    // became visible before ignore_cursor_events landed (or that call
+    // failed), a fullscreen topmost invisible window would swallow every
+    // click on the machine — the user couldn't even reach Task Manager.
     let w = WebviewWindowBuilder::new(&app, "overlay", WebviewUrl::App("index.html".into()))
         .title("MKYADA overlay")
         .decorations(false)
@@ -195,12 +199,24 @@ fn overlay_show(app: AppHandle) -> Result<(), String> {
         .skip_taskbar(true)
         .focused(false)
         .shadow(false)
+        .visible(false)
         .position(0.0, 0.0)
         .inner_size(size.width, size.height)
         .build()
         .map_err(|e| e.to_string())?;
-    w.set_ignore_cursor_events(true).map_err(|e| e.to_string())?;
+    if let Err(e) = w.set_ignore_cursor_events(true) {
+        let _ = w.destroy(); // never leave a click-eating window behind
+        return Err(format!("overlay click-through failed: {e}"));
+    }
+    w.show().map_err(|e| e.to_string())?;
     Ok(())
+}
+
+/// Keep the main window above the game while fine-tuning macro coordinates.
+#[tauri::command]
+fn window_set_pin(app: AppHandle, pinned: bool) -> Result<(), String> {
+    let w = app.get_webview_window("main").ok_or("no main window")?;
+    w.set_always_on_top(pinned).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -251,6 +267,7 @@ pub fn run() {
             firmware_update,
             overlay_show,
             overlay_hide,
+            window_set_pin,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

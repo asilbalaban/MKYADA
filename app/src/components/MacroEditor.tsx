@@ -102,10 +102,13 @@ export function MacroEditor({ macro, onChange }: Props) {
     );
   }
 
-  // keep the on-screen overlay in sync while it's open
+  // keep the on-screen overlay in sync while it's open, and heartbeat so the
+  // overlay can close itself if we disappear (it's a topmost window)
   useEffect(() => {
     if (!overlayOn) return;
     void emit("overlay:data", { macro, selected, onlySelected: overlayOnlySelected });
+    const ping = setInterval(() => void emit("overlay:ping"), 1000);
+    return () => clearInterval(ping);
   }, [overlayOn, macro, selected, overlayOnlySelected]);
 
   useEffect(

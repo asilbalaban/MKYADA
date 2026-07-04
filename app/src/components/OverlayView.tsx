@@ -2,7 +2,8 @@
 // window: draws the macro's mouse path 1:1 on the real screen so the user can
 // verify exactly where clicks will land (port of the old tkinter overlay).
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { MacroFile } from "../lib/types";
 import { EditorItem, groupEvents, isMoveGroup } from "../lib/recorder-model";
@@ -16,14 +17,39 @@ interface OverlayData {
 
 export function OverlayView() {
   const [data, setData] = useState<OverlayData | null>(null);
+  const lastPing = useRef(Date.now());
 
   useEffect(() => {
     // the shell paints a dark background; the overlay must be see-through
     document.documentElement.style.background = "transparent";
     document.body.style.background = "transparent";
-    const un = listen<OverlayData>("overlay:data", (e) => setData(e.payload));
+    const un = listen<OverlayData>("overlay:data", (e) => {
+      lastPing.current = Date.now();
+      setData(e.payload);
+    });
+    const unPing = listen("overlay:ping", () => {
+      lastPing.current = Date.now();
+    });
+
+    // FAILSAFE 1: this window is supposed to be click-through. If any input
+    // reaches us, click-through is broken (seen on Windows) and we'd be a
+    // fullscreen topmost click trap — close immediately.
+    const bail = () => void invoke("overlay_hide");
+    window.addEventListener("mousedown", bail, true);
+    window.addEventListener("keydown", bail, true);
+
+    // FAILSAFE 2: if the editor stops sending heartbeats (main window died),
+    // don't stay on top of the user's screen forever.
+    const watchdog = setInterval(() => {
+      if (Date.now() - lastPing.current > 5000) void invoke("overlay_hide");
+    }, 1000);
+
     return () => {
       un.then((f) => f());
+      unPing.then((f) => f());
+      window.removeEventListener("mousedown", bail, true);
+      window.removeEventListener("keydown", bail, true);
+      clearInterval(watchdog);
     };
   }, []);
 
