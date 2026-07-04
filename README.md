@@ -37,6 +37,12 @@ Unlike most DIY macro pads that just remap keys, MKYADA plays back **full record
 - **Per-app profiles** — with the app running, key 1 can be *Save As* in Photoshop and an inventory macro in your game. No matching profile? The keypad falls back to its own on-board config within 5 seconds.
 - **In-app firmware updates**, wrong-solder-order key remapping, device nicknames, multi-device support, light/dark theme, and a GitHub release check on launch.
 
+## The app
+
+| Assign keys | Manage devices |
+|---|---|
+| ![Keys page — click a key, pick what it does](docs/images/app-keys.png) | ![Devices page — connected keypad with nickname and firmware info](docs/images/app-devices.png) |
+
 ## Hardware
 
 | Component | Details |
@@ -47,7 +53,11 @@ Unlike most DIY macro pads that just remap keys, MKYADA plays back **full record
 | Status LED | onboard WS2812 (GP16), nothing to wire |
 | Case | 3D-printed **Stream Cheap** remix — STLs + print notes in [hardware/case/](hardware/case/) |
 
-Full soldering walkthrough with the board pinout photo: **[hardware/wiring.md](hardware/wiring.md)**. Any key count from 1 to 20 works — the setup wizard adapts. Soldered the keys in the wrong order? The app remaps them in software.
+<p align="center">
+  <img src="docs/raspberry-2040-zero.jpg" alt="Waveshare RP2040-Zero — key pins GP0-GP8 down the right edge, GND on the upper left" width="320">
+</p>
+
+Full soldering walkthrough with the board pinout: **[hardware/wiring.md](hardware/wiring.md)**. Any key count from 1 to 20 works — the setup wizard adapts. Soldered the keys in the wrong order? The app remaps them in software.
 
 ## How it works
 
