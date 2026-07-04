@@ -20,7 +20,87 @@ static LISTENER: Once = Once::new();
 /// Mouse-move sample throttle, matching the tkinter recorder's 15 ms.
 const MOVE_SAMPLE_MS: u128 = 15;
 
+/// Windows reports keys as virtual-key codes, which layouts REASSIGN per
+/// physical key (German swaps Y/Z, French AZERTY moves the whole letter
+/// block, Turkish-F everything). Macro labels must be positional — the HID
+/// contract — so round-trip the VK back to its scancode under the active
+/// layout and name the physical key by its US position. Without this, a
+/// German user recording "z" would get a macro that plays back "y".
+#[cfg(target_os = "windows")]
+mod positional {
+    use rdev::Key;
+    use std::ffi::c_void;
+
+    #[link(name = "user32")]
+    extern "system" {
+        fn GetForegroundWindow() -> *mut c_void;
+        fn GetWindowThreadProcessId(hwnd: *mut c_void, pid: *mut u32) -> u32;
+        fn GetKeyboardLayout(thread: u32) -> *mut c_void;
+        fn MapVirtualKeyExW(code: u32, map_type: u32, hkl: *mut c_void) -> u32;
+    }
+
+    const MAPVK_VK_TO_VSC: u32 = 0;
+
+    /// rdev Key -> Windows virtual-key code, for the layout-movable keys only
+    /// (letters, digits, punctuation). Named keys never move.
+    fn vk(key: Key) -> Option<u32> {
+        use Key::*;
+        Some(match key {
+            KeyA => 0x41, KeyB => 0x42, KeyC => 0x43, KeyD => 0x44, KeyE => 0x45,
+            KeyF => 0x46, KeyG => 0x47, KeyH => 0x48, KeyI => 0x49, KeyJ => 0x4A,
+            KeyK => 0x4B, KeyL => 0x4C, KeyM => 0x4D, KeyN => 0x4E, KeyO => 0x4F,
+            KeyP => 0x50, KeyQ => 0x51, KeyR => 0x52, KeyS => 0x53, KeyT => 0x54,
+            KeyU => 0x55, KeyV => 0x56, KeyW => 0x57, KeyX => 0x58, KeyY => 0x59,
+            KeyZ => 0x5A,
+            Num0 => 0x30, Num1 => 0x31, Num2 => 0x32, Num3 => 0x33, Num4 => 0x34,
+            Num5 => 0x35, Num6 => 0x36, Num7 => 0x37, Num8 => 0x38, Num9 => 0x39,
+            SemiColon => 0xBA, Equal => 0xBB, Comma => 0xBC, Minus => 0xBD,
+            Dot => 0xBE, Slash => 0xBF, BackQuote => 0xC0, LeftBracket => 0xDB,
+            BackSlash => 0xDC, RightBracket => 0xDD, Quote => 0xDE,
+            _ => return None,
+        })
+    }
+
+    /// US set-1 scancode -> positional label (inverse of layout.rs's table).
+    fn sc_label(sc: u32) -> Option<&'static str> {
+        Some(match sc {
+            0x02 => "1", 0x03 => "2", 0x04 => "3", 0x05 => "4", 0x06 => "5",
+            0x07 => "6", 0x08 => "7", 0x09 => "8", 0x0A => "9", 0x0B => "0",
+            0x0C => "-", 0x0D => "=",
+            0x10 => "q", 0x11 => "w", 0x12 => "e", 0x13 => "r", 0x14 => "t",
+            0x15 => "y", 0x16 => "u", 0x17 => "i", 0x18 => "o", 0x19 => "p",
+            0x1A => "[", 0x1B => "]",
+            0x1E => "a", 0x1F => "s", 0x20 => "d", 0x21 => "f", 0x22 => "g",
+            0x23 => "h", 0x24 => "j", 0x25 => "k", 0x26 => "l", 0x27 => ";",
+            0x28 => "'", 0x29 => "`", 0x2B => "\\",
+            0x2C => "z", 0x2D => "x", 0x2E => "c", 0x2F => "v", 0x30 => "b",
+            0x31 => "n", 0x32 => "m", 0x33 => ",", 0x34 => ".", 0x35 => "/",
+            _ => return None,
+        })
+    }
+
+    pub fn label(key: Key) -> Option<&'static str> {
+        let vk = vk(key)?;
+        let hkl = unsafe {
+            let fg = GetForegroundWindow();
+            let thread = if fg.is_null() {
+                0
+            } else {
+                GetWindowThreadProcessId(fg, std::ptr::null_mut())
+            };
+            GetKeyboardLayout(thread)
+        };
+        let sc = unsafe { MapVirtualKeyExW(vk, MAPVK_VK_TO_VSC, hkl) };
+        sc_label(sc)
+    }
+}
+
 pub fn key_label(key: Key) -> Option<&'static str> {
+    // Physical position wins over the layout's VK assignment (Windows).
+    #[cfg(target_os = "windows")]
+    if let Some(l) = positional::label(key) {
+        return Some(l);
+    }
     use Key::*;
     Some(match key {
         KeyA => "a", KeyB => "b", KeyC => "c", KeyD => "d", KeyE => "e",

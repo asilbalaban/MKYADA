@@ -15,7 +15,7 @@ import {
   modifierDisplay,
   modsFromEvent,
 } from "../lib/macro-model";
-import { displayKey } from "../lib/layout";
+import { displayKey, untypeableChars } from "../lib/layout";
 import { Button, Field, Input, Select } from "./ui";
 
 const KINDS: { value: Assignment["kind"]; label: string; launchOnly?: boolean }[] = [
@@ -203,6 +203,15 @@ export function AssignmentEditor({
             placeholder="e.g. your@email.com"
             onChange={(e) => onChange({ ...value, text: e.target.value })}
           />
+          {(() => {
+            const bad = untypeableChars(value.text);
+            return bad.length > 0 ? (
+              <p className="text-warning text-xs mt-1">
+                The keypad can't type these characters on your keyboard layout
+                (they need an input method): {bad.join(" ")} — they will be skipped.
+              </p>
+            ) : null;
+          })()}
         </Field>
       )}
 

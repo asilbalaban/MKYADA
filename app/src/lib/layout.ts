@@ -94,6 +94,20 @@ export function displayKey(label: string): string {
  * the user's layout. Null when the character needs dead keys or isn't on the
  * layout at all.
  */
+/**
+ * Characters in a text that no single keystroke on the user's layout can
+ * produce (IME-composed scripts like Hangul/Kanji, dead-key accents). The
+ * UI warns instead of silently skipping them at compile time.
+ */
+export function untypeableChars(text: string): string[] {
+  const bad = new Set<string>();
+  for (const ch of text) {
+    if (ch === "\n" || ch === "\t" || ch === " ") continue;
+    if (!charToKeystroke(ch)) bad.add(ch);
+  }
+  return [...bad];
+}
+
 export function charToKeystroke(ch: string): Keystroke | null {
   if (Object.keys(REVERSE).length) return REVERSE[ch] ?? null;
   // US fallback
