@@ -5,7 +5,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { message, open, save } from "@tauri-apps/plugin-dialog";
+import { open, save } from "@tauri-apps/plugin-dialog";
+import { Circle, FileDown, FileUp, Play, Square } from "lucide-react";
 import { readTextFile } from "../lib/fs";
 import { ipc } from "../lib/ipc";
 import { useDevice } from "../lib/device";
@@ -13,12 +14,14 @@ import type { MacroEvent, MacroFile } from "../lib/types";
 import { captureScreen, thinForDevice } from "../lib/recorder-model";
 import { macroFileName, migrateMacro } from "../lib/macro-model";
 import { Badge, Button, Card, Field, Input, Select } from "../components/ui";
+import { useToast } from "../components/toast";
 import { MacroEditor } from "../components/MacroEditor";
 import { usePermissions, useRecordError } from "../components/Permissions";
 
 export function RecorderPage() {
   const { hello, drive, send } = useDevice();
   const { status: perms } = usePermissions();
+  const toast = useToast();
   const captureError = useRecordError();
   const canRecord = !perms || perms.platform !== "macos" || perms.input_monitoring === "granted";
   const [recording, setRecording] = useState(false);
@@ -90,7 +93,7 @@ export function RecorderPage() {
       setMacro(migrateMacro(parsed));
       setStatus(`Imported ${(file as string).split(/[\\/]/).pop()}`);
     } catch (e) {
-      setStatus(`Import failed: ${e}`);
+      toast.error("Import failed", String(e));
     }
   }
 
@@ -103,7 +106,7 @@ export function RecorderPage() {
     if (!path) return;
     const out = optimize ? { ...macro, events: thinForDevice(macro.events) } : macro;
     await invoke("write_local_file", { path, content: JSON.stringify(out, null, 2) });
-    setStatus(`Exported to ${path}`);
+    toast.success("Exported", path);
   }
 
   async function playOnDevice() {
@@ -135,15 +138,12 @@ export function RecorderPage() {
       await ipc.driveWrite(drive.path, file, JSON.stringify(out));
       await send({ t: "reload" });
       setStatus(`Assigned to ${file}`);
-      await message(
-        `Macro saved to the device ✓\n\nKey ${assignKey} → ${file} (${out.events.length} events)`,
-        { title: "Assigned to key", kind: "info" },
+      toast.success(
+        `Macro saved to key ${assignKey}`,
+        `${out.events.length} events written to the keypad. Press the key to try it.`,
       );
     } catch (e) {
-      await message(`Could not write to the device:\n${e}`, {
-        title: "Assign failed",
-        kind: "error",
-      });
+      toast.error("Could not write to the keypad", String(e));
     }
   }
 
@@ -153,18 +153,20 @@ export function RecorderPage() {
         <div className="flex items-center gap-3 flex-wrap">
           {recording ? (
             <Button variant="danger" onClick={() => void stopRecording()}>
-              ■ Stop (F8)
+              <Square size={14} aria-hidden /> Stop (F8)
             </Button>
           ) : (
             <Button variant="primary" onClick={() => void startRecording()} disabled={!canRecord}>
-              ● Record (F8)
+              <Circle size={14} aria-hidden /> Record (F8)
             </Button>
           )}
           {!canRecord && (
             <Badge tone="amber">grant Input Monitoring in Settings to record</Badge>
           )}
           {recording && <Badge tone="red">REC · {count} events</Badge>}
-          <Button onClick={() => void importJson()}>Import JSON…</Button>
+          <Button onClick={() => void importJson()}>
+            <FileUp size={14} aria-hidden /> Import JSON…
+          </Button>
           <Field label="Start delay (s)">
             <Input
               type="number" min="0" max="30" className="w-16"
@@ -172,14 +174,14 @@ export function RecorderPage() {
               onChange={(e) => setStartDelay(Math.max(0, parseInt(e.target.value) || 0))}
             />
           </Field>
-          <p className="text-xs text-slate-500 max-w-sm">
+          <p className="text-xs text-fg-faint max-w-sm">
             F8 starts/stops recording even while another window is focused.
             Mouse moves, clicks, scrolls and keys are captured globally.
           </p>
         </div>
-        {status && <p className="text-xs text-slate-400 mt-2">{status}</p>}
+        {status && <p className="text-xs text-fg-muted mt-2">{status}</p>}
         {captureError && (
-          <p className="text-xs text-red-400 mt-2">⚠ {captureError}</p>
+          <p className="text-xs text-danger mt-2">⚠ {captureError}</p>
         )}
       </Card>
 
@@ -190,17 +192,21 @@ export function RecorderPage() {
           <Card title="Play & save">
             <div className="flex items-center gap-2 flex-wrap">
               <Button variant="primary" onClick={() => void playOnDevice()} disabled={!drive}>
-                ▶ Play on device (hardware HID)
+                <Play size={14} aria-hidden /> Play on device (hardware HID)
               </Button>
               <Button onClick={() => void previewLocally()}>
                 Preview locally (may not work in games)
               </Button>
               <Button onClick={() => void invoke("preview_stop").then(() => send({ t: "stop" }))}>
-                ■ Stop
+                <Square size={14} aria-hidden /> Stop
               </Button>
               <span className="mx-2 border-l border-line h-6" />
-              <Button onClick={() => void exportJson(false)}>Export JSON…</Button>
-              <Button onClick={() => void exportJson(true)}>Export optimized…</Button>
+              <Button onClick={() => void exportJson(false)}>
+                <FileDown size={14} aria-hidden /> Export JSON…
+              </Button>
+              <Button onClick={() => void exportJson(true)}>
+                <FileDown size={14} aria-hidden /> Export optimized…
+              </Button>
               {hello && drive && (
                 <>
                   <span className="mx-2 border-l border-line h-6" />
@@ -225,7 +231,7 @@ export function RecorderPage() {
               )}
             </div>
             {!hello && (
-              <p className="text-xs text-slate-500 mt-2">
+              <p className="text-xs text-fg-faint mt-2">
                 Connect a device to play through hardware or assign to a key.
               </p>
             )}

@@ -2,14 +2,17 @@
 // Ends with a live key test that doubles as a solder-joint check.
 
 import { useEffect, useState } from "react";
+import { Usb } from "lucide-react";
 import { useDevice } from "../lib/device";
-import { Badge, Button, Card, Field, Input, Select } from "../components/ui";
+import { useNav } from "../lib/nav";
+import { Button, Card, EmptyState, Field, Input, Select, Stepper } from "../components/ui";
 import { defaultConfig, macroSlots } from "../lib/macro-model";
 import type { DeviceConfig } from "../lib/types";
 import { Keypad } from "../components/Keypad";
 
 export function SetupPage({ onDone }: { onDone: () => void }) {
   const { hello, drive, writeAndReload, send } = useDevice();
+  const nav = useNav();
   const [cfg, setCfg] = useState<DeviceConfig>(() => {
     const c = defaultConfig();
     if (hello) c.key_count = hello.key_count;
@@ -33,7 +36,20 @@ export function SetupPage({ onDone }: { onDone: () => void }) {
   }, [hello]);
 
   if (!hello) {
-    return <p className="text-slate-400">Connect a device first.</p>;
+    return (
+      <Card>
+        <EmptyState
+          icon={<Usb size={28} />}
+          title="No keypad connected"
+          description="Connect your MKYADA keypad to set up its keys and layers."
+          action={
+            <Button variant="primary" onClick={() => nav("devices")}>
+              Go to Devices
+            </Button>
+          }
+        />
+      </Card>
+    );
   }
 
   async function save() {
@@ -52,14 +68,12 @@ export function SetupPage({ onDone }: { onDone: () => void }) {
   }
 
   return (
-    <div className="flex flex-col gap-4 max-w-2xl">
-      <div className="flex gap-2 text-xs text-slate-500">
-        {["Keys & layers", "Review", "Test"].map((s, i) => (
-          <Badge key={s} tone={i === step ? "blue" : "default"}>
-            {i + 1}. {s}
-          </Badge>
-        ))}
-      </div>
+    <div className="flex flex-col gap-4 max-w-3xl mx-auto w-full">
+      <Stepper
+        steps={["Keys & layers", "Review", "Test"]}
+        current={step}
+        onStepClick={(i) => setStep(i)}
+      />
 
       {step === 0 && (
         <Card title="How is your keypad built?">
@@ -149,7 +163,7 @@ export function SetupPage({ onDone }: { onDone: () => void }) {
               </Field>
             </div>
 
-            <p className="text-sm text-slate-400">
+            <p className="text-sm text-fg-muted">
               This gives you <span className="text-accent font-semibold">{macroSlots(cfg)}</span>{" "}
               macro slot{macroSlots(cfg) === 1 ? "" : "s"}.
             </p>
@@ -165,20 +179,20 @@ export function SetupPage({ onDone }: { onDone: () => void }) {
 
       {step === 1 && (
         <Card title="Review & write to device">
-          <div className="flex flex-col gap-3 text-sm text-slate-300">
+          <div className="flex flex-col gap-3 text-sm text-fg">
             <pre className="bg-panel2 border border-line rounded-lg p-3 text-xs overflow-x-auto">
               {JSON.stringify(cfg, null, 2)}
             </pre>
             {!drive && (
-              <p className="text-amber-400 text-xs">
+              <p className="text-warning text-xs">
                 No CIRCUITPY drive found — cannot write the config. Check that the board's USB
                 drive is mounted.
               </p>
             )}
-            {error && <p className="text-red-400 text-xs">{error}</p>}
+            {error && <p className="text-danger text-xs">{error}</p>}
             <div className="flex justify-between">
               <Button onClick={() => setStep(0)}>Back</Button>
-              <Button variant="primary" onClick={() => void save()} disabled={saving || !drive}>
+              <Button variant="primary" onClick={() => void save()} disabled={!drive} loading={saving}>
                 {saving ? "Writing…" : "Write config.json"}
               </Button>
             </div>
@@ -190,7 +204,7 @@ export function SetupPage({ onDone }: { onDone: () => void }) {
         <>
           <Card title="Live key test — press your physical keys">
             <div className="flex flex-col gap-4">
-              <p className="text-sm text-slate-400">
+              <p className="text-sm text-fg-muted">
                 Pressing a key should light it up below. If a key doesn't react, check its solder
                 joint (GP{"{n-1}"} and GND).
               </p>
@@ -270,17 +284,17 @@ function RemapPanel({
     <Card title="Key order (remap)">
       <div className="flex flex-col gap-3 text-sm">
         {!supported ? (
-          <p className="text-amber-400 text-xs">
+          <p className="text-warning text-xs">
             This firmware doesn't support remapping — update the firmware on the drive first.
           </p>
         ) : active ? (
           <>
-            <p className="text-slate-300">
+            <p className="text-fg">
               Press the physical key that should be{" "}
               <span className="text-accent font-bold text-lg">#{order.length + 1}</span> of{" "}
               {cfg.key_count} …
             </p>
-            <p className="text-xs text-slate-500">
+            <p className="text-xs text-fg-faint">
               Pressed so far (GPIO order): {order.join(", ") || "—"}
             </p>
             <div>
@@ -289,11 +303,11 @@ function RemapPanel({
           </>
         ) : (
           <>
-            <p className="text-slate-400 text-xs">
+            <p className="text-fg-muted text-xs">
               Keys lighting up in the wrong order? Your solder order differs from GP0…GP5.
               Remap fixes the numbering everywhere — including standalone mode.
               {!isIdentity && (
-                <> Current map (GP0…): <span className="font-mono text-slate-300">{current.join(" ")}</span></>
+                <> Current map (GP0…): <span className="font-mono text-fg">{current.join(" ")}</span></>
               )}
             </p>
             <div className="flex gap-2">

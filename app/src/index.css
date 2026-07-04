@@ -1,21 +1,101 @@
 @import "tailwindcss";
 
+/*
+ * Semantic theme tokens. Light is the default; `:root[data-theme="dark"]`
+ * overrides the same variables, so every Tailwind utility that references
+ * them (bg-panel, text-fg-muted, border-line, …) follows the theme at
+ * runtime. Values are GitHub-Primer-inspired.
+ */
 @theme {
+  /* surfaces */
+  --color-bg: #f4f6f8;
+  --color-panel: #ffffff;
+  --color-panel2: #eef1f5;
+  --color-line: #d5dce3;
+
+  /* text */
+  --color-fg: #1f2328;
+  --color-fg-muted: #57606a;
+  --color-fg-faint: #7d8590;
+
+  /* brand */
+  --color-accent: #0369a1;
+  --color-accent-dim: #0284c7;
+  --color-accent-fg: #ffffff;
+
+  /* status */
+  --color-success: #1a7f37;
+  --color-success-bg: #dafbe1;
+  --color-success-line: #aceebb;
+  --color-warning: #9a6700;
+  --color-warning-bg: #fff8c5;
+  --color-warning-line: #d4a72c66;
+  --color-danger: #cf222e;
+  --color-danger-bg: #ffebe9;
+  --color-danger-line: #ff818266;
+  --color-info: #0969da;
+  --color-info-bg: #ddf4ff;
+  --color-info-line: #54aeff66;
+
+  /* misc */
+  --color-layer: #8250df;
+}
+
+:root[data-theme="dark"] {
   --color-bg: #0d1117;
   --color-panel: #161b22;
   --color-panel2: #1c2330;
   --color-line: #2d3644;
+
+  --color-fg: #e6edf3;
+  --color-fg-muted: #94a3b8;
+  --color-fg-faint: #64748b;
+
   --color-accent: #38bdf8;
   --color-accent-dim: #0ea5e9;
+  --color-accent-fg: #08131c;
+
+  --color-success: #3fb950;
+  --color-success-bg: #2ea04326;
+  --color-success-line: #2ea0434d;
+  --color-warning: #e3b341;
+  --color-warning-bg: #bb800926;
+  --color-warning-line: #bb80094d;
+  --color-danger: #f85149;
+  --color-danger-bg: #f851491a;
+  --color-danger-line: #f8514966;
+  --color-info: #7dd3fc;
+  --color-info-bg: #0ea5e91a;
+  --color-info-line: #0ea5e94d;
+
+  --color-layer: #c084fc;
 }
 
 html,
 body {
   background: var(--color-bg);
-  color: #e6edf3;
-  font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif;
+  color: var(--color-fg);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI Variable", "Segoe UI",
+    system-ui, "Helvetica Neue", Arial, sans-serif;
   user-select: none;
   -webkit-user-select: none;
+}
+
+/* Keyboard-visible focus ring everywhere; invisible for mouse clicks. */
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 
 ::-webkit-scrollbar {
@@ -23,6 +103,6 @@ body {
   height: 10px;
 }
 ::-webkit-scrollbar-thumb {
-  background: #2d3644;
+  background: var(--color-line);
   border-radius: 5px;
 }

@@ -7,6 +7,7 @@ import { useProfiles } from "../lib/profiles";
 import type { Assignment, Profile } from "../lib/types";
 import { describeAssignment } from "../lib/macro-model";
 import { AssignmentEditor } from "../components/AssignmentEditor";
+import { Crosshair } from "lucide-react";
 import { Badge, Button, Card, Field, Input } from "../components/ui";
 
 export function ProfilesPage() {
@@ -58,8 +59,8 @@ export function ProfilesPage() {
           <Button variant={enabled ? "primary" : "default"} onClick={() => setEnabled(!enabled)}>
             {enabled ? "Enabled" : "Disabled"}
           </Button>
-          <span className="text-slate-400">
-            Foreground: <span className="text-slate-200 font-mono">{foreground.exe || "—"}</span>
+          <span className="text-fg-muted">
+            Foreground: <span className="text-fg font-mono">{foreground.exe || "—"}</span>
           </span>
           {activeProfile ? (
             <Badge tone="green">active: {activeProfile.name}</Badge>
@@ -67,7 +68,7 @@ export function ProfilesPage() {
             <Badge>no match — device runs standalone config</Badge>
           )}
         </div>
-        <p className="text-xs text-slate-500 mt-2">
+        <p className="text-xs text-fg-faint mt-2">
           When the foreground app matches a profile, the keypad's presses are routed through
           this app and played back via the device (still hardware HID). Otherwise the device
           uses its own on-board key assignments.
@@ -77,7 +78,7 @@ export function ProfilesPage() {
       <div className="grid grid-cols-[240px_1fr] gap-4 items-start">
         <Card title="Profiles" actions={<Button onClick={addProfile}>+ Add</Button>}>
           {profiles.length === 0 ? (
-            <p className="text-slate-500 text-xs">
+            <p className="text-fg-faint text-xs">
               No profiles. Focus the target app, then click “+ Add”.
             </p>
           ) : (
@@ -91,10 +92,10 @@ export function ProfilesPage() {
                       setDraft(null);
                     }}
                     className={`w-full text-left px-2 py-1.5 rounded text-sm flex items-center justify-between
-                      ${p.id === selectedId ? "bg-panel2 text-accent" : "text-slate-300 hover:bg-panel2"}`}
+                      ${p.id === selectedId ? "bg-panel2 text-accent" : "text-fg hover:bg-panel2"}`}
                   >
                     <span>{p.name}</span>
-                    {activeProfile?.id === p.id && <span className="text-green-400 text-xs">●</span>}
+                    {activeProfile?.id === p.id && <span className="text-success text-xs">●</span>}
                   </button>
                 </li>
               ))}
@@ -119,9 +120,9 @@ export function ProfilesPage() {
                       placeholder="KnightOnLine.exe"
                       onChange={(e) => updateSelected({ match: { ...selected.match, exe: e.target.value } })}
                     />
-                    <Button title="Use current foreground app"
+                    <Button title="Use current foreground app" aria-label="Use current foreground app"
                       onClick={() => updateSelected({ match: { ...selected.match, exe: foreground.exe } })}>
-                      ⤓
+                      <Crosshair size={14} aria-hidden />
                     </Button>
                   </div>
                 </Field>
@@ -139,7 +140,7 @@ export function ProfilesPage() {
 
               <div className="grid grid-cols-[1fr_1fr] gap-4 items-start">
                 <div className="flex flex-col gap-1">
-                  <p className="text-xs text-slate-500 mb-1">Keys in this profile</p>
+                  <p className="text-xs text-fg-faint mb-1">Keys in this profile</p>
                   {Array.from({ length: keyCount }, (_, i) => i + 1).map((n) => {
                     const a = selected.keys[String(n)];
                     return (
@@ -150,10 +151,10 @@ export function ProfilesPage() {
                           setDraft(null);
                         }}
                         className={`flex items-center justify-between px-3 py-2 rounded-md border text-sm
-                          ${editKey === n ? "border-accent bg-panel2" : "border-line bg-panel2 hover:border-slate-500"}`}
+                          ${editKey === n ? "border-accent bg-panel2" : "border-line bg-panel2 hover:border-fg-faint"}`}
                       >
-                        <span className="font-semibold text-slate-200">Key {n}</span>
-                        <span className="text-xs text-slate-400">
+                        <span className="font-semibold text-fg">Key {n}</span>
+                        <span className="text-xs text-fg-muted">
                           {a ? describeAssignment(a) : "device default"}
                         </span>
                       </button>
@@ -163,10 +164,10 @@ export function ProfilesPage() {
 
                 <div>
                   {editKey === null ? (
-                    <p className="text-slate-500 text-sm">Select a key to override it in this profile.</p>
+                    <p className="text-fg-faint text-sm">Select a key to override it in this profile.</p>
                   ) : (
                     <div className="flex flex-col gap-3">
-                      <p className="text-xs text-slate-500">
+                      <p className="text-xs text-fg-faint">
                         Key {editKey} — unassigned keys fall back to the device's own config.
                       </p>
                       <AssignmentEditor
@@ -188,7 +189,7 @@ export function ProfilesPage() {
           </Card>
         ) : (
           <Card title="Per-app profiles">
-            <p className="text-slate-500 text-sm">
+            <p className="text-fg-faint text-sm">
               Select or add a profile. Example: key 1 types Ctrl+Shift+S in Photoshop but runs
               your inventory macro in Knight Online.
             </p>

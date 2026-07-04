@@ -6,6 +6,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { RefreshCw } from "lucide-react";
 import { Badge, Button, Card } from "./ui";
 
 type PermState = "granted" | "denied" | "unknown";
@@ -66,15 +67,15 @@ function PermRow({
   kind: string;
 }) {
   const border =
-    state === "granted" ? "border-green-800" : state === "denied" ? "border-red-700" : "border-amber-700";
+    state === "granted" ? "border-success-line" : state === "denied" ? "border-danger-line" : "border-warning-line";
   const dot =
-    state === "granted" ? "bg-green-400" : state === "denied" ? "bg-red-500" : "bg-amber-400";
+    state === "granted" ? "bg-success" : state === "denied" ? "bg-danger" : "bg-warning";
   return (
     <div className={`flex items-center gap-3 bg-panel2 border ${border} rounded-lg px-3 py-2`}>
       <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${dot}`} />
       <div className="flex-1 min-w-0">
-        <p className="text-sm text-slate-200">{title}</p>
-        <p className="text-xs text-slate-500">{purpose}</p>
+        <p className="text-sm text-fg">{title}</p>
+        <p className="text-xs text-fg-faint">{purpose}</p>
       </div>
       <StateBadge state={state} />
       {state !== "granted" && (
@@ -93,7 +94,7 @@ export function PermissionsCard() {
   if (status.platform !== "macos") {
     return (
       <Card title="Permissions">
-        <p className="text-sm text-slate-400">
+        <p className="text-sm text-fg-muted">
           No special OS permissions are required on {status.platform === "windows" ? "Windows" : "Linux"}.
           {status.platform === "linux" && " (Global recording requires an X11 session — Wayland is not supported yet.)"}
         </p>
@@ -107,7 +108,7 @@ export function PermissionsCard() {
       actions={
         <div className="flex items-center gap-2">
           {lastChecked && (
-            <span className="text-[10px] text-slate-500">checked {lastChecked}</span>
+            <span className="text-[10px] text-fg-faint">checked {lastChecked}</span>
           )}
           <Button onClick={() => void refresh()} disabled={checking}>
             {checking ? "Checking…" : "Re-check"}
@@ -130,30 +131,30 @@ export function PermissionsCard() {
         />
 
         {missing && (
-          <div className="bg-red-900/20 border border-red-800 rounded-lg p-3 flex flex-col gap-2">
-            <p className="text-sm text-red-300 font-semibold">
+          <div className="bg-danger-bg border border-danger-line rounded-lg p-3 flex flex-col gap-2">
+            <p className="text-sm text-danger font-semibold">
               Already granted it, but it still shows DENIED?
             </p>
-            <p className="text-xs text-slate-400 leading-relaxed">
-              The app is unsigned, so <span className="text-slate-200">every update gets a new
+            <p className="text-xs text-fg-muted leading-relaxed">
+              The app is unsigned, so <span className="text-fg">every update gets a new
               signature</span> and macOS ties permissions to the old one. The toggle in System
               Settings then belongs to the previous version and does nothing. Fix it like this:
             </p>
-            <ol className="text-xs text-slate-300 list-decimal list-inside space-y-1">
+            <ol className="text-xs text-fg list-decimal list-inside space-y-1">
               <li>Open the pane with the button above (Privacy &amp; Security → Input Monitoring / Accessibility).</li>
-              <li><span className="text-slate-100">Remove MKYADA from the list</span> (select it and press the “−” button) — just toggling it off/on is often not enough.</li>
+              <li><span className="text-fg">Remove MKYADA from the list</span> (select it and press the “−” button) — just toggling it off/on is often not enough.</li>
               <li>Restart MKYADA below, then click <em>Allow…</em> when it asks again.</li>
             </ol>
             <div>
               <Button variant="primary" onClick={() => void invoke("app_restart")}>
-                ⟳ Restart MKYADA
+                <RefreshCw size={14} aria-hidden /> Restart MKYADA
               </Button>
             </div>
           </div>
         )}
 
-        <p className="text-xs text-slate-500 mt-1">
-          Configuring your keypad and playing macros <span className="text-slate-300">through the device</span> work
+        <p className="text-xs text-fg-faint mt-1">
+          Configuring your keypad and playing macros <span className="text-fg">through the device</span> work
           without any permissions. A fresh Input Monitoring grant only takes effect after the app restarts.
         </p>
       </div>
@@ -167,9 +168,9 @@ export function PermissionsBanner({ onOpenSettings }: { onOpenSettings: () => vo
   const [dismissed, setDismissed] = useState(false);
   if (!status || !missing || dismissed) return null;
   return (
-    <div className="flex items-center justify-between bg-red-900/30 border-b border-red-800 px-4 py-2 text-sm">
+    <div className="flex items-center justify-between bg-danger-bg border-b border-danger-line px-4 py-2 text-sm">
       <span className="flex items-center gap-2">
-        <span className="w-2 h-2 rounded-full bg-red-500" />
+        <span className="w-2 h-2 rounded-full bg-danger" />
         Recording won't work yet — macOS permissions missing
         {status.input_monitoring !== "granted" && " · Input Monitoring"}
         {status.accessibility !== "granted" && " · Accessibility"}

@@ -4,9 +4,25 @@
 // simplification — with clearly labeled buttons instead of cryptic icons,
 // plus a full-screen on-monitor path overlay.
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { emit } from "@tauri-apps/api/event";
+import {
+  ArrowDown,
+  ArrowUp,
+  Copy,
+  Keyboard,
+  Monitor,
+  MonitorOff,
+  MousePointerClick,
+  MoveRight,
+  Music,
+  Scissors,
+  Spline,
+  Timer,
+  Trash2,
+  UnfoldVertical,
+} from "lucide-react";
 import type { MacroEvent, MacroFile } from "../lib/types";
 import {
   EditorItem,
@@ -156,17 +172,17 @@ export function MacroEditor({ macro, onChange }: Props) {
                 key={i}
                 onClick={() => setSelected(selected === i ? null : i)}
                 className={`flex items-center gap-2 rounded-md px-2 py-1.5 text-xs text-left border
-                  ${selected === i ? "border-accent bg-accent/10" : "border-line bg-panel2 hover:border-slate-500"}`}
+                  ${selected === i ? "border-accent bg-accent/10" : "border-line bg-panel2 hover:border-fg-faint"}`}
               >
-                <span className="w-6 text-center text-sm">{itemIcon(item)}</span>
-                <span className="w-8 text-slate-500">#{i + 1}</span>
-                <span className="flex-1 text-slate-300 truncate">{describeItem(item)}</span>
-                <span className="text-slate-500">{item.delay ?? 0} ms</span>
+                <span className="w-6 flex justify-center text-fg-muted">{itemIcon(item)}</span>
+                <span className="w-8 text-fg-faint">#{i + 1}</span>
+                <span className="flex-1 text-fg truncate">{describeItem(item)}</span>
+                <span className="text-fg-faint">{item.delay ?? 0} ms</span>
               </button>
             ))}
-            {items.length === 0 && <p className="text-slate-500 text-sm">No events.</p>}
+            {items.length === 0 && <p className="text-fg-faint text-sm">No events.</p>}
           </div>
-          <div className={`text-xs mt-2 ${stats.tooBig ? "text-amber-400" : "text-slate-500"}`}>
+          <div className={`text-xs mt-2 ${stats.tooBig ? "text-warning" : "text-fg-faint"}`}>
             {stats.events} events · {(stats.bytes / 1024).toFixed(1)} KB
             {stats.tooBig && " — large for the device; use Optimize below."}
           </div>
@@ -175,15 +191,23 @@ export function MacroEditor({ macro, onChange }: Props) {
         <div className="flex flex-col gap-3">
           <Card title={current ? `Edit row #${(selected ?? 0) + 1}` : "Row editor"}>
             {!current ? (
-              <p className="text-slate-500 text-sm">Click a row on the left to edit every value.</p>
+              <p className="text-fg-faint text-sm">Click a row on the left to edit every value.</p>
             ) : (
               <div className="flex flex-col gap-3">
                 <RowFields item={current} onChange={(it) => updateItem(selected!, it)} />
                 <div className="flex flex-wrap gap-2 border-t border-line pt-3">
-                  <Button onClick={() => moveItem(selected!, -1)}>▲ Move up</Button>
-                  <Button onClick={() => moveItem(selected!, 1)}>▼ Move down</Button>
-                  <Button onClick={() => duplicateItem(selected!)}>⧉ Duplicate</Button>
-                  <Button variant="danger" onClick={() => removeItem(selected!)}>🗑 Delete row</Button>
+                  <Button onClick={() => moveItem(selected!, -1)}>
+                    <ArrowUp size={14} aria-hidden /> Move up
+                  </Button>
+                  <Button onClick={() => moveItem(selected!, 1)}>
+                    <ArrowDown size={14} aria-hidden /> Move down
+                  </Button>
+                  <Button onClick={() => duplicateItem(selected!)}>
+                    <Copy size={14} aria-hidden /> Duplicate
+                  </Button>
+                  <Button variant="danger" onClick={() => removeItem(selected!)}>
+                    <Trash2 size={14} aria-hidden /> Delete row
+                  </Button>
                 </div>
               </div>
             )}
@@ -192,17 +216,25 @@ export function MacroEditor({ macro, onChange }: Props) {
           <Card title="Whole macro">
             <div className="flex flex-wrap gap-2">
               <Button variant="primary" onClick={() => void toggleOverlay()}>
-                {overlayOn ? "◼ Hide screen overlay" : "🖥 Show path on real screen"}
+                {overlayOn ? (
+                  <>
+                    <MonitorOff size={14} aria-hidden /> Hide screen overlay
+                  </>
+                ) : (
+                  <>
+                    <Monitor size={14} aria-hidden /> Show path on real screen
+                  </>
+                )}
               </Button>
               <Button
                 onClick={() =>
                   commit(items.map((it) => (isMoveGroup(it) ? rdpSimplify(resample(it, 30), 3) : it)))
                 }
               >
-                ✂ Optimize for device
+                <Scissors size={14} aria-hidden /> Optimize for device
               </Button>
             </div>
-            <p className="text-[11px] text-slate-500 mt-2">
+            <p className="text-[11px] text-fg-faint mt-2">
               The overlay draws the mouse path 1:1 on your monitor (click-through). The selected
               row is highlighted amber.
             </p>
@@ -213,9 +245,17 @@ export function MacroEditor({ macro, onChange }: Props) {
   );
 }
 
-function itemIcon(item: EditorItem): string {
-  if (isMoveGroup(item)) return "〰";
-  return { key: "⌨", button: "🖱", scroll: "↕", wait: "⏱", move: "→", consumer: "♪" }[item.type] ?? "·";
+function itemIcon(item: EditorItem): ReactNode {
+  if (isMoveGroup(item)) return <Spline size={14} aria-hidden />;
+  const icons: Record<string, ReactNode> = {
+    key: <Keyboard size={14} aria-hidden />,
+    button: <MousePointerClick size={14} aria-hidden />,
+    scroll: <UnfoldVertical size={14} aria-hidden />,
+    wait: <Timer size={14} aria-hidden />,
+    move: <MoveRight size={14} aria-hidden />,
+    consumer: <Music size={14} aria-hidden />,
+  };
+  return icons[item.type] ?? "·";
 }
 
 function Num({
@@ -254,10 +294,10 @@ function RowFields({ item, onChange }: { item: EditorItem; onChange: (i: EditorI
           {delayField}
           <Num label="Duration (ms)" value={groupDuration(g)} onChange={(n) => onChange(setGroupDuration(g, Math.max(1, n)))} />
           <Field label="Points">
-            <span className="text-sm text-slate-300 py-1.5">{g.points.length}</span>
+            <span className="text-sm text-fg py-1.5">{g.points.length}</span>
           </Field>
         </div>
-        <p className="text-xs text-slate-500 -mb-1">Start / end coordinates (path scales to fit):</p>
+        <p className="text-xs text-fg-faint -mb-1">Start / end coordinates (path scales to fit):</p>
         <div className="flex flex-wrap gap-3">
           <Num label="Start X" value={first.x} onChange={(n) => onChange(remapGroup(g, { x: n, y: first.y }, last))} />
           <Num label="Start Y" value={first.y} onChange={(n) => onChange(remapGroup(g, { x: first.x, y: n }, last))} />
@@ -265,8 +305,12 @@ function RowFields({ item, onChange }: { item: EditorItem; onChange: (i: EditorI
           <Num label="End Y" value={last.y} onChange={(n) => onChange(remapGroup(g, first, { x: last.x, y: n }))} />
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button onClick={() => onChange(straighten(g))}>— Straighten (keep endpoints)</Button>
-          <Button onClick={() => onChange(rdpSimplify(g, 3))}>✂ Simplify path</Button>
+          <Button onClick={() => onChange(straighten(g))}>
+            <MoveRight size={14} aria-hidden /> Straighten (keep endpoints)
+          </Button>
+          <Button onClick={() => onChange(rdpSimplify(g, 3))}>
+            <Scissors size={14} aria-hidden /> Simplify path
+          </Button>
         </div>
       </div>
     );

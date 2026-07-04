@@ -2,6 +2,10 @@
 
 **M**acro **K**eyboard **Y**ou **A**lways **D**ream **A**bout — an open-source, DIY 6-key macro keypad built on the RP2040-Zero, with a cross-platform desktop configurator.
 
+<p align="center">
+  <img src="docs/images/mkyada-topview.jpg" alt="MKYADA — 6-key macro keypad with backlit mechanical keys and USB-C" width="560">
+</p>
+
 ```
 ┌──────────────┐   serial (JSON-lines)    ┌───────────────┐    USB HID     ┌───────────┐
 │  MKYADA App  │ ◄──────────────────────► │  RP2040-Zero  │ ─────────────► │  Your PC  │
@@ -19,6 +23,10 @@ Unlike most DIY macro pads that just remap keys, MKYADA plays back **full record
 - **Per-app profiles** — with the desktop app running, key 1 can be *Save As* in Photoshop and an inventory macro in your game.
 - **Record & edit** — record keyboard + mouse, edit every event, set speed / repeat / loop-until-pressed-again.
 - **Build your own** — solder 6 switches to an RP2040-Zero, print the case, flash the firmware. Full docs in [hardware/](hardware/) and [docs/](docs/).
+
+<p align="center">
+  <img src="docs/images/mkyada-backview.jpg" alt="MKYADA back view — USB-C port" width="380">
+</p>
 
 ## Repository layout
 

@@ -2,6 +2,7 @@
 // file on the device ("everything is JSON").
 
 import { useState } from "react";
+import { Play } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { readTextFile } from "../lib/fs";
 import type { Assignment, MacroFile } from "../lib/types";
@@ -155,13 +156,13 @@ export function AssignmentEditor({
 
       {value.kind === "recorded" && (
         <div className="flex items-center gap-2 text-sm">
-          <span className="text-slate-300">▶ {value.name}</span>
-          <span className="text-slate-500 text-xs">({value.macro.events.length} events)</span>
+          <span className="text-fg inline-flex items-center gap-1"><Play size={13} aria-hidden /> {value.name}</span>
+          <span className="text-fg-faint text-xs">({value.macro.events.length} events)</span>
           <Button onClick={importMacro}>Replace…</Button>
         </div>
       )}
 
-      {importError && <p className="text-red-400 text-xs">{importError}</p>}
+      {importError && <p className="text-danger text-xs">{importError}</p>}
     </div>
   );
 }

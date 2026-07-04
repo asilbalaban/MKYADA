@@ -4,7 +4,7 @@
 
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { ask, message } from "@tauri-apps/plugin-dialog";
+import { Usb } from "lucide-react";
 import { useDevice } from "../lib/device";
 import {
   RememberedDevice,
@@ -12,10 +12,14 @@ import {
   rememberDevice,
   rememberedDevices,
 } from "../lib/devnames";
-import { Badge, Button, Card, Field, Input } from "../components/ui";
+import { Badge, Button, Card, EmptyState, Field, Input } from "../components/ui";
+import { useToast } from "../components/toast";
+import { useConfirm } from "../components/dialog";
 
 export function DevicesPage({ onConnected }: { onConnected: () => void }) {
   const { scanning, devices, scan, connect, port, hello, drive, disconnect, send } = useDevice();
+  const toast = useToast();
+  const confirm = useConfirm();
   const [remembered, setRemembered] = useState<Record<string, RememberedDevice>>({});
   const [nickname, setNickname] = useState("");
   const [bundledFw, setBundledFw] = useState("");
@@ -41,16 +45,19 @@ export function DevicesPage({ onConnected }: { onConnected: () => void }) {
     if (!hello) return;
     await rememberDevice(hello.uid, { name: nickname.trim() });
     await refreshRemembered();
+    toast.success("Nickname saved");
   }
 
   async function updateFirmware() {
     if (!hello || !drive) return;
-    const ok = await ask(
-      `Update the device firmware from v${hello.fw} to v${bundledFw}?\n\n` +
+    const ok = await confirm({
+      title: "Update firmware",
+      message:
+        `Update the device firmware from v${hello.fw} to v${bundledFw}?\n\n` +
         "Your key assignments, macros and config stay untouched. " +
         "The keypad restarts and reconnects automatically.",
-      { title: "Update firmware", kind: "info" },
-    );
+      confirmLabel: "Update",
+    });
     if (!ok) return;
     setUpdating(true);
     try {
@@ -58,13 +65,12 @@ export function DevicesPage({ onConnected }: { onConnected: () => void }) {
       // New firmware supports {"t":"reset"}; older ones auto-reload code.py,
       // which is enough when boot.py didn't change.
       await send({ t: "reset" }).catch(() => {});
-      await message(
-        `Firmware updated (${files.length} files written).\n` +
-          "The keypad is restarting — it will reconnect in a few seconds.",
-        { title: "Firmware updated", kind: "info" },
+      toast.success(
+        `Firmware updated (${files.length} files written)`,
+        "The keypad is restarting — it will reconnect in a few seconds.",
       );
     } catch (e) {
-      await message(`Firmware update failed:\n${e}`, { title: "Firmware update", kind: "error" });
+      toast.error("Firmware update failed", String(e));
     } finally {
       setUpdating(false);
     }
@@ -80,7 +86,7 @@ export function DevicesPage({ onConnected }: { onConnected: () => void }) {
   );
 
   return (
-    <div className="flex flex-col gap-4 max-w-2xl">
+    <div className="flex flex-col gap-4 max-w-3xl mx-auto w-full">
       <Card
         title="Connected"
         actions={
@@ -94,8 +100,8 @@ export function DevicesPage({ onConnected }: { onConnected: () => void }) {
         {port && hello ? (
           <div className="flex flex-col gap-3">
             <div className="flex items-center gap-3">
-              <span className="w-3 h-3 rounded-full bg-green-400 animate-pulse" />
-              <span className="text-lg font-semibold text-slate-100">
+              <span className="w-3 h-3 rounded-full bg-success animate-pulse" />
+              <span className="text-lg font-semibold text-fg">
                 {displayName(remembered[hello.uid]?.name, hello.uid)}
               </span>
               <Badge tone="green">USB · connected</Badge>
@@ -110,52 +116,58 @@ export function DevicesPage({ onConnected }: { onConnected: () => void }) {
               </Field>
               <Button onClick={() => void saveNickname()}>Save name</Button>
             </div>
-            <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-sm text-slate-400">
+            <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-sm text-fg-muted">
               <span>Firmware</span>
-              <span className="text-slate-200">
+              <span className="text-fg">
                 v{hello.fw}
                 {fwOutdated && <Badge tone="amber"> update available</Badge>}
               </span>
               <span>Keys</span>
-              <span className="text-slate-200">{hello.key_count}</span>
+              <span className="text-fg">{hello.key_count}</span>
               <span>Serial port</span>
-              <span className="text-slate-200 font-mono text-xs">{port}</span>
+              <span className="text-fg font-mono text-xs">{port}</span>
               <span>USB drive</span>
-              <span className="text-slate-200 font-mono text-xs">
+              <span className="text-fg font-mono text-xs">
                 {drive ? drive.path : "not found"}
               </span>
               <span>Board UID</span>
-              <span className="text-slate-200 font-mono text-xs">{hello.uid}</span>
+              <span className="text-fg font-mono text-xs">{hello.uid}</span>
             </div>
             {fwOutdated && (
-              <div className="flex items-center gap-3 bg-amber-900/20 border border-amber-800 rounded-lg px-3 py-2">
-                <span className="text-sm text-amber-200">
+              <div className="flex items-center gap-3 bg-warning-bg border border-warning-line rounded-lg px-3 py-2">
+                <span className="text-sm text-fg">
                   This app ships firmware v{bundledFw}; the device runs v{hello.fw}.
                 </span>
-                <Button variant="primary" onClick={() => void updateFirmware()} disabled={updating || !drive}>
+                <Button
+                  variant="primary"
+                  onClick={() => void updateFirmware()}
+                  disabled={!drive}
+                  loading={updating}
+                >
                   {updating ? "Updating…" : "Update firmware"}
                 </Button>
               </div>
             )}
           </div>
         ) : (
-          <p className="text-slate-400 text-sm">
-            No device connected. Plug in your MKYADA keypad — it connects automatically when it's
-            the only one.
-          </p>
+          <EmptyState
+            icon={<Usb size={28} />}
+            title="No keypad connected"
+            description="Plug in your MKYADA keypad — it connects automatically when it's the only one."
+          />
         )}
       </Card>
 
       <Card
         title="Plugged in — ready to connect"
         actions={
-          <Button onClick={() => void scan()} disabled={scanning}>
+          <Button onClick={() => void scan()} loading={scanning}>
             {scanning ? "Scanning…" : "Scan"}
           </Button>
         }
       >
         {pluggedIn.length === 0 ? (
-          <p className="text-slate-500 text-sm">
+          <p className="text-fg-faint text-sm">
             {port ? "No other keypads plugged in." : scanning ? "Looking for keypads…" : "No keypads found on USB."}
           </p>
         ) : (
@@ -166,12 +178,12 @@ export function DevicesPage({ onConnected }: { onConnected: () => void }) {
                 className="flex items-center justify-between bg-panel2 border-2 border-accent/50 rounded-lg px-3 py-2"
               >
                 <div className="flex items-center gap-3">
-                  <span className="w-2.5 h-2.5 rounded-full bg-sky-400" />
+                  <span className="w-2.5 h-2.5 rounded-full bg-accent" />
                   <div className="flex flex-col">
-                    <span className="text-sm font-semibold text-slate-100">
+                    <span className="text-sm font-semibold text-fg">
                       {displayName(remembered[d.hello.uid]?.name, d.hello.uid)}
                     </span>
-                    <span className="text-xs text-slate-500">
+                    <span className="text-xs text-fg-faint">
                       USB · fw v{d.hello.fw} · {d.hello.key_count} keys · {d.port}
                     </span>
                   </div>
@@ -196,9 +208,9 @@ export function DevicesPage({ onConnected }: { onConnected: () => void }) {
           <ul className="flex flex-col gap-1 opacity-60">
             {offline.map((r) => (
               <li key={r.uid} className="flex items-center gap-3 px-3 py-1.5 text-sm">
-                <span className="w-2.5 h-2.5 rounded-full bg-slate-600" />
-                <span className="text-slate-300">{displayName(r.name, r.uid)}</span>
-                <span className="text-xs text-slate-500">
+                <span className="w-2.5 h-2.5 rounded-full bg-fg-faint" />
+                <span className="text-fg">{displayName(r.name, r.uid)}</span>
+                <span className="text-xs text-fg-faint">
                   last seen {new Date(r.lastSeen).toLocaleString()}
                   {r.fw && ` · fw v${r.fw}`}
                 </span>

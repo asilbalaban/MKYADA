@@ -2,8 +2,9 @@
 // save. Every assignment is compiled to a macro JSON on the device drive.
 
 import { useCallback, useEffect, useState } from "react";
-import { message } from "@tauri-apps/plugin-dialog";
+import { Play, Usb } from "lucide-react";
 import { useDevice } from "../lib/device";
+import { useNav } from "../lib/nav";
 import { ipc } from "../lib/ipc";
 import type { Assignment, DeviceConfig, MacroFile } from "../lib/types";
 import { layerLabel } from "../lib/types";
@@ -13,17 +14,21 @@ import {
   macroFileName,
   parseAssignment,
 } from "../lib/macro-model";
-import { Button, Card } from "../components/ui";
+import { Button, Card, EmptyState, Spinner } from "../components/ui";
+import { useToast } from "../components/toast";
 import { Keypad } from "../components/Keypad";
 import { AssignmentEditor } from "../components/AssignmentEditor";
 
 export function KeysPage() {
   const { hello, drive, send, onMsg } = useDevice();
+  const nav = useNav();
+  const toast = useToast();
   const [cfg, setCfg] = useState<DeviceConfig | null>(null);
   const [layer, setLayer] = useState(0);
   const [selected, setSelected] = useState<number | null>(null);
   const [assignments, setAssignments] = useState<Map<string, Assignment>>(new Map());
   const [draft, setDraft] = useState<Assignment | null>(null);
+  const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState("");
 
   const slotKey = (keyNo: number, layerIdx: number) => `${keyNo}:${layerIdx}`;
@@ -79,15 +84,37 @@ export function KeysPage() {
     [onMsg],
   );
 
-  if (!hello) return <p className="text-slate-400">Connect a device first.</p>;
+  if (!hello)
+    return (
+      <Card>
+        <EmptyState
+          icon={<Usb size={28} />}
+          title="No keypad connected"
+          description="Connect your MKYADA keypad to assign what each key does."
+          action={
+            <Button variant="primary" onClick={() => nav("devices")}>
+              Go to Devices
+            </Button>
+          }
+        />
+      </Card>
+    );
   if (!drive)
     return (
-      <p className="text-amber-400 text-sm">
-        Connected, but no CIRCUITPY drive was found — assignments can't be saved. Replug the
-        board and make sure its USB drive mounts.
-      </p>
+      <Card>
+        <EmptyState
+          icon={<Usb size={28} />}
+          title="Keypad connected, but its USB drive wasn't found"
+          description="Assignments are saved as files on the keypad's USB drive (CIRCUITPY). Unplug and replug the keypad so the drive mounts."
+        />
+      </Card>
     );
-  if (!cfg) return <p className="text-slate-400">Loading…</p>;
+  if (!cfg)
+    return (
+      <div className="flex items-center gap-2 text-fg-muted text-sm p-4">
+        <Spinner /> Loading key assignments…
+      </div>
+    );
 
   const layers = cfg.layer_key ? cfg.layer_count : 1;
   const current = selected !== null ? assignments.get(slotKey(selected, layer)) : undefined;
@@ -96,6 +123,7 @@ export function KeysPage() {
     if (selected === null || !draft || !cfg || !drive) return;
     const file = macroFileName(selected, layer);
     const macro = compileAssignment(draft);
+    setSaving(true);
     try {
       if (macro) {
         macro.screen = cfg.screen;
@@ -111,24 +139,24 @@ export function KeysPage() {
         }
       }
     } catch (e) {
-      await message(
-        `Could not write to the device:\n${e}\n\nCheck that the CIRCUITPY drive is mounted and writable (unplug/replug the keypad if needed).`,
-        { title: "Save failed", kind: "error" },
+      toast.error(
+        "Could not save to the keypad",
+        `${e}\n\nCheck that the keypad's USB drive is mounted and writable (unplug/replug if needed).`,
       );
+      setSaving(false);
       return;
     }
+    setSaving(false);
     const next = new Map(assignments);
     if (macro && draft.kind !== "none") next.set(slotKey(selected, layer), draft);
     else next.delete(slotKey(selected, layer));
     setAssignments(next);
     setDraft(null);
-    setStatus(macro ? `Saved ${file}` : `Cleared ${file}`);
-    await message(
-      macro
-        ? `Saved to the device ✓\n\nKey ${selected} → ${file}\nPress the key (or ▶ Test) to try it.`
-        : `Cleared key ${selected} (${file} removed).`,
-      { title: macro ? "Saved to device" : "Assignment cleared", kind: "info" },
-    );
+    if (macro) {
+      toast.success(`Key ${selected} saved to the keypad`, "Press the key (or ▶ Test) to try it.");
+    } else {
+      toast.info(`Key ${selected} cleared`);
+    }
   }
 
   async function testPlay(keyNo: number) {
@@ -175,7 +203,7 @@ export function KeysPage() {
           }}
           assignments={visibleAssignments}
         />
-        <p className="text-xs text-slate-500 mt-3">
+        <p className="text-xs text-fg-faint mt-3">
           Press physical keys to test wiring — they light up live.
           {cfg.layer_key && ` Key ${cfg.layer_key} is the layer switch.`}
         </p>
@@ -190,12 +218,14 @@ export function KeysPage() {
         actions={
           selected !== null &&
           current && (
-            <Button onClick={() => void testPlay(selected)}>▶ Test</Button>
+            <Button onClick={() => void testPlay(selected)}>
+              <Play size={14} aria-hidden /> Test
+            </Button>
           )
         }
       >
         {selected === null ? (
-          <p className="text-slate-500 text-sm">
+          <p className="text-fg-faint text-sm">
             Click a key on the left to configure what it does.
           </p>
         ) : (
@@ -208,13 +238,13 @@ export function KeysPage() {
               <Button onClick={() => setDraft(null)} disabled={!draft}>
                 Revert
               </Button>
-              <Button variant="primary" onClick={() => void saveDraft()} disabled={!draft}>
-                Save to device
+              <Button variant="primary" onClick={() => void saveDraft()} disabled={!draft} loading={saving}>
+                Save to keypad
               </Button>
             </div>
           </div>
         )}
-        {status && <p className="text-xs text-slate-500 mt-3">{status}</p>}
+        {status && <p className="text-xs text-fg-faint mt-3">{status}</p>}
       </Card>
     </div>
   );
