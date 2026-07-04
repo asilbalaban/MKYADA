@@ -5,7 +5,7 @@ import { useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { readTextFile } from "../lib/fs";
 import type { Assignment, MacroFile } from "../lib/types";
-import { MEDIA_USAGES, MODIFIERS, SPECIAL_KEYS, migrateMacro } from "../lib/macro-model";
+import { MEDIA_USAGES, MODIFIERS, SPECIAL_KEYS, migrateMacro, modifierDisplay } from "../lib/macro-model";
 import { Button, Field, Input, Select } from "./ui";
 
 const KINDS: { value: Assignment["kind"]; label: string; launchOnly?: boolean }[] = [
@@ -94,6 +94,7 @@ export function AssignmentEditor({
                 <Button
                   key={m}
                   variant={value.mods.includes(m) ? "primary" : "default"}
+                  title={m === "WIN" ? "Windows key / macOS Command — same key on the keypad" : undefined}
                   onClick={() =>
                     onChange({
                       ...value,
@@ -103,7 +104,7 @@ export function AssignmentEditor({
                     })
                   }
                 >
-                  {m}
+                  {modifierDisplay(m)}
                 </Button>
               ))}
             </div>

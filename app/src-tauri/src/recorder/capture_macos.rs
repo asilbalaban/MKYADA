@@ -12,12 +12,14 @@
 use serde_json::json;
 use std::ffi::c_void;
 use std::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
-use std::sync::{Mutex, Once, OnceLock};
+use std::sync::{Mutex, OnceLock};
 use std::time::Instant;
 use tauri::{AppHandle, Emitter};
 
 static CAPTURING: AtomicBool = AtomicBool::new(false);
-static LISTENER: Once = Once::new();
+/// Tap thread alive? Unlike a Once, this allows a retry after a failed tap
+/// creation (e.g. Input Monitoring granted after the first attempt).
+static RUNNING: AtomicBool = AtomicBool::new(false);
 static APP: OnceLock<AppHandle> = OnceLock::new();
 static TAP_PORT: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
 const MOVE_SAMPLE_MS: u128 = 15;
@@ -258,43 +260,56 @@ extern "C" fn tap_callback(
 
 pub fn ensure_listener(app: AppHandle) {
     let _ = APP.set(app);
-    LISTENER.call_once(|| {
-        std::thread::spawn(|| {
-            *STATE.lock().unwrap() = Some(CaptureState {
-                last: Instant::now(),
-                last_move: Instant::now(),
-                mouse_x: 0,
-                mouse_y: 0,
-                mods_down: Vec::new(),
-            });
-            let mask: u64 = [
-                KEY_DOWN, KEY_UP, FLAGS_CHANGED, LEFT_DOWN, LEFT_UP, RIGHT_DOWN,
-                RIGHT_UP, MOUSE_MOVED, LEFT_DRAGGED, RIGHT_DRAGGED, SCROLL_WHEEL,
-                OTHER_DOWN, OTHER_UP, OTHER_DRAGGED,
-            ]
-            .iter()
-            .fold(0u64, |m, &t| m | (1u64 << t));
-            unsafe {
-                let port = CGEventTapCreate(
-                    SESSION_TAP,
-                    HEAD_INSERT,
-                    LISTEN_ONLY,
-                    mask,
-                    tap_callback,
-                    std::ptr::null_mut(),
-                );
-                if port.is_null() {
-                    // No Input Monitoring permission (the UI surfaces this).
-                    eprintln!("CGEventTapCreate failed — missing Input Monitoring permission?");
-                    return;
-                }
-                TAP_PORT.store(port, Ordering::Relaxed);
-                let source = CFMachPortCreateRunLoopSource(std::ptr::null(), port, 0);
-                CFRunLoopAddSource(CFRunLoopGetCurrent(), source, kCFRunLoopCommonModes);
-                CGEventTapEnable(port, true);
-                CFRunLoopRun();
-            }
+    // Already have a live tap thread? Nothing to do. A previous FAILED attempt
+    // cleared RUNNING, so granting the permission and trying again works
+    // without restarting the app (though macOS usually applies a fresh
+    // Input Monitoring grant only after relaunch).
+    if RUNNING.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    std::thread::spawn(|| {
+        *STATE.lock().unwrap() = Some(CaptureState {
+            last: Instant::now(),
+            last_move: Instant::now(),
+            mouse_x: 0,
+            mouse_y: 0,
+            mods_down: Vec::new(),
         });
+        let mask: u64 = [
+            KEY_DOWN, KEY_UP, FLAGS_CHANGED, LEFT_DOWN, LEFT_UP, RIGHT_DOWN,
+            RIGHT_UP, MOUSE_MOVED, LEFT_DRAGGED, RIGHT_DRAGGED, SCROLL_WHEEL,
+            OTHER_DOWN, OTHER_UP, OTHER_DRAGGED,
+        ]
+        .iter()
+        .fold(0u64, |m, &t| m | (1u64 << t));
+        unsafe {
+            let port = CGEventTapCreate(
+                SESSION_TAP,
+                HEAD_INSERT,
+                LISTEN_ONLY,
+                mask,
+                tap_callback,
+                std::ptr::null_mut(),
+            );
+            if port.is_null() {
+                RUNNING.store(false, Ordering::SeqCst);
+                if let Some(app) = APP.get() {
+                    let _ = app.emit(
+                        "record:error",
+                        "Could not start global capture — macOS denied Input Monitoring \
+                         for this app version. Grant it in System Settings, then restart MKYADA.",
+                    );
+                }
+                return;
+            }
+            TAP_PORT.store(port, Ordering::Relaxed);
+            let source = CFMachPortCreateRunLoopSource(std::ptr::null(), port, 0);
+            CFRunLoopAddSource(CFRunLoopGetCurrent(), source, kCFRunLoopCommonModes);
+            CGEventTapEnable(port, true);
+            CFRunLoopRun();
+            // Run loop ended (shouldn't happen): allow a future retry.
+            RUNNING.store(false, Ordering::SeqCst);
+        }
     });
 }
 

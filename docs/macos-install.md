@@ -41,5 +41,19 @@ Notes:
   through the device — hardware HID playback comes from the board itself.
 - After flipping a toggle in System Settings, quit and reopen MKYADA if the
   status doesn't turn green by itself.
-- macOS ties permissions to the app bundle: after updating to a new version
-  you may need to re-approve Input Monitoring.
+
+### Permission shows "on" but the app still says DENIED
+
+The app is unsigned, so **every update gets a new code signature** and macOS
+ties permissions to the old one — the toggle you see belongs to the previous
+version and does nothing. Fix:
+
+1. System Settings → Privacy & Security → **Input Monitoring** (and
+   **Accessibility**),
+2. select **MKYADA** in the list and **remove it with the “−” button**
+   (toggling off/on is often not enough),
+3. restart MKYADA and grant again when it asks.
+
+The app detects this situation and shows the same steps with a red banner.
+This will keep happening after updates until the project ships Apple-notarized
+builds (requires a paid Apple Developer account).

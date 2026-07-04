@@ -26,6 +26,19 @@ const MOD_TO_LABEL: Record<string, string> = {
   WIN: "cmd_l",
 };
 
+const IS_MAC = navigator.platform.toUpperCase().includes("MAC");
+
+/**
+ * Display name for a canonical modifier. Stored mods stay canonical
+ * (CTRL/SHIFT/ALT/WIN) so macro JSONs are portable; only the UI adapts —
+ * the HID "GUI" modifier is the Windows key on Windows and ⌘ on macOS,
+ * and ALT is ⌥ Option on macOS.
+ */
+export function modifierDisplay(mod: string): string {
+  if (!IS_MAC) return mod;
+  return { CTRL: "⌃ CTRL", SHIFT: "⇧ SHIFT", ALT: "⌥ OPT", WIN: "⌘ CMD" }[mod] ?? mod;
+}
+
 // US-layout: shifted symbol -> base key
 const SHIFT_MAP: Record<string, string> = {
   "!": "1", "@": "2", "#": "3", "$": "4", "%": "5", "^": "6", "&": "7",
@@ -160,7 +173,7 @@ export function describeAssignment(a: Assignment): string {
     case "keystroke":
       return a.key.toUpperCase();
     case "combo":
-      return [...a.mods, a.key.toUpperCase()].join(" + ");
+      return [...a.mods.map(modifierDisplay), a.key.toUpperCase()].join(" + ");
     case "text":
       return `Type "${a.text.length > 18 ? a.text.slice(0, 18) + "…" : a.text}"`;
     case "media":

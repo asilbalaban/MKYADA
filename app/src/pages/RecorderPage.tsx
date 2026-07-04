@@ -14,11 +14,12 @@ import { captureScreen, thinForDevice } from "../lib/recorder-model";
 import { macroFileName, migrateMacro } from "../lib/macro-model";
 import { Badge, Button, Card, Field, Input, Select } from "../components/ui";
 import { MacroEditor } from "../components/MacroEditor";
-import { usePermissions } from "../components/Permissions";
+import { usePermissions, useRecordError } from "../components/Permissions";
 
 export function RecorderPage() {
   const { hello, drive, send } = useDevice();
   const { status: perms } = usePermissions();
+  const captureError = useRecordError();
   const canRecord = !perms || perms.platform !== "macos" || perms.input_monitoring === "granted";
   const [recording, setRecording] = useState(false);
   const [count, setCount] = useState(0);
@@ -166,6 +167,9 @@ export function RecorderPage() {
           </p>
         </div>
         {status && <p className="text-xs text-slate-400 mt-2">{status}</p>}
+        {captureError && (
+          <p className="text-xs text-red-400 mt-2">⚠ {captureError}</p>
+        )}
       </Card>
 
       {macro && (

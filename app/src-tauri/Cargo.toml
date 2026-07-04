@@ -1,6 +1,6 @@
 [package]
 name = "mkyada"
-version = "0.1.4"
+version = "0.1.5"
 description = "MKYADA — Macro Keyboard You Always Dream About"
 authors = ["Asil Balaban"]
 license = "MIT"

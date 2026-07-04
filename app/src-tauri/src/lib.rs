@@ -126,6 +126,13 @@ fn permissions_request(kind: String) {
     permissions::request(&kind);
 }
 
+/// Relaunch the app — needed on macOS for a fresh Input Monitoring grant to
+/// take effect.
+#[tauri::command]
+fn app_restart(app: AppHandle) {
+    app.restart();
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -156,6 +163,7 @@ pub fn run() {
             foreground_start,
             permissions_status,
             permissions_request,
+            app_restart,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
