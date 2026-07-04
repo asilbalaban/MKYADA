@@ -1,0 +1,22 @@
+{
+  "format": "mkyada-macro",
+  "version": 2,
+  "name": "Demo: type mkyada",
+  "kind": "text",
+  "text": "mkyada",
+  "settings": { "speed": 1.0, "repeat": 1 },
+  "events": [
+    { "delay": 0,  "type": "key", "action": "down", "key": "m" },
+    { "delay": 30, "type": "key", "action": "up",   "key": "m" },
+    { "delay": 30, "type": "key", "action": "down", "key": "k" },
+    { "delay": 30, "type": "key", "action": "up",   "key": "k" },
+    { "delay": 30, "type": "key", "action": "down", "key": "y" },
+    { "delay": 30, "type": "key", "action": "up",   "key": "y" },
+    { "delay": 30, "type": "key", "action": "down", "key": "a" },
+    { "delay": 30, "type": "key", "action": "up",   "key": "a" },
+    { "delay": 30, "type": "key", "action": "down", "key": "d" },
+    { "delay": 30, "type": "key", "action": "up",   "key": "d" },
+    { "delay": 30, "type": "key", "action": "down", "key": "a" },
+    { "delay": 30, "type": "key", "action": "up",   "key": "a" }
+  ]
+}
