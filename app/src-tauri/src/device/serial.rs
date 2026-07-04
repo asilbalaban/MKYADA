@@ -16,6 +16,9 @@ use tauri::{AppHandle, Emitter};
 
 const PRODUCT_MARKER: &str = "MKYADA";
 const PROBE_TIMEOUT: Duration = Duration::from_millis(900);
+/// USB vendor IDs CircuitPython boards ship with (Adafruit, Raspberry Pi) —
+/// used to order the probe fallback, not to exclude anything.
+const KNOWN_VIDS: &[u16] = &[0x239A, 0x2E8A];
 
 #[derive(Serialize, Clone)]
 pub struct DeviceInfo {
@@ -39,26 +42,51 @@ impl DeviceManager {
 }
 
 fn open(port: &str) -> Result<Box<dyn SerialPort>, String> {
-    serialport::new(port, 115_200)
+    let mut sp = serialport::new(port, 115_200)
         .timeout(Duration::from_millis(100))
         .open()
-        .map_err(|e| format!("{port}: {e}"))
+        .map_err(|e| format!("{port}: {e}"))?;
+    // CDC hosts conventionally assert DTR; some stacks hold data until it is.
+    let _ = sp.write_data_terminal_ready(true);
+    Ok(sp)
 }
 
-/// Ports whose USB product string mentions MKYADA.
+/// Ports worth probing for a keypad.
+///
+/// Preferred: USB product string mentions MKYADA (macOS/Linux report the real
+/// string). Windows instead reports the usbser.sys friendly name ("USB Serial
+/// Device"), so when nothing matches by name we fall back to EVERY USB serial
+/// port — known CircuitPython vendor IDs first. probe() keeps only ports that
+/// actually answer `identify` with `hello`, so the fallback stays safe.
 pub fn candidate_ports() -> Vec<String> {
-    let mut out = Vec::new();
-    if let Ok(ports) = serialport::available_ports() {
-        for p in ports {
-            if let SerialPortType::UsbPort(info) = &p.port_type {
-                let product = info.product.as_deref().unwrap_or("");
-                if product.contains(PRODUCT_MARKER) {
-                    out.push(p.port_name.clone());
-                }
-            }
-        }
+    let Ok(ports) = serialport::available_ports() else {
+        return Vec::new();
+    };
+    let usb: Vec<(String, u16, String)> = ports
+        .into_iter()
+        .filter_map(|p| match p.port_type {
+            SerialPortType::UsbPort(info) => Some((
+                p.port_name,
+                info.vid,
+                info.product.unwrap_or_default(),
+            )),
+            _ => None,
+        })
+        .collect();
+
+    let by_name: Vec<String> = usb
+        .iter()
+        .filter(|(_, _, product)| product.contains(PRODUCT_MARKER))
+        .map(|(name, _, _)| name.clone())
+        .collect();
+    if !by_name.is_empty() {
+        return by_name;
     }
-    out
+
+    let (mut known, rest): (Vec<_>, Vec<_>) =
+        usb.into_iter().partition(|(_, vid, _)| KNOWN_VIDS.contains(vid));
+    known.extend(rest);
+    known.into_iter().map(|(name, _, _)| name).collect()
 }
 
 /// Send `identify` and wait briefly for a `hello`. Filters out the CDC

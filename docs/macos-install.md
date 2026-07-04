@@ -9,12 +9,15 @@
 
 ## First launch (unsigned app)
 
-The app is not notarized with Apple (no paid developer certificate), so the
-first launch needs one extra step:
+The app is not notarized with Apple (no paid developer certificate), so on
+first launch macOS shows *"Apple could not verify MKYADA is free of malware"*
+with only **Move to Trash / Done** buttons. Don't move it to trash — pick one
+of these instead:
 
-- **Right-click** MKYADA.app → **Open** → **Open** in the dialog,
-- or, if macOS says the app "is damaged / can't be checked", clear the
-  quarantine flag once:
+- Click **Done**, then open **System Settings → Privacy & Security**, scroll
+  down to *"MKYADA was blocked…"* and click **Open Anyway** (recent macOS
+  versions removed the old right-click → Open shortcut), **or**
+- clear the quarantine flag once in Terminal:
 
   ```sh
   xattr -cr /Applications/MKYADA.app
