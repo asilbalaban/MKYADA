@@ -230,6 +230,42 @@ export function AssignmentEditor({
         </div>
       )}
 
+      {value.kind !== "none" && value.kind !== "launch" && (
+        <div className="flex flex-wrap gap-3 border-t border-line pt-3">
+          <Field label="Press again while playing">
+            <Select
+              value={value.behavior?.on_repress ?? "stop"}
+              onChange={(e) =>
+                onChange({
+                  ...value,
+                  behavior: {
+                    ...value.behavior,
+                    on_repress: e.target.value as "stop" | "restart",
+                  },
+                })
+              }
+            >
+              <option value="stop">Stop the macro</option>
+              <option value="restart">Restart it from the top</option>
+            </Select>
+          </Field>
+          <Field label="While the key is held down">
+            <Select
+              value={value.behavior?.hold_repeat ? "repeat" : "once"}
+              onChange={(e) =>
+                onChange({
+                  ...value,
+                  behavior: { ...value.behavior, hold_repeat: e.target.value === "repeat" },
+                })
+              }
+            >
+              <option value="once">Play once</option>
+              <option value="repeat">Repeat — like holding a letter key</option>
+            </Select>
+          </Field>
+        </div>
+      )}
+
       {importError && <p className="text-danger text-xs">{importError}</p>}
     </div>
   );

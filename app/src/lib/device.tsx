@@ -20,6 +20,8 @@ interface DeviceState {
   port: string | null;
   hello: Hello | null;
   drive: DriveInfo | null;
+  /** active layer letter ("a", "b", …) as reported live by the device */
+  layer: string;
   scan: () => Promise<DeviceInfo[]>;
   connect: (info: DeviceInfo) => Promise<void>;
   disconnect: () => Promise<void>;
@@ -38,14 +40,22 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
   const [port, setPort] = useState<string | null>(null);
   const [hello, setHello] = useState<Hello | null>(null);
   const [drive, setDrive] = useState<DriveInfo | null>(null);
+  const [layer, setLayer] = useState("a");
   const btnSubs = useRef(new Set<(e: BtnEvent) => void>());
   const msgSubs = useRef(new Set<(m: Record<string, unknown>) => void>());
 
   useEffect(() => {
     const un1 = onDeviceMsg((msg) => {
       msgSubs.current.forEach((cb) => cb(msg));
-      if (msg.t === "hello") setHello(msg as unknown as Hello);
-      if (msg.t === "btn") btnSubs.current.forEach((cb) => cb(msg as unknown as BtnEvent));
+      if (msg.t === "hello") {
+        setHello(msg as unknown as Hello);
+        setLayer(String((msg as { layer?: string }).layer ?? "a"));
+      }
+      if (msg.t === "layer") setLayer(String((msg as { layer?: string }).layer ?? "a"));
+      if (msg.t === "btn") {
+        setLayer(String((msg as unknown as BtnEvent).layer ?? "a"));
+        btnSubs.current.forEach((cb) => cb(msg as unknown as BtnEvent));
+      }
     });
     const un2 = onDeviceDisconnected(() => {
       setPort(null);
@@ -147,6 +157,7 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
         port,
         hello,
         drive,
+        layer,
         scan,
         connect,
         disconnect,

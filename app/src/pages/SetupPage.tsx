@@ -120,8 +120,14 @@ export function SetupPage({ onDone }: { onDone: () => void }) {
             <span>Layers</span>
             <span className="text-fg">
               {cfg.layer_key
-                ? `Key ${cfg.layer_key} switches ${cfg.layer_count} layers (${cfg.layer_mode})`
+                ? `Key ${cfg.layer_key} cycles ${cfg.layer_count} layers`
                 : "None — every key is a macro"}
+            </span>
+            <span>While a macro plays</span>
+            <span className="text-fg">
+              {cfg.busy_other === "switch"
+                ? "Other keys interrupt and take over"
+                : "Other keys are ignored"}
             </span>
             <span>Macro slots</span>
             <span className="text-fg">{macroSlots(cfg)}</span>
@@ -217,32 +223,31 @@ export function SetupPage({ onDone }: { onDone: () => void }) {
             </Field>
 
             {cfg.layer_key && (
-              <div className="grid grid-cols-2 gap-3">
-                <Field label="Layers">
-                  <Select
-                    value={cfg.layer_count}
-                    onChange={(e) => setCfg({ ...cfg, layer_count: Number(e.target.value) })}
-                  >
-                    {[2, 3, 4].map((n) => (
-                      <option key={n} value={n}>
-                        {n}
-                      </option>
-                    ))}
-                  </Select>
-                </Field>
-                <Field label="Mode">
-                  <Select
-                    value={cfg.layer_mode}
-                    onChange={(e) =>
-                      setCfg({ ...cfg, layer_mode: e.target.value as "toggle" | "hold" })
-                    }
-                  >
-                    <option value="toggle">Toggle — press cycles A → B → …</option>
-                    <option value="hold">Hold — layer B while held (2 layers)</option>
-                  </Select>
-                </Field>
-              </div>
+              <Field label="Layers — pressing the layer key cycles A → B → …">
+                <Select
+                  value={cfg.layer_count}
+                  onChange={(e) => setCfg({ ...cfg, layer_count: Number(e.target.value) })}
+                >
+                  {[2, 3, 4].map((n) => (
+                    <option key={n} value={n}>
+                      {n}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
             )}
+
+            <Field label="If another macro key is pressed while one is playing">
+              <Select
+                value={cfg.busy_other ?? "ignore"}
+                onChange={(e) =>
+                  setCfg({ ...cfg, busy_other: e.target.value as "ignore" | "switch" })
+                }
+              >
+                <option value="ignore">Ignore it — finish the current macro</option>
+                <option value="switch">Stop it and play the new key's macro</option>
+              </Select>
+            </Field>
 
             <div className="grid grid-cols-2 gap-3">
               <Field label="Screen width (mouse macros)">

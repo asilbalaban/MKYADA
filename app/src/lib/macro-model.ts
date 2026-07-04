@@ -162,49 +162,70 @@ export function compileAssignment(a: Assignment, name?: string): MacroFile | nul
     version: 2,
     created: new Date().toISOString(),
   };
-  switch (a.kind) {
-    case "none":
-      return null;
-    case "keystroke":
-      return { ...base, name: name ?? a.key, kind: "keystroke", combo: { mods: [], key: a.key }, events: keyTap(a.key, 0) };
-    case "combo":
-      return {
-        ...base,
-        name: name ?? [...a.mods, a.key.toUpperCase()].join("+"),
-        kind: "combo",
-        combo: { mods: a.mods, key: a.key },
-        events: comboEvents(a.mods, a.key),
-      };
-    case "text":
-      return { ...base, name: name ?? `Type: ${a.text.slice(0, 24)}`, kind: "text", text: a.text, events: textEvents(a.text) };
-    case "media":
-      return {
-        ...base,
-        name: name ?? a.usage,
-        kind: "media",
-        media: a.usage,
-        events: [{ delay: 0, type: "consumer", usage: a.usage }],
-      };
-    case "recorded":
-      return { ...migrateMacro(a.macro), name: name ?? a.name };
-    case "launch":
-      return null; // host-mode only, never written to the device
+  const compiled = ((): MacroFile | null => {
+    switch (a.kind) {
+      case "none":
+        return null;
+      case "keystroke":
+        return { ...base, name: name ?? a.key, kind: "keystroke", combo: { mods: [], key: a.key }, events: keyTap(a.key, 0) };
+      case "combo":
+        return {
+          ...base,
+          name: name ?? [...a.mods, a.key.toUpperCase()].join("+"),
+          kind: "combo",
+          combo: { mods: a.mods, key: a.key },
+          events: comboEvents(a.mods, a.key),
+        };
+      case "text":
+        return { ...base, name: name ?? `Type: ${a.text.slice(0, 24)}`, kind: "text", text: a.text, events: textEvents(a.text) };
+      case "media":
+        return {
+          ...base,
+          name: name ?? a.usage,
+          kind: "media",
+          media: a.usage,
+          events: [{ delay: 0, type: "consumer", usage: a.usage }],
+        };
+      case "recorded":
+        return { ...migrateMacro(a.macro), name: name ?? a.name };
+      case "launch":
+        return null; // host-mode only, never written to the device
+    }
+  })();
+  // behavior options ride along in settings, whatever the kind
+  if (compiled && a.behavior) {
+    const { on_repress, hold_repeat } = a.behavior;
+    compiled.settings = {
+      ...compiled.settings,
+      ...(on_repress && on_repress !== "stop" ? { on_repress } : {}),
+      ...(hold_repeat ? { hold_repeat } : {}),
+    };
   }
+  return compiled;
 }
 
 /** Parse a macro file back into an editable assignment via its kind metadata. */
 export function parseAssignment(m: MacroFile): Assignment {
+  const behavior =
+    m.settings?.on_repress === "restart" || m.settings?.hold_repeat
+      ? {
+          behavior: {
+            ...(m.settings?.on_repress ? { on_repress: m.settings.on_repress } : {}),
+            ...(m.settings?.hold_repeat ? { hold_repeat: true } : {}),
+          },
+        }
+      : {};
   switch (m.kind) {
     case "keystroke":
-      return { kind: "keystroke", key: m.combo?.key ?? "" };
+      return { kind: "keystroke", key: m.combo?.key ?? "", ...behavior };
     case "combo":
-      return { kind: "combo", mods: m.combo?.mods ?? [], key: m.combo?.key ?? "" };
+      return { kind: "combo", mods: m.combo?.mods ?? [], key: m.combo?.key ?? "", ...behavior };
     case "text":
-      return { kind: "text", text: m.text ?? "" };
+      return { kind: "text", text: m.text ?? "", ...behavior };
     case "media":
-      return { kind: "media", usage: m.media ?? "" };
+      return { kind: "media", usage: m.media ?? "", ...behavior };
     default:
-      return { kind: "recorded", name: m.name ?? "macro", macro: m };
+      return { kind: "recorded", name: m.name ?? "macro", macro: m, ...behavior };
   }
 }
 
@@ -249,6 +270,7 @@ export function defaultConfig(): DeviceConfig {
     layer_count: 2,
     layer_mode: "toggle",
     key_map: null,
+    busy_other: "ignore",
     screen: { width: screen.width, height: screen.height },
   };
 }

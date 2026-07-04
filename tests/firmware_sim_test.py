@@ -177,22 +177,30 @@ hello = app.hello()
 check("hello uid", hello["uid"] == "0001020304050607")
 check("hello mode", hello["mode"] == "standalone")
 
-# layer toggle via on_edge
+# layer toggle via on_edge (+ every change announces {"t":"layer"} to the app)
 app.config["layer_key"] = 6
 app.config["layer_count"] = 3
+layer_msgs = []
+_orig_send = app.proto.send
+app.proto.send = lambda obj: layer_msgs.append(obj)
 app.on_edge(5, True)
 check("toggle -> layer b", app.layer == 1)
+check("layer announced", layer_msgs[-1] == {"t": "layer", "layer": "b"}, str(layer_msgs))
 app.on_edge(5, True)
 check("toggle -> layer c", app.layer == 2)
 app.on_edge(5, True)
 check("toggle wraps -> a", app.layer == 0)
 
-# hold mode
+# "hold" layer mode was removed — even with it in config, press just cycles
 app.config["layer_mode"] = "hold"
 app.on_edge(5, True)
-check("hold down -> b", app.layer == 1)
+check("hold config still cycles", app.layer == 1)
 app.on_edge(5, False)
-check("hold up -> a", app.layer == 0)
+check("release does nothing", app.layer == 1)
+app.on_edge(5, True)
+app.on_edge(5, True)
+check("back to a", app.layer == 0)
+app.proto.send = _orig_send
 
 # key_map remap: GPIO 0 -> logical key 3
 app.config["layer_key"] = None
@@ -244,6 +252,69 @@ check("btn has phys", any(m.get("t") == "btn" and m.get("phys") == 2 for m in ou
 outbox.clear()
 app.handle_msg({"t": "play", "file": "macros/nope.json"})
 check("err not_found", any(m.get("code") == "not_found" for m in outbox), str(outbox))
+
+# --- playback collision policies + hold-to-repeat ------------------------
+import tempfile
+
+app.handle_msg({"t": "host_leave"})
+app.config["key_map"] = list(range(1, 7))
+app.config["layer_key"] = None
+app.config["busy_other"] = "ignore"
+_orig_scan = app.buttons.scan
+_orig_play = app.engine.play
+
+def macro_file(settings):
+    f = tempfile.NamedTemporaryFile("w", suffix=".json", delete=False)
+    json.dump({"format": "mkyada-macro", "version": 2, "settings": settings,
+               "events": [{"delay": 0, "type": "key", "action": "down", "key": "a"},
+                          {"delay": 0, "type": "key", "action": "up", "key": "a"}]}, f)
+    f.close()
+    return f.name
+
+# on_repress "restart": same key mid-play queues a replay
+path_restart = macro_file({"on_repress": "restart"})
+presses = [[(0, True)]]
+app.buttons.scan = lambda: presses.pop(0) if presses else []
+app.pending_play = None
+app.play_file(path_restart, trigger=0)
+check("restart queues same macro", app.pending_play == (path_restart, 0), str(app.pending_play))
+
+# on_repress default: same key just stops
+path_stop = macro_file({})
+presses = [[(0, True)]]
+app.pending_play = None
+app.play_file(path_stop, trigger=0)
+check("re-press stops by default", app.pending_play is None, str(app.pending_play))
+
+# busy_other "switch": another key mid-play queues that key's macro
+app.config["busy_other"] = "switch"
+presses = [[(2, True)]]
+app.pending_play = None
+app.play_file(path_stop, trigger=0)
+check("switch queues other macro", app.pending_play == ("/macros/key3.json", 2), str(app.pending_play))
+
+# busy_other "ignore" (default): another key does nothing
+app.config["busy_other"] = "ignore"
+presses = [[(2, True)]]
+app.pending_play = None
+app.play_file(path_stop, trigger=0)
+check("ignore keeps playing", app.pending_play is None, str(app.pending_play))
+
+# hold_repeat: replays while the physical key stays down
+path_hold = macro_file({"hold_repeat": True})
+runs = {"n": 0}
+def _fake_play(events, **kw):
+    runs["n"] += 1
+    if runs["n"] >= 3:
+        app.buttons.stable[0] = False
+app.engine.play = _fake_play
+app.buttons.scan = lambda: []
+app.buttons.stable[0] = True
+app.play_file(path_hold, trigger=0)
+check("hold_repeat replays while held", runs["n"] == 3, str(runs))
+
+app.buttons.scan = _orig_scan
+app.engine.play = _orig_play
 
 print()
 print("FAILED:" if failures else "ALL FIRMWARE SIM TESTS PASSED", failures or "")

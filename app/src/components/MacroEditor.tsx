@@ -39,6 +39,7 @@ import {
   setGroupDuration,
   straighten,
 } from "../lib/recorder-model";
+import { IS_MAC } from "../lib/macro-model";
 import { Button, Card, Field, Input, Select } from "./ui";
 import { useToast } from "./toast";
 
@@ -49,7 +50,10 @@ interface Props {
 
 export function MacroEditor({ macro, onChange }: Props) {
   const items = useMemo(() => groupEvents(macro.events), [macro.events]);
-  const [selected, setSelected] = useState<number | null>(null);
+  // Multi-select: click = single, shift+click = range from anchor,
+  // cmd/ctrl+click = toggle. Sorted list of row indices.
+  const [selected, setSelected] = useState<number[]>([]);
+  const anchor = useRef<number | null>(null);
   const [bulkFactor, setBulkFactor] = useState("1.0");
   const [overlayOn, setOverlayOn] = useState(false);
   const [overlayOnlySelected, setOverlayOnlySelected] = useState(false);
@@ -62,15 +66,35 @@ export function MacroEditor({ macro, onChange }: Props) {
     onChange({ ...macro, events: flattenItems(newItems) });
   }
 
+  function rowClick(e: React.MouseEvent, i: number) {
+    if (e.shiftKey && anchor.current !== null) {
+      const [a, b] = [Math.min(anchor.current, i), Math.max(anchor.current, i)];
+      setSelected(Array.from({ length: b - a + 1 }, (_, k) => a + k));
+      return;
+    }
+    if (e.metaKey || e.ctrlKey) {
+      setSelected((cur) =>
+        cur.includes(i) ? cur.filter((x) => x !== i) : [...cur, i].sort((x, y) => x - y),
+      );
+      anchor.current = i;
+      return;
+    }
+    anchor.current = i;
+    setSelected((cur) => (cur.length === 1 && cur[0] === i ? [] : [i]));
+  }
+
   function updateItem(idx: number, item: EditorItem) {
     const next = [...items];
     next[idx] = item;
     commit(next);
   }
 
-  function removeItem(idx: number) {
-    commit(items.filter((_, i) => i !== idx));
-    setSelected(null);
+  function removeSelected() {
+    const dead = new Set(selected);
+    commit(items.filter((_, i) => !dead.has(i)));
+    setSelected([]);
+    anchor.current = null;
+    if (dead.size > 1) toast.info(`${dead.size} rows deleted`);
   }
 
   function duplicateItem(idx: number) {
@@ -85,7 +109,8 @@ export function MacroEditor({ macro, onChange }: Props) {
     const next = [...items];
     [next[idx], next[j]] = [next[j], next[idx]];
     commit(next);
-    setSelected(j);
+    setSelected([j]);
+    anchor.current = j;
   }
 
   function applyBulk() {
@@ -149,17 +174,18 @@ export function MacroEditor({ macro, onChange }: Props) {
     }
   }
 
-  const current = selected !== null ? items[selected] : null;
+  const single = selected.length === 1 ? selected[0] : null;
+  const current = single !== null ? items[single] : null;
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="grid grid-cols-4 gap-3">
+      <div className="flex flex-wrap gap-3 items-end">
         <Field label="Name">
           <Input value={macro.name ?? ""} onChange={(e) => onChange({ ...macro, name: e.target.value })} />
         </Field>
         <Field label="Speed ×">
           <Input
-            type="number" step="0.1" min="0.1"
+            type="number" step="0.1" min="0.1" className="w-20"
             value={macro.settings?.speed ?? 1}
             onChange={(e) =>
               onChange({ ...macro, settings: { ...macro.settings, speed: parseFloat(e.target.value) || 1 } })
@@ -168,12 +194,40 @@ export function MacroEditor({ macro, onChange }: Props) {
         </Field>
         <Field label="Repeat (0 = loop until key)">
           <Input
-            type="number" min="0"
+            type="number" min="0" className="w-20"
             value={macro.settings?.repeat ?? 1}
             onChange={(e) =>
               onChange({ ...macro, settings: { ...macro.settings, repeat: Math.max(0, parseInt(e.target.value) || 0) } })
             }
           />
+        </Field>
+        <Field label="Press key again while playing">
+          <Select
+            value={macro.settings?.on_repress ?? "stop"}
+            onChange={(e) =>
+              onChange({
+                ...macro,
+                settings: { ...macro.settings, on_repress: e.target.value as "stop" | "restart" },
+              })
+            }
+          >
+            <option value="stop">Stop the macro</option>
+            <option value="restart">Restart it</option>
+          </Select>
+        </Field>
+        <Field label="While key is held">
+          <Select
+            value={macro.settings?.hold_repeat ? "repeat" : "once"}
+            onChange={(e) =>
+              onChange({
+                ...macro,
+                settings: { ...macro.settings, hold_repeat: e.target.value === "repeat" },
+              })
+            }
+          >
+            <option value="once">Play once</option>
+            <option value="repeat">Repeat while held</option>
+          </Select>
         </Field>
         <Field label="All delays ×">
           <div className="flex gap-1">
@@ -206,10 +260,10 @@ export function MacroEditor({ macro, onChange }: Props) {
               {overlayOn && (
                 <Button
                   variant={overlayOnlySelected ? "primary" : "default"}
-                  title="Draw only the selected row instead of the whole macro"
+                  title="Draw only the selected rows instead of the whole macro"
                   onClick={() => setOverlayOnlySelected(!overlayOnlySelected)}
                 >
-                  Selected row only
+                  Selected rows only
                 </Button>
               )}
               <Button onClick={() => commit([...items, { type: "wait", delay: 500 } as MacroEvent])}>
@@ -218,13 +272,14 @@ export function MacroEditor({ macro, onChange }: Props) {
             </div>
           }
         >
-          <div className="max-h-96 overflow-y-auto flex flex-col gap-1 pr-1">
+          <div className="max-h-96 overflow-y-auto flex flex-col gap-1 pr-1 select-none">
             {items.map((item, i) => (
               <button
                 key={i}
-                onClick={() => setSelected(selected === i ? null : i)}
+                onClick={(e) => rowClick(e, i)}
+                aria-pressed={selected.includes(i)}
                 className={`flex items-center gap-2 rounded-md px-2 py-1.5 text-xs text-left border
-                  ${selected === i ? "border-accent bg-accent/10" : "border-line bg-panel2 hover:border-fg-faint"}`}
+                  ${selected.includes(i) ? "border-accent bg-accent/10" : "border-line bg-panel2 hover:border-fg-faint"}`}
               >
                 <span className="w-6 flex justify-center text-fg-muted">{itemIcon(item)}</span>
                 <span className="w-8 text-fg-faint">#{i + 1}</span>
@@ -234,6 +289,9 @@ export function MacroEditor({ macro, onChange }: Props) {
             ))}
             {items.length === 0 && <p className="text-fg-faint text-sm">No events.</p>}
           </div>
+          <p className="text-[11px] text-fg-faint mt-1.5">
+            Shift+click selects a range, {IS_MAC ? "⌘" : "Ctrl"}+click adds/removes single rows.
+          </p>
           <div className="flex items-center justify-between gap-3 mt-2 border-t border-line pt-2">
             <div className={`text-xs ${stats.tooBig ? "text-warning" : "text-fg-faint"}`}>
               {stats.events} events · {(stats.bytes / 1024).toFixed(1)} KB
@@ -251,23 +309,43 @@ export function MacroEditor({ macro, onChange }: Props) {
         </Card>
 
         <div className="flex flex-col gap-3">
-          <Card title={current ? `Edit row #${(selected ?? 0) + 1}` : "Row editor"}>
-            {!current ? (
+          <Card
+            title={
+              selected.length > 1
+                ? `${selected.length} rows selected`
+                : current
+                  ? `Edit row #${(single ?? 0) + 1}`
+                  : "Row editor"
+            }
+          >
+            {selected.length > 1 ? (
+              <div className="flex flex-col gap-3">
+                <p className="text-fg-muted text-sm">
+                  Rows #{selected[0] + 1}…#{selected[selected.length - 1] + 1} selected
+                  ({selected.length} rows).
+                </p>
+                <div>
+                  <Button variant="danger" onClick={removeSelected}>
+                    <Trash2 size={14} aria-hidden /> Delete {selected.length} rows
+                  </Button>
+                </div>
+              </div>
+            ) : !current ? (
               <p className="text-fg-faint text-sm">Click a row on the left to edit every value.</p>
             ) : (
               <div className="flex flex-col gap-3">
-                <RowFields item={current} onChange={(it) => updateItem(selected!, it)} />
+                <RowFields item={current} onChange={(it) => updateItem(single!, it)} />
                 <div className="flex flex-wrap gap-2 border-t border-line pt-3">
-                  <Button onClick={() => moveItem(selected!, -1)}>
+                  <Button onClick={() => moveItem(single!, -1)}>
                     <ArrowUp size={14} aria-hidden /> Move up
                   </Button>
-                  <Button onClick={() => moveItem(selected!, 1)}>
+                  <Button onClick={() => moveItem(single!, 1)}>
                     <ArrowDown size={14} aria-hidden /> Move down
                   </Button>
-                  <Button onClick={() => duplicateItem(selected!)}>
+                  <Button onClick={() => duplicateItem(single!)}>
                     <Copy size={14} aria-hidden /> Duplicate
                   </Button>
-                  <Button variant="danger" onClick={() => removeItem(selected!)}>
+                  <Button variant="danger" onClick={removeSelected}>
                     <Trash2 size={14} aria-hidden /> Delete row
                   </Button>
                 </div>

@@ -15,6 +15,7 @@ import {
 import { OverlayView } from "./components/OverlayView";
 import { DeviceProvider, useDevice } from "./lib/device";
 import { ProfilesProvider } from "./lib/profiles";
+import { deviceName, onDevnamesChanged } from "./lib/devnames";
 import { NavContext, Page } from "./lib/nav";
 import { ipc } from "./lib/ipc";
 import type { UpdateInfo } from "./lib/types";
@@ -42,7 +43,20 @@ function Shell() {
   const [page, setPage] = useState<Page>("devices");
   const [update, setUpdate] = useState<UpdateInfo | null>(null);
   const [pinned, setPinned] = useState(false);
-  const { hello, port } = useDevice();
+  const [nickname, setNickname] = useState("");
+  const { hello, port, layer } = useDevice();
+
+  // Sidebar shows the keypad's nickname (set on the Devices page) and follows
+  // renames live.
+  useEffect(() => {
+    if (!hello) {
+      setNickname("");
+      return;
+    }
+    const load = () => void deviceName(hello.uid).then(setNickname);
+    load();
+    return onDevnamesChanged(load);
+  }, [hello]);
 
   // "Always on top": keep MKYADA above the game while fine-tuning macro
   // coordinates — no alt-tab round trips after every small edit.
@@ -65,9 +79,9 @@ function Shell() {
       <div className="flex h-screen">
         <aside className="w-48 shrink-0 border-r border-line bg-panel flex flex-col">
           <div className="px-4 py-4 border-b border-line flex items-center gap-3">
-            <img src="/mkyada-logo.png" alt="MKYADA" className="w-11 h-11 rounded-xl shrink-0" />
+            <img src="/mkyada-logo.png" alt="MKYADA" className="w-12 h-12 rounded-xl shrink-0" />
             <p className="text-[11px] text-fg-muted leading-snug font-medium">
-              Macro Keyboard You Always Dream About
+              Macro Keypad You Always Dream About
             </p>
           </div>
           <nav className="flex-1 py-2" aria-label="Main">
@@ -114,7 +128,14 @@ function Shell() {
               {pinned ? "Always on top: ON" : "Always on top"}
             </button>
             {port && hello ? (
-              <Badge tone="green">● {hello.key_count}-key connected</Badge>
+              <div className="flex flex-col gap-1 items-start">
+                <Badge tone="green">
+                  ● {nickname.trim() || `${hello.key_count}-key keypad`} connected
+                </Badge>
+                {hello.layer_key && (
+                  <Badge tone="blue">Layer {layer.toUpperCase()}</Badge>
+                )}
+              </div>
             ) : (
               <Badge>○ no device</Badge>
             )}

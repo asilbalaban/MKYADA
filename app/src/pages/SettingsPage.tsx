@@ -67,7 +67,7 @@ export function SettingsPage() {
       <Card title="About">
         <div className="flex flex-col gap-2 text-sm text-fg">
           <p>
-            <span className="font-semibold">MKYADA</span> — Macro Keyboard You Always Dream About
+            <span className="font-semibold">MKYADA</span> — Macro Keypad You Always Dream About
           </p>
           <p className="text-fg-faint">App version {version || "…"}</p>
           <Button variant="ghost" className="self-start px-0 text-accent"

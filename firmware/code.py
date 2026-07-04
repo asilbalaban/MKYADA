@@ -40,9 +40,11 @@ DEFAULT_CONFIG = {
     "key_count": 6,
     "layer_key": None,   # 1-based key number, or null
     "layer_count": 2,
-    "layer_mode": "toggle",  # "toggle" cycles a->b->..., "hold" = momentary layer b
+    "layer_mode": "toggle",  # kept for config compat; press always cycles a->b->...
     "key_map": None,     # per-GPIO logical key numbers, e.g. [3,1,2] when the
                          # solder order differs; null = identity (GP0 = key 1)
+    "busy_other": "ignore",  # another macro key pressed while playing:
+                             # "ignore" it, or "switch" (stop + play the new one)
     "screen": {"width": 1920, "height": 1080},
 }
 
@@ -98,6 +100,7 @@ class App:
         self.mode = "standalone"
         self.last_rx = 0.0
         self.playing_key = None  # 0-based index of the key that started playback
+        self.pending_play = None  # (path, trigger) queued by restart/switch policies
 
     # --- config ---
     def load_config(self):
@@ -120,6 +123,8 @@ class App:
                 and sorted(km) == list(range(1, cfg["key_count"] + 1))):
             km = list(range(1, cfg["key_count"] + 1))  # identity
         cfg["key_map"] = km
+        if cfg.get("busy_other") not in ("ignore", "switch"):
+            cfg["busy_other"] = "ignore"
         self.config = cfg
         self.engine.set_screen(cfg["screen"].get("width", 1920),
                                cfg["screen"].get("height", 1080))
@@ -174,6 +179,7 @@ class App:
             self.led.set(layer=0)
             self.proto.send({"t": "ok", "re": "reload"})
             self.proto.send(self.hello())
+            self.announce_layer()
         elif t == "reset":
             # Hard reset: re-runs boot.py (needed after firmware updates).
             self.proto.send({"t": "ok", "re": "reset"})
@@ -185,7 +191,12 @@ class App:
                 self.layer = LAYER_NAMES.index(name)
                 self.led.set(layer=self.layer)
                 self.proto.send({"t": "ok", "re": "set_layer"})
+                self.announce_layer()
         return False
+
+    def announce_layer(self):
+        """Tell a connected app which layer is active (sidebar indicator)."""
+        self.proto.send({"t": "layer", "layer": LAYER_NAMES[self.layer]})
 
     def set_mode(self, mode):
         self.mode = mode
@@ -222,6 +233,10 @@ class App:
         if repeat is None:
             repeat = settings.get("repeat", 1)
         loop = int(repeat) == 0
+        # what a re-press of the same key does while playing: stop or restart
+        on_repress = settings.get("on_repress", "stop")
+        # replay while the physical key is held down (like OS key repeat)
+        hold_repeat = bool(settings.get("hold_repeat"))
         events = data.get("events") or []
         screen = data.get("screen")
 
@@ -231,9 +246,21 @@ class App:
         stopped = False
 
         def should_stop():
-            # Panic: the triggering key again (standalone), or any key (host play).
+            # Same key again: stop (or queue a restart). Another macro key:
+            # per config, ignore it or switch to its macro. Host plays
+            # (trigger None) stop on any key.
             for i, pressed in self.buttons.scan():
-                if pressed and (trigger is None or i == trigger):
+                if not pressed:
+                    continue
+                if trigger is None or i == trigger:
+                    if trigger is not None and on_repress == "restart":
+                        self.pending_play = (path, trigger)
+                    return True
+                if trigger is not None and self.config["busy_other"] == "switch":
+                    key_no = self.config["key_map"][i]
+                    if self.config["layer_key"] == key_no:
+                        continue
+                    self.pending_play = (self.macro_path(key_no), i)
                     return True
             for m in self.proto.poll():
                 if self.handle_msg(m, in_playback=True):
@@ -246,8 +273,16 @@ class App:
                 self.engine.play(events, screen=screen, speed=speed,
                                  should_stop=should_stop, tick=self.led.tick)
                 runs += 1
-                if not loop and runs >= max(1, int(repeat)):
-                    break
+                if loop:
+                    continue
+                if runs < max(1, int(repeat)):
+                    continue
+                # "aaaa…" behaviour: keep replaying while the key stays down
+                if hold_repeat and trigger is not None and self.buttons.stable[trigger]:
+                    self.buttons.scan()  # keep edge state fresh
+                    if self.buttons.stable[trigger]:
+                        continue
+                break
         except StopPlayback:
             stopped = True
         finally:
@@ -267,11 +302,10 @@ class App:
                              "edge": "down" if pressed else "up"})
             return
         if c["layer_key"] == key_no:
-            if c["layer_mode"] == "hold":
-                self.layer = 1 if pressed else 0
-            elif pressed:
+            if pressed:
                 self.layer = (self.layer + 1) % c["layer_count"]
-            self.led.set(layer=self.layer)
+                self.led.set(layer=self.layer)
+                self.announce_layer()
             return
         if pressed:
             self.play_file(self.macro_path(key_no), trigger=i)
@@ -282,6 +316,12 @@ class App:
         while True:
             for i, pressed in self.buttons.scan():
                 self.on_edge(i, pressed)
+            # restart/switch policies queue the next macro instead of
+            # recursing inside the playback stack
+            while self.pending_play:
+                path, trig = self.pending_play
+                self.pending_play = None
+                self.play_file(path, trigger=trig)
             for msg in self.proto.poll():
                 self.handle_msg(msg)
             if self.mode == "host":

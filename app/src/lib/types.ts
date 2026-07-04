@@ -33,9 +33,12 @@ export interface DeviceConfig {
   key_count: number;
   layer_key: number | null;
   layer_count: number;
+  /** kept for config compat — firmware always cycles on press ("toggle") */
   layer_mode: "toggle" | "hold";
   /** per-GPIO logical key numbers ([3,1,2] = GP0 acts as key 3); null = identity */
   key_map?: number[] | null;
+  /** another macro key pressed while one is playing: ignore it, or switch to it */
+  busy_other?: "ignore" | "switch";
   screen: { width: number; height: number };
 }
 
@@ -57,11 +60,26 @@ export interface MacroFile {
   text?: string;
   media?: string;
   screen?: { width: number; height: number };
-  settings?: { speed?: number; repeat?: number };
+  settings?: MacroSettings;
   events: MacroEvent[];
 }
 
-export type Assignment =
+export interface MacroSettings {
+  speed?: number;
+  repeat?: number;
+  /** pressing the macro's own key while it plays: stop it (default) or restart it */
+  on_repress?: "stop" | "restart";
+  /** replay while the physical key is held — like holding a letter key down */
+  hold_repeat?: boolean;
+}
+
+/** Per-key behavior options shared by every assignment kind. */
+export interface AssignmentBehavior {
+  on_repress?: "stop" | "restart";
+  hold_repeat?: boolean;
+}
+
+export type Assignment = (
   | { kind: "none" }
   | { kind: "keystroke"; key: string }
   | { kind: "combo"; mods: string[]; key: string }
@@ -69,7 +87,8 @@ export type Assignment =
   | { kind: "media"; usage: string }
   | { kind: "recorded"; name: string; macro: MacroFile }
   // host-mode only: cannot be expressed as HID, runs on the computer
-  | { kind: "launch"; target: string };
+  | { kind: "launch"; target: string }
+) & { behavior?: AssignmentBehavior };
 
 export interface Profile {
   id: string;

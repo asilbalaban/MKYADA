@@ -126,7 +126,7 @@ STLs and print notes live in [hardware/case/](hardware/case/).
 
 ## Türkçe
 
-**MKYADA** (Macro Keyboard You Always Dream About), Waveshare RP2040-Zero üzerine kurulu, açık kaynak, kendin-yap bir makro klavyedir (referans tasarım 6 tuş, 20 tuşa kadar desteklenir) ve çok platformlu bir masaüstü yapılandırma uygulamasıyla gelir.
+**MKYADA** (Macro Keypad You Always Dream About), Waveshare RP2040-Zero üzerine kurulu, açık kaynak, kendin-yap bir makro klavyedir (referans tasarım 6 tuş, 20 tuşa kadar desteklenir) ve çok platformlu bir masaüstü yapılandırma uygulamasıyla gelir.
 
 Çoğu DIY makro pad sadece tuş atar; MKYADA ise kaydedilmiş **mouse hareketleri + tıklamalar + tuş vuruşlarını gerçek donanım HID girdisi olarak** kartın kendisinden oynatır. Yazılımsal makro araçları girdiyi işletim sistemi seviyesinde enjekte ettiği için oyunlarda çoğu zaman çalışmaz; MKYADA'nın girdisi elektriksel olarak gerçek bir klavye/mouse olduğundan ayırt edilemez.
 

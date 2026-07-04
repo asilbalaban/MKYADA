@@ -10,8 +10,9 @@ import { EditorItem, groupEvents, isMoveGroup } from "../lib/recorder-model";
 
 interface OverlayData {
   macro: MacroFile;
-  selected: number | null;
-  /** Draw only the selected row instead of the whole macro. */
+  /** selected row indices (multi-select) */
+  selected: number[] | number | null;
+  /** Draw only the selected rows instead of the whole macro. */
   onlySelected?: boolean;
 }
 
@@ -54,7 +55,10 @@ export function OverlayView() {
   }, []);
 
   if (!data) return null;
-  const { macro, selected, onlySelected } = data;
+  const { macro, onlySelected } = data;
+  const selectedSet = new Set(
+    Array.isArray(data.selected) ? data.selected : data.selected !== null ? [data.selected] : [],
+  );
   const sw = Math.max(1, macro.screen?.width ?? screen.width);
   const sh = Math.max(1, macro.screen?.height ?? screen.height);
   // overlay window covers the screen; scale recorded coords to viewport
@@ -66,7 +70,7 @@ export function OverlayView() {
   const clicks: { x: number; y: number; button: string; hot: boolean; n: number }[] = [];
   let clickNo = 0;
   items.forEach((item: EditorItem, idx) => {
-    const hot = idx === selected;
+    const hot = selectedSet.has(idx);
     if (onlySelected && !hot) return;
     if (isMoveGroup(item)) {
       const d = item.points.map((p, i) => `${i === 0 ? "M" : "L"}${p.x * sx},${p.y * sy}`).join(" ");

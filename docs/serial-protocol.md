@@ -10,6 +10,17 @@ Device discovery: scan serial ports for USB product string **"MKYADA Keypad"**,
 open the *data* interface, send `identify`, expect `hello`. Match the serial
 port to its CIRCUITPY volume via the `UID:` line in `boot_out.txt` vs `hello.uid`.
 
+## Layer announcements
+
+Whenever the active layer changes (layer key pressed, `set_layer`, `reload`)
+the device emits:
+
+```json
+{ "t": "layer", "layer": "b" }
+```
+
+The app uses it for the live layer indicator in the sidebar.
+
 ## Modes
 
 ```

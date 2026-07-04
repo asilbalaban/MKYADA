@@ -32,6 +32,8 @@ identically.
 | `screen` | for mouse macros | Capture resolution; absolute coordinates are rescaled from it (`x * 32767 / (width-1)`). |
 | `settings.speed` | no | Playback speed multiplier (default `1.0`) |
 | `settings.repeat` | no | Repeat count. **`0` = loop until the key is pressed again.** Default `1`. |
+| `settings.on_repress` | no | What pressing the macro's own key does while it plays: `"stop"` (default) or `"restart"` (play again from the top). |
+| `settings.hold_repeat` | no | `true` = replay while the physical key is held down, like holding a letter key. Default `false`. |
 | `events` | yes | Ordered event list |
 
 ## Events
@@ -58,7 +60,7 @@ Every event has `delay` — milliseconds to wait **before** executing it.
 
 ```
 CIRCUITPY/
-├── config.json          key count + layer settings (see firmware/config.example.json)
+├── config.json          key count, layers, busy_other policy (see firmware/config.example.json)
 └── macros/
     ├── key1.json        key 1, layer A
     ├── key1-b.json      key 1, layer B

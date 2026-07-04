@@ -47,7 +47,7 @@ jobs:
           tagName: ${{ github.ref_name }}
           releaseName: "MKYADA ${{ github.ref_name }}"
           releaseBody: |
-            MKYADA — Macro Keyboard You Always Dream About.
+            MKYADA — Macro Keypad You Always Dream About.
 
             **Desktop app installers** are attached below (Windows `.exe`/`.msi`,
             macOS universal `.dmg`).

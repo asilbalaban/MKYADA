@@ -11,6 +11,13 @@ export interface RememberedDevice {
 
 const store = new LazyStore("devices.json");
 
+// lets the shell refresh the sidebar nickname the moment it's saved
+const listeners = new Set<() => void>();
+export function onDevnamesChanged(cb: () => void): () => void {
+  listeners.add(cb);
+  return () => void listeners.delete(cb);
+}
+
 export async function rememberedDevices(): Promise<Record<string, RememberedDevice>> {
   return ((await store.get<Record<string, RememberedDevice>>("devices")) ?? {}) as Record<
     string,
@@ -30,6 +37,7 @@ export async function rememberDevice(uid: string, patch: Partial<RememberedDevic
   };
   await store.set("devices", all);
   await store.save();
+  listeners.forEach((cb) => cb());
 }
 
 export async function deviceName(uid: string): Promise<string> {

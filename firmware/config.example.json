@@ -4,6 +4,9 @@
   "key_count": 6,
   "layer_key": null,
   "layer_count": 2,
-  "layer_mode": "toggle",
-  "screen": { "width": 1920, "height": 1080 }
+  "busy_other": "ignore",
+  "screen": {
+    "width": 1920,
+    "height": 1080
+  }
 }
