@@ -7,6 +7,7 @@ import { Badge, Button } from "./components/ui";
 import { DevicesPage } from "./pages/DevicesPage";
 import { SetupPage } from "./pages/SetupPage";
 import { KeysPage } from "./pages/KeysPage";
+import { RecorderPage } from "./pages/RecorderPage";
 import { SettingsPage } from "./pages/SettingsPage";
 
 type Page = "devices" | "setup" | "keys" | "recorder" | "profiles" | "settings";
@@ -83,11 +84,7 @@ function Shell() {
           {page === "devices" && <DevicesPage onConnected={() => setPage("keys")} />}
           {page === "setup" && <SetupPage onDone={() => setPage("keys")} />}
           {page === "keys" && <KeysPage />}
-          {page === "recorder" && (
-            <p className="text-slate-500 text-sm">
-              Macro recorder — coming in the next milestone.
-            </p>
-          )}
+          {page === "recorder" && <RecorderPage />}
           {page === "profiles" && (
             <p className="text-slate-500 text-sm">
               Per-application profiles — coming in the next milestone.

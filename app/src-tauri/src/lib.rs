@@ -1,8 +1,11 @@
 mod device;
+mod player;
+mod recorder;
 mod updater;
 
 use device::drive::{self, DriveInfo};
 use device::serial::{self, DeviceInfo, DeviceManager};
+use player::Preview;
 use serde_json::Value;
 use tauri::{AppHandle, State};
 
@@ -67,6 +70,44 @@ fn read_local_file(path: String) -> Result<String, String> {
     std::fs::read_to_string(path).map_err(|e| e.to_string())
 }
 
+/// Write a file to a user-chosen path (macro JSON export).
+#[tauri::command]
+fn write_local_file(path: String, content: String) -> Result<(), String> {
+    std::fs::write(path, content).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn recorder_start(app: AppHandle) {
+    recorder::capture::ensure_listener(app);
+    recorder::capture::start();
+}
+
+#[tauri::command]
+fn recorder_stop() {
+    recorder::capture::stop();
+}
+
+#[tauri::command]
+fn recorder_state(app: AppHandle) -> bool {
+    recorder::capture::ensure_listener(app);
+    recorder::capture::is_capturing()
+}
+
+#[tauri::command]
+fn preview_play(
+    app: AppHandle,
+    preview: State<Preview>,
+    events: Vec<Value>,
+    speed: f64,
+) -> Result<(), String> {
+    preview.play(app, events, speed)
+}
+
+#[tauri::command]
+fn preview_stop(preview: State<Preview>) {
+    preview.stop();
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -74,6 +115,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_store::Builder::new().build())
         .manage(DeviceManager::default())
+        .manage(Preview::default())
         .invoke_handler(tauri::generate_handler![
             scan_devices,
             connect_device,
@@ -87,6 +129,12 @@ pub fn run() {
             drive_list,
             check_update,
             read_local_file,
+            write_local_file,
+            recorder_start,
+            recorder_stop,
+            recorder_state,
+            preview_play,
+            preview_stop,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
