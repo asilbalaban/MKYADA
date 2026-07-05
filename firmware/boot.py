@@ -7,8 +7,16 @@
 #     buttons(1B) + X(16-bit abs 0..32767) + Y(16-bit abs) + wheel(8-bit rel)
 #   HID consumer control (stock, report ID 3) — media keys
 #   CDC serial: console (debug/REPL) + data (app protocol)
-#   Mass storage: CIRCUITPY drive stays enabled (config + macro JSON files)
+#   Mass storage: CIRCUITPY drive enabled by default; `"usb_drive": false` in
+#     config.json hides it (finished-product mode: the app manages all files
+#     over serial — see the fs_* commands in docs/serial-protocol.md).
+#     Recovery: hold key 1 (GP0) while plugging in to force the drive back on.
 
+import json
+
+import board
+import digitalio
+import storage
 import supervisor
 import usb_cdc
 import usb_hid
@@ -58,6 +66,33 @@ abs_mouse = usb_hid.Device(
     out_report_lengths=(0,),
 )
 
+def usb_drive_wanted():
+    """config.json `usb_drive` (default: visible). Holding key 1 (GP0, active
+    low) during power-on overrides to visible — the escape hatch if the app
+    is unavailable while the drive is hidden."""
+    try:
+        io = digitalio.DigitalInOut(board.GP0)
+        io.direction = digitalio.Direction.INPUT
+        io.pull = digitalio.Pull.UP
+        held = not io.value
+        io.deinit()
+        if held:
+            return True
+    except Exception:
+        pass
+    try:
+        with open("/config.json") as f:
+            return json.load(f).get("usb_drive") is not False
+    except (OSError, ValueError):
+        return True
+
+
 supervisor.set_usb_identification(manufacturer="MKYADA", product="MKYADA Keypad")
 usb_hid.enable((usb_hid.Device.KEYBOARD, abs_mouse, usb_hid.Device.CONSUMER_CONTROL))
 usb_cdc.enable(console=True, data=True)
+if not usb_drive_wanted():
+    # Finished-product mode: no CIRCUITPY drive on the host. That frees the
+    # filesystem for the firmware itself, so the app can manage files over
+    # serial (fs_* commands) — including config.json to turn this back off.
+    storage.disable_usb_drive()
+    storage.remount("/", readonly=False)

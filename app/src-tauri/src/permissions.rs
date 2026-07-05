@@ -100,22 +100,15 @@ pub fn status() -> PermissionsStatus {
 
 #[cfg(target_os = "macos")]
 pub fn request(kind: &str) {
-    match kind {
-        "input_monitoring" => {
-            if !imp::request_input_monitoring() {
-                // already denied once: the prompt won't reappear, guide the
-                // user to the settings pane instead
-                imp::open_settings("input_monitoring");
-            }
-        }
-        "accessibility" => {
-            if !imp::request_accessibility() {
-                // already denied once: the prompt won't reappear, guide the
-                // user to the settings pane instead
-                imp::open_settings("accessibility");
-            }
-        }
-        _ => {}
+    let granted = match kind {
+        "input_monitoring" => imp::request_input_monitoring(),
+        "accessibility" => imp::request_accessibility(),
+        _ => return,
+    };
+    if !granted {
+        // already denied once: the prompt won't reappear, guide the user to
+        // the settings pane instead
+        imp::open_settings(kind);
     }
 }
 

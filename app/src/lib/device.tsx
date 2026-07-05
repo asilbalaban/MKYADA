@@ -34,6 +34,16 @@ interface DeviceState {
 
 const Ctx = createContext<DeviceState | null>(null);
 
+/** Stand-in DriveInfo when the keypad's USB drive is hidden on purpose:
+ * the Rust backend routes `serial:<uid>` paths over the serial protocol. */
+export function serialDrive(uid: string): DriveInfo {
+  return { path: `serial:${uid}`, uid, board: "serial" };
+}
+
+export function isSerialDrive(drive: DriveInfo | null): boolean {
+  return drive?.path.startsWith("serial:") ?? false;
+}
+
 export function DeviceProvider({ children }: { children: ReactNode }) {
   const [scanning, setScanning] = useState(false);
   const [devices, setDevices] = useState<DeviceInfo[]>([]);
@@ -87,19 +97,35 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
     setPort(info.port);
     setHello(info.hello);
     void rememberDevice(info.hello.uid, { fw: info.hello.fw });
-    // Match the CIRCUITPY volume by the UID reported in hello.
-    const drives = await ipc.listDrives();
-    const match = drives.find((d) => d.uid.toLowerCase() === info.hello.uid.toLowerCase());
-    setDrive(match ?? drives[0] ?? null);
-    if (match) void syncNameWithDevice(match.path, info.hello.uid);
+    if (info.hello.usb_drive === false) {
+      // The keypad hides its USB drive on purpose — files travel over
+      // serial. The `serial:<uid>` sentinel routes every drive_* command
+      // to the fs_* protocol in the Rust backend.
+      const virtual = serialDrive(info.hello.uid);
+      setDrive(virtual);
+      void syncNameWithDevice(virtual.path, info.hello.uid);
+    } else {
+      // Match the CIRCUITPY volume by the UID reported in hello.
+      const drives = await ipc.listDrives();
+      const match = drives.find((d) => d.uid.toLowerCase() === info.hello.uid.toLowerCase());
+      setDrive(match ?? drives[0] ?? null);
+      if (match) void syncNameWithDevice(match.path, info.hello.uid);
+    }
     await ipc.deviceSend({ t: "identify" });
   }, []);
 
   // The CIRCUITPY drive often mounts seconds after the serial port appears
   // (especially on Windows) — keep looking for it instead of making the user
-  // unplug and replug the keypad.
+  // unplug and replug the keypad. A deliberately hidden drive never mounts:
+  // use the serial-fs sentinel right away.
   useEffect(() => {
     if (!hello || drive) return;
+    if (hello.usb_drive === false) {
+      const virtual = serialDrive(hello.uid);
+      setDrive(virtual);
+      void syncNameWithDevice(virtual.path, hello.uid);
+      return;
+    }
     let cancelled = false;
     const find = async () => {
       try {

@@ -26,10 +26,15 @@ pub struct DeviceInfo {
     pub hello: Value,
 }
 
+/// Sink for fs_* responses while a serialfs operation is in flight; the
+/// reader thread routes matching messages here instead of the frontend.
+type FsRoute = Arc<Mutex<Option<std::sync::mpsc::Sender<Value>>>>;
+
 pub struct Connection {
     pub port_name: String,
     writer: Box<dyn SerialPort>,
     stop: Arc<AtomicBool>,
+    fs_route: FsRoute,
 }
 
 #[derive(Default)]
@@ -38,6 +43,17 @@ pub struct DeviceManager(pub Mutex<Option<Connection>>);
 impl DeviceManager {
     pub fn connected_port(&self) -> Option<String> {
         self.0.lock().unwrap().as_ref().map(|c| c.port_name.clone())
+    }
+
+    /// Install (or clear) the routing sink for fs_* responses.
+    pub fn set_fs_route(
+        &self,
+        tx: Option<std::sync::mpsc::Sender<Value>>,
+    ) -> Result<(), String> {
+        let guard = self.0.lock().unwrap();
+        let conn = guard.as_ref().ok_or("not connected")?;
+        *conn.fs_route.lock().unwrap() = tx;
+        Ok(())
     }
 }
 
@@ -156,10 +172,12 @@ pub fn connect(app: AppHandle, mgr: &DeviceManager, port: &str) -> Result<(), St
     let sp = open(port)?;
     let writer = sp.try_clone().map_err(|e| e.to_string())?;
     let stop = Arc::new(AtomicBool::new(false));
+    let fs_route: FsRoute = Arc::new(Mutex::new(None));
     let conn = Connection {
         port_name: port.to_string(),
         writer,
         stop: stop.clone(),
+        fs_route: fs_route.clone(),
     };
     *mgr.0.lock().unwrap() = Some(conn);
 
@@ -186,7 +204,17 @@ pub fn connect(app: AppHandle, mgr: &DeviceManager, port: &str) -> Result<(), St
                         timeouts = 0;
                     }
                     if let Ok(v) = serde_json::from_slice::<Value>(&line) {
-                        let _ = app.emit("device:msg", &v);
+                        // fs_* responses belong to the serialfs op that asked
+                        // for them; everything else streams to the frontend.
+                        let routed = super::serialfs::is_fs_msg(&v)
+                            && fs_route
+                                .lock()
+                                .unwrap()
+                                .as_ref()
+                                .is_some_and(|tx| tx.send(v.clone()).is_ok());
+                        if !routed {
+                            let _ = app.emit("device:msg", &v);
+                        }
                     }
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::TimedOut => {

@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { getVersion } from "@tauri-apps/api/app";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { MicOff, Monitor, Moon, Pin, Power, Rocket, Sun } from "lucide-react";
+import { HardDrive, MicOff, Monitor, Moon, Pin, Power, Rocket, Sun } from "lucide-react";
 import { ipc } from "../lib/ipc";
+import { useDevice } from "../lib/device";
 import type { UpdateInfo } from "../lib/types";
 import {
   setAlwaysOnTop,
@@ -20,6 +21,8 @@ import {
 import { Badge, Button, Card } from "../components/ui";
 import { PermissionsCard } from "../components/Permissions";
 import { SystemStatusStrip } from "../components/SystemStatus";
+import { useToast } from "../components/toast";
+import { useConfirm } from "../components/dialog";
 
 const THEME_OPTIONS: { value: ThemePref; label: string; icon: typeof Sun }[] = [
   { value: "system", label: "System", icon: Monitor },
@@ -120,6 +123,95 @@ function WindowCard() {
   );
 }
 
+/** Device-level settings that live in the keypad's own config.json. */
+function KeypadCard() {
+  const { hello, drive, send, disconnect } = useDevice();
+  const toast = useToast();
+  const confirm = useConfirm();
+  const [busy, setBusy] = useState(false);
+  const hidden = hello?.usb_drive === false;
+  // firmware < 0.4.0 has no usb_drive support (no fs_* serial commands)
+  const supported = hello?.usb_drive !== undefined;
+
+  async function setHidden(hide: boolean) {
+    if (!hello || !drive) return;
+    const ok = await confirm({
+      title: hide ? "Hide the USB drive" : "Show the USB drive",
+      message: hide
+        ? "The keypad will stop showing up as a flash drive. Keys, macros and setup are " +
+          "managed entirely from this app — files travel over the serial connection, " +
+          "like a finished product.\n\nThe keypad restarts now. Recovery: hold key 1 " +
+          "while plugging it in to force the drive back on."
+        : "The keypad will show up as a USB drive (CIRCUITPY) again, raw JSON files and " +
+          "all.\n\nThe keypad restarts now.",
+      confirmLabel: hide ? "Hide drive" : "Show drive",
+    });
+    if (!ok) return;
+    setBusy(true);
+    try {
+      // merge into the stored config so key/layer setup survives the toggle
+      let cfg: Record<string, unknown> = {};
+      try {
+        cfg = JSON.parse(await ipc.driveRead(drive.path, "config.json"));
+      } catch {
+        // fresh board without a config — the firmware defaults the rest
+      }
+      await ipc.driveWrite(
+        drive.path,
+        "config.json",
+        JSON.stringify({ ...cfg, usb_drive: !hide }, null, 2),
+      );
+      // Same restart dance as the Devices page: clean unmount, reset, drop
+      // the dead connection so auto-connect reattaches after the reboot.
+      await ipc.driveEject(drive.path).catch(() => {});
+      await send({ t: "reset" }).catch(() => {});
+      await disconnect().catch(() => {});
+      toast.success(
+        "Keypad restarting",
+        hide
+          ? "It will reconnect without a USB drive — this app keeps full access."
+          : "It will reconnect with its USB drive visible.",
+      );
+    } catch (e) {
+      toast.error("Could not change the drive setting", String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Card title="Keypad">
+      <div className="flex items-center justify-between gap-4">
+        <div className="flex flex-col gap-0.5 text-sm">
+          <span className="text-fg font-medium">Hide the keypad's USB drive</span>
+          <span className="text-xs text-fg-faint">
+            Finished-product mode: the keypad no longer appears as a flash drive full of
+            system files — this app manages everything over the serial connection instead.
+            Off by default. Hold key 1 while plugging in to force the drive back (recovery).
+          </span>
+        </div>
+        {!hello ? (
+          <Badge tone="amber">connect a keypad</Badge>
+        ) : !supported ? (
+          <Badge tone="amber">needs firmware ≥ 0.4.0</Badge>
+        ) : (
+          <Button
+            variant={hidden ? "primary" : "default"}
+            role="switch"
+            aria-checked={hidden}
+            loading={busy}
+            disabled={!drive}
+            onClick={() => void setHidden(!hidden)}
+          >
+            <HardDrive size={14} aria-hidden />
+            {hidden ? "Hidden" : "Visible"}
+          </Button>
+        )}
+      </div>
+    </Card>
+  );
+}
+
 function FeedbackCard() {
   const ledMic = useLedMicFeedback();
   return (
@@ -176,6 +268,7 @@ export function SettingsPage() {
     <div className="flex flex-col gap-4 max-w-3xl mx-auto w-full">
       <AppearanceCard />
       <WindowCard />
+      <KeypadCard />
       <FeedbackCard />
       <PermissionsCard />
       <Card title="About">

@@ -12,6 +12,9 @@ export interface Hello {
   layer_mode: "toggle" | "hold";
   /** per-GPIO logical key numbers; absent on firmware < 0.1.4 */
   key_map?: number[];
+  /** false = CIRCUITPY drive hidden, files managed over serial
+   * (fs_* commands); absent on firmware < 0.4.0 */
+  usb_drive?: boolean;
   layer: string;
   mode: "standalone" | "host";
 }
@@ -39,6 +42,8 @@ export interface DeviceConfig {
   key_map?: number[] | null;
   /** another macro key pressed while one is playing: ignore it, or switch to it */
   busy_other?: "ignore" | "switch";
+  /** false hides the CIRCUITPY drive (boot.py); the app manages files over serial */
+  usb_drive?: boolean;
   screen: { width: number; height: number };
 }
 

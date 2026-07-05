@@ -50,6 +50,7 @@ Unlike most DIY macro pads that just remap keys, MKYADA plays back **full record
 - **Status LED** — the onboard RGB LED shows the active layer, playback (fast blink; slow blink while looping), host mode and errors — and can mirror app-side state like "mic muted".
 - **Absolute mouse positioning** — clicks land on screen coordinates, not relative nudges, via a custom HID descriptor proven in-game.
 - **Self-healing connection** — dead/reset serial ports and read-only drives are detected and recovered from automatically; nicknames are stored on the device itself so they follow it between computers.
+- **Finished-product mode** — an optional setting (app → *Settings → Keypad*) hides the keypad's USB drive entirely: no flash drive, no raw JSON in sight. The app keeps full access over the serial connection. Hold key 1 while plugging in to bring the drive back.
 
 **In the desktop app (Windows / macOS, Linux planned):**
 - **Point-and-click key setup** — click a key, press the shortcut you want (single keys, combos, text snippets, media keys), save. Live key test shows every physical press.

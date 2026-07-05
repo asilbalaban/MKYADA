@@ -8,7 +8,9 @@
 
 import gc
 import json
+import os
 import time
+from binascii import a2b_base64, b2a_base64
 
 import board
 import digitalio
@@ -32,9 +34,11 @@ PIN_ORDER = (
 )
 DEBOUNCE_S = 0.02
 PING_TIMEOUT_S = 5.0
-PROTO_VERSION = 2  # v2: key_action + led ops, btn streamed in standalone too
+PROTO_VERSION = 3  # v3: fs_* file management over serial (hidden-drive mode)
 MACRO_FORMATS = ("mkyada-macro", "asil-macro")
 LAYER_NAMES = "abcdefgh"
+FS_CHUNK = 2048  # raw bytes per fs_chunk line (base64 on the wire)
+FS_ACK_TIMEOUT_S = 3.0
 
 DEFAULT_CONFIG = {
     "key_count": 6,
@@ -46,6 +50,8 @@ DEFAULT_CONFIG = {
     "busy_other": "ignore",  # another macro key pressed while playing:
                              # "ignore" it, or "switch" (stop + play the new one)
     "screen": {"width": 1920, "height": 1080},
+    "usb_drive": True,   # false = hide the CIRCUITPY drive from the host;
+                         # the app manages files over serial instead (boot.py)
 }
 
 
@@ -101,6 +107,7 @@ class App:
         self.last_rx = 0.0
         self.playing_key = None  # 0-based index of the key that started playback
         self.pending_play = None  # (path, trigger) queued by restart/switch policies
+        self.upload = None  # in-flight fs_write: {"path", "tmp", "f", "seq"}
 
     # --- config ---
     def load_config(self):
@@ -125,6 +132,7 @@ class App:
         cfg["key_map"] = km
         if cfg.get("busy_other") not in ("ignore", "switch"):
             cfg["busy_other"] = "ignore"
+        cfg["usb_drive"] = cfg.get("usb_drive") is not False  # same rule as boot.py
         self.config = cfg
         self.engine.set_screen(cfg["screen"].get("width", 1920),
                                cfg["screen"].get("height", 1080))
@@ -141,7 +149,7 @@ class App:
                 "format": "mkyada", "uid": uid_hex(),
                 "key_count": c["key_count"], "layer_key": c["layer_key"],
                 "layer_count": c["layer_count"], "layer_mode": c["layer_mode"],
-                "key_map": c["key_map"],
+                "key_map": c["key_map"], "usb_drive": c["usb_drive"],
                 "layer": LAYER_NAMES[self.layer], "mode": self.mode}
 
     def handle_msg(self, msg, in_playback=False):
@@ -155,7 +163,22 @@ class App:
         elif t == "stop":
             return True
         elif in_playback:
+            # file ops can't run mid-playback — tell the app instead of
+            # letting it wait for a response that never comes
+            if t in ("fs_list", "fs_read", "fs_write", "fs_delete"):
+                self.proto.send({"t": "err", "re": t, "code": "busy",
+                                 "msg": "playback in progress"})
             return False  # everything else waits until playback ends
+        elif t == "fs_list":
+            self.fs_list(msg)
+        elif t == "fs_read":
+            self.fs_read(msg)
+        elif t == "fs_write":
+            self.fs_write(msg)
+        elif t == "fs_delete":
+            self.fs_delete(msg)
+        elif t == "fs_ack":
+            pass  # stray ack from a transfer we already gave up on
         elif t == "host_enter":
             self.set_mode("host")
             self.proto.send({"t": "ok", "re": "host_enter"})
@@ -206,6 +229,156 @@ class App:
     def announce_layer(self):
         """Tell a connected app which layer is active (sidebar indicator)."""
         self.proto.send({"t": "layer", "layer": LAYER_NAMES[self.layer]})
+
+    # --- serial file management (proto v3) ---
+    # With the USB drive hidden (config usb_drive=false) the app can't reach
+    # the filesystem as mass storage, so it manages files over serial:
+    #   fs_list {path} -> {"t":"fs_list","entries":[{name,size,dir}]}
+    #   fs_read {path} -> fs_chunk stream (base64), app answers fs_ack each
+    #   fs_write {path,seq,data,eof} -> ok per chunk; .part temp + rename
+    #   fs_delete {path} -> ok
+    # Writes need a writable filesystem, i.e. the drive must be hidden —
+    # otherwise the host owns it and we answer {"code":"readonly"}.
+
+    def fs_err(self, re, code, msg=""):
+        self.proto.send({"t": "err", "re": re, "code": code, "msg": str(msg)})
+
+    def fs_path(self, msg):
+        p = "/" + str(msg.get("path", "")).lstrip("/")
+        if ".." in p or p == "/":
+            return None
+        return p
+
+    def close_upload(self, discard=False):
+        up = self.upload
+        self.upload = None
+        if not up:
+            return
+        try:
+            up["f"].close()
+        except Exception:
+            pass
+        if discard:
+            try:
+                os.remove(up["tmp"])
+            except OSError:
+                pass
+
+    def fs_list(self, msg):
+        path = "/" + str(msg.get("path", "")).strip("/")
+        entries = []
+        try:
+            for name in os.listdir(path):
+                try:
+                    st = os.stat((path.rstrip("/") + "/" + name))
+                except OSError:
+                    continue
+                entries.append({"name": name, "size": st[6],
+                                "dir": bool(st[0] & 0x4000)})
+        except OSError as e:
+            return self.fs_err("fs_list", "not_found", e)
+        self.proto.send({"t": "fs_list", "path": path, "entries": entries})
+
+    def fs_read(self, msg):
+        path = self.fs_path(msg)
+        if not path:
+            return self.fs_err("fs_read", "bad_path", msg.get("path"))
+        try:
+            f = open(path, "rb")
+        except OSError as e:
+            return self.fs_err("fs_read", "not_found", e)
+        seq = 0
+        try:
+            while True:
+                chunk = f.read(FS_CHUNK)
+                eof = len(chunk) < FS_CHUNK
+                data = b2a_base64(chunk).decode().strip() if chunk else ""
+                self.proto.send({"t": "fs_chunk", "path": path, "seq": seq,
+                                 "data": data, "eof": eof})
+                if eof:
+                    break
+                if not self.wait_fs_ack():
+                    break  # app went away mid-read
+                seq += 1
+        finally:
+            f.close()
+
+    def wait_fs_ack(self):
+        """Flow control for fs_read: one chunk in flight at a time."""
+        t0 = time.monotonic()
+        while time.monotonic() - t0 < FS_ACK_TIMEOUT_S:
+            for m in self.proto.poll():
+                self.last_rx = time.monotonic()
+                if m.get("t") == "fs_ack":
+                    return True
+                if m.get("t") == "ping":
+                    self.proto.send({"t": "pong"})
+                # anything else mid-transfer is dropped on purpose
+            self.led.tick()
+            time.sleep(0.002)
+        return False
+
+    def fs_write(self, msg):
+        path = self.fs_path(msg)
+        if not path:
+            return self.fs_err("fs_write", "bad_path", msg.get("path"))
+        seq = int(msg.get("seq") or 0)
+        if seq == 0:
+            self.close_upload(discard=True)
+            tmp = path + ".part"
+            try:
+                self.fs_mkparents(path)
+                f = open(tmp, "wb")
+            except OSError as e:
+                code = "readonly" if (e.args and e.args[0] == 30) else "io"
+                return self.fs_err("fs_write", code, e)
+            self.upload = {"path": path, "tmp": tmp, "f": f, "seq": 0}
+        up = self.upload
+        if not up or up["path"] != path or seq != up["seq"]:
+            self.close_upload(discard=True)
+            return self.fs_err("fs_write", "bad_seq", seq)
+        data = msg.get("data")
+        try:
+            if data:
+                up["f"].write(a2b_base64(data))
+        except (OSError, ValueError) as e:
+            self.close_upload(discard=True)
+            return self.fs_err("fs_write", "io", e)
+        up["seq"] += 1
+        if not msg.get("eof"):
+            return self.proto.send({"t": "ok", "re": "fs_write", "seq": seq})
+        self.upload = None
+        try:
+            up["f"].close()
+            try:
+                os.remove(path)  # FAT rename can't overwrite
+            except OSError:
+                pass
+            os.rename(up["tmp"], path)
+        except OSError as e:
+            return self.fs_err("fs_write", "io", e)
+        self.proto.send({"t": "ok", "re": "fs_write", "seq": seq, "eof": True})
+
+    def fs_mkparents(self, path):
+        parts = path.split("/")[1:-1]
+        cur = ""
+        for p in parts:
+            cur += "/" + p
+            try:
+                os.mkdir(cur)
+            except OSError:
+                pass  # already exists (or open() will surface the error)
+
+    def fs_delete(self, msg):
+        path = self.fs_path(msg)
+        if not path:
+            return self.fs_err("fs_delete", "bad_path", msg.get("path"))
+        try:
+            os.remove(path)
+        except OSError as e:
+            code = "readonly" if (e.args and e.args[0] == 30) else "not_found"
+            return self.fs_err("fs_delete", code, e)
+        self.proto.send({"t": "ok", "re": "fs_delete", "path": path})
 
     def set_mode(self, mode):
         self.mode = mode
@@ -391,6 +564,9 @@ class App:
             # app-commanded LED feedback must not outlive the app
             if self.led.override and not self.proto.connected:
                 self.led.clear_override()
+            # a half-received upload must not leak its file handle either
+            if self.upload and not self.proto.connected:
+                self.close_upload(discard=True)
             self.led.tick()
             time.sleep(0.002)
 

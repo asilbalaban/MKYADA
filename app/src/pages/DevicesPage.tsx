@@ -6,7 +6,7 @@ import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { RotateCcw, Usb } from "lucide-react";
 import { ipc } from "../lib/ipc";
-import { useDevice } from "../lib/device";
+import { isSerialDrive, useDevice } from "../lib/device";
 import {
   RememberedDevice,
   displayName,
@@ -165,7 +165,11 @@ export function DevicesPage({ onConnected }: { onConnected: () => void }) {
               <span className="text-fg font-mono text-xs">{port}</span>
               <span>USB drive</span>
               <span className="text-fg font-mono text-xs">
-                {drive ? drive.path : "not found"}
+                {isSerialDrive(drive)
+                  ? "hidden — managed by the app (Settings)"
+                  : drive
+                    ? drive.path
+                    : "not found"}
               </span>
               <span>Board UID</span>
               <span className="text-fg font-mono text-xs">{hello.uid}</span>

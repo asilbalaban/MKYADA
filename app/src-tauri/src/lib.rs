@@ -11,6 +11,7 @@ mod vars;
 
 use device::drive::{self, DriveInfo};
 use device::serial::{self, DeviceInfo, DeviceManager};
+use device::serialfs;
 use player::Preview;
 use serde_json::Value;
 use std::sync::{Arc, Mutex};
@@ -129,11 +130,13 @@ fn list_drives() -> Vec<DriveInfo> {
     drive::list_drives()
 }
 
-/// Write to the keypad drive. If the drive is read-only (FAT dirty bit on
-/// macOS, or the firmware holding the filesystem — the usual case on
-/// Windows), restart the keypad over serial and retry once it re-mounts:
-/// the cross-platform equivalent of unplug/replug. Async so the up-to-25s
-/// recovery never blocks the main thread.
+/// Write to the keypad. `drive` is either a CIRCUITPY mount point or the
+/// `serial:<uid>` sentinel (USB drive hidden — files travel over serial).
+/// If a real drive is read-only (FAT dirty bit on macOS, or the firmware
+/// holding the filesystem — the usual case on Windows), restart the keypad
+/// over serial and retry once it re-mounts: the cross-platform equivalent
+/// of unplug/replug. Async so the up-to-25s recovery never blocks the main
+/// thread.
 #[tauri::command]
 async fn drive_write(
     app: AppHandle,
@@ -142,10 +145,20 @@ async fn drive_write(
     content: String,
 ) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
-        drive_write_recovering(&app, &drive, &path, &content)
+        write_to_device(&app, &drive, &path, &content)
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+/// Route a file write to the mounted drive or the serial fs protocol.
+fn write_to_device(app: &AppHandle, drive: &str, rel: &str, content: &str) -> Result<(), String> {
+    if serialfs::is_serial(drive) {
+        let mgr = app.state::<DeviceManager>();
+        serialfs::write_file(&mgr, rel, content.as_bytes())
+    } else {
+        drive_write_recovering(app, drive, rel, content)
+    }
 }
 
 fn drive_write_recovering(
@@ -201,24 +214,56 @@ fn drive_write_recovering(
 }
 
 #[tauri::command]
-fn drive_read(drive: String, path: String) -> Result<String, String> {
-    drive::read_file(&drive, &path)
+async fn drive_read(app: AppHandle, drive: String, path: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        if serialfs::is_serial(&drive) {
+            let mgr = app.state::<DeviceManager>();
+            let bytes = serialfs::read_file(&mgr, &path)?;
+            String::from_utf8(bytes).map_err(|e| e.to_string())
+        } else {
+            drive::read_file(&drive, &path)
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-fn drive_delete(drive: String, path: String) -> Result<(), String> {
-    drive::delete_file(&drive, &path)
+async fn drive_delete(app: AppHandle, drive: String, path: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        if serialfs::is_serial(&drive) {
+            let mgr = app.state::<DeviceManager>();
+            serialfs::delete_file(&mgr, &path)
+        } else {
+            drive::delete_file(&drive, &path)
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-fn drive_list(drive: String, path: String) -> Result<Vec<String>, String> {
-    drive::list_dir(&drive, &path)
+async fn drive_list(app: AppHandle, drive: String, path: String) -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        if serialfs::is_serial(&drive) {
+            let mgr = app.state::<DeviceManager>();
+            serialfs::list_dir(&mgr, &path)
+        } else {
+            drive::list_dir(&drive, &path)
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Cleanly unmount the drive before a device reset, so the next mount
-/// doesn't come up read-only (macOS FAT dirty-bit behavior).
+/// doesn't come up read-only (macOS FAT dirty-bit behavior). A hidden
+/// drive has nothing mounted — nothing to do.
 #[tauri::command]
 fn drive_eject(drive: String) -> Result<(), String> {
+    if serialfs::is_serial(&drive) {
+        return Ok(());
+    }
     drive::eject(&drive)
 }
 
@@ -387,9 +432,10 @@ fn firmware_bundled_version(app: AppHandle) -> Result<String, String> {
         .map_err(|e| e.to_string())
 }
 
-/// Copy the bundled firmware onto the device drive. Never touches the user's
-/// config.json, macros/ or lib/ — only code + modules + VERSION. Uses the
-/// same read-only recovery as drive_write, so it's async off the main thread.
+/// Copy the bundled firmware onto the device — via its drive, or over
+/// serial when the drive is hidden. Never touches the user's config.json,
+/// macros/ or lib/ — only code + modules + VERSION. Uses the same read-only
+/// recovery as drive_write, so it's async off the main thread.
 #[tauri::command]
 async fn firmware_update(app: AppHandle, drive: String) -> Result<Vec<String>, String> {
     tauri::async_runtime::spawn_blocking(move || {
@@ -400,7 +446,7 @@ async fn firmware_update(app: AppHandle, drive: String) -> Result<Vec<String>, S
         let mut written = Vec::new();
         for name in ["boot.py", "code.py", "VERSION"] {
             let content = std::fs::read_to_string(src.join(name)).map_err(|e| e.to_string())?;
-            drive_write_recovering(&app, &drive, name, &content)?;
+            write_to_device(&app, &drive, name, &content)?;
             written.push(name.to_string());
         }
         let modules = std::fs::read_dir(src.join("mkyada")).map_err(|e| e.to_string())?;
@@ -410,7 +456,7 @@ async fn firmware_update(app: AppHandle, drive: String) -> Result<Vec<String>, S
                 continue;
             }
             let content = std::fs::read_to_string(entry.path()).map_err(|e| e.to_string())?;
-            drive_write_recovering(&app, &drive, &format!("mkyada/{file}"), &content)?;
+            write_to_device(&app, &drive, &format!("mkyada/{file}"), &content)?;
             written.push(format!("mkyada/{file}"));
         }
         Ok(written)

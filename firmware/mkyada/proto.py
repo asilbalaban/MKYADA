@@ -8,7 +8,9 @@ import usb_cdc
 
 
 class Proto:
-    MAX_LINE = 1024  # commands are tiny; big data travels via the CIRCUITPY drive
+    # Commands are tiny, but fs_write lines carry ~2.7KB of base64 when the
+    # USB drive is hidden and files travel over serial instead.
+    MAX_LINE = 16384
 
     def __init__(self):
         self.ser = usb_cdc.data

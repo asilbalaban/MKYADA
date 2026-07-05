@@ -1,4 +1,4 @@
-# MKYADA serial protocol (v2)
+# MKYADA serial protocol (v3)
 
 v2 (firmware 0.3.0) adds: `btn` streaming in standalone mode, the `key_action`
 announcement for key-logic variants, and the `led` feedback override. v1 hosts
@@ -52,6 +52,10 @@ STANDALONE ──(host_enter)──► HOST ──(host_leave | CDC disconnect |
 | `{"t":"reload"}` | Re-read `config.json` (send after writing files); resets layer to A; replies `ok` + fresh `hello` |
 | `{"t":"set_layer","layer":"b"}` | Force the active layer |
 | `{"t":"led","mode":"solid","rgb":[255,0,0]}` | v2. Override the status LED with a feedback color (`mode`: `solid` \| `blink` \| `off`). Playback blinks still win; the override auto-clears when the app disconnects, so the standalone LED grammar is untouched. |
+| `{"t":"fs_list","path":"macros"}` | v3. Reply with `fs_list` (directory entries) |
+| `{"t":"fs_read","path":"macros/key1.json"}` | v3. Stream the file back as `fs_chunk` messages; the host must answer each non-final chunk with `{"t":"fs_ack"}` (one chunk in flight) |
+| `{"t":"fs_write","path":"macros/key1.json","seq":0,"data":"<base64>","eof":false}` | v3. Chunked upload (≤3 KB raw per chunk); every chunk is acknowledged with `ok`. Written to `<path>.part`, renamed into place on `eof` — a dropped transfer never corrupts the target. Needs a writable filesystem, i.e. `usb_drive: false` (otherwise `err readonly`) |
+| `{"t":"fs_delete","path":"macros/key1.json"}` | v3. Delete a file; replies `ok` |
 
 ## Device → Host
 
@@ -66,10 +70,26 @@ STANDALONE ──(host_enter)──► HOST ──(host_leave | CDC disconnect |
 | `{"t":"ok","re":"reload"}` | Command acknowledged |
 | `{"t":"err","re":"play","code":"not_found","msg":"/macros/key9.json"}` | Codes: `not_found`, `bad_json`, `bad_format`, `oom` |
 | `{"t":"pong"}` | Reply to `ping` |
+| `{"t":"fs_list","path":"/macros","entries":[{"name":"key1.json","size":123,"dir":false}]}` | v3. Reply to `fs_list` |
+| `{"t":"fs_chunk","path":"/macros/key1.json","seq":0,"data":"<base64>","eof":true}` | v3. `fs_read` stream; the last chunk carries `eof: true` |
+| `{"t":"ok","re":"fs_write","seq":3,"eof":true}` | v3. Chunk acknowledged (final ack carries `eof`) |
+| `{"t":"err","re":"fs_write","code":"readonly"}` | v3. fs codes: `bad_path`, `bad_seq`, `not_found`, `readonly` (drive visible → host owns the filesystem), `io`, `busy` (mid-playback) |
 
 ## Playback interaction rules
 
 - During playback the device still answers `ping`/`identify` and honors `stop`.
 - **Panic stop:** pressing the key that started the macro (standalone), or any
   key (host-commanded playback), aborts it and releases all pressed inputs.
-- All other commands received during playback are ignored.
+- `fs_*` commands during playback are answered with `err busy` (so the app
+  never waits on a reply that will not come); everything else is ignored.
+
+## Hidden-drive mode (v3)
+
+`config.json` may set `"usb_drive": false`: boot.py then hides the CIRCUITPY
+drive from the host (finished-product mode) and remounts the filesystem
+writable for the firmware, which is what makes `fs_write`/`fs_delete`
+possible. The app manages every file over the `fs_*` commands and passes a
+`serial:<uid>` sentinel instead of a mount path internally. `hello` reports
+the state as `usb_drive` (absent on firmware < 0.4.0). Recovery without the
+app: hold key 1 (GP0) while plugging the keypad in — the drive comes back
+for that session.

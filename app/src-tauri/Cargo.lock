@@ -2397,6 +2397,7 @@ name = "mkyada"
 version = "0.4.2"
 dependencies = [
  "active-win-pos-rs",
+ "base64 0.22.1",
  "enigo",
  "macos-accessibility-client",
  "rdev",
