@@ -4,7 +4,7 @@
 
 # MKYADA
 
-**M**acro **K**eyboard **Y**ou **A**lways **D**ream **A**bout — an open-source, DIY **macro keypad** (6 keys in the reference build, up to 20 supported) built on the Waveshare **RP2040-Zero**, with a cross-platform desktop configurator. It records your mouse and keyboard, then replays them as **real hardware HID input** — so your macros work even in games that ignore software automation.
+**M**acro **K**eypad **Y**ou **A**lways **D**ream **A**bout — an open-source, DIY **macro keypad** (6 keys in the reference build, up to 20 supported) built on the Waveshare **RP2040-Zero**, with a cross-platform desktop configurator. It records your mouse and keyboard, then replays them as **real hardware HID input** — so your macros work even in games that ignore software automation.
 
 <p align="center">
   <img src="docs/images/mkyada-topview-1800.jpg" alt="MKYADA — 6-key macro keypad with backlit mechanical keys and USB-C" width="560">
