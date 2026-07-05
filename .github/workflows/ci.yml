@@ -39,8 +39,21 @@ jobs:
         run: |
           npm ci
           npm run build
+      - name: No dev/screenshot scaffolding in dist
+        working-directory: app
+        run: |
+          if grep -riq "mock-tauri" dist/index.html; then
+            echo "dist/index.html references mock-tauri — dev scaffolding leaked into the build"
+            exit 1
+          fi
       - name: Recorder model tests
         run: npx -y tsx tests/model_test.ts
+      - name: Unit tests (round-trip, layout, contract fixtures)
+        working-directory: app
+        run: npx vitest run
       - name: Rust check
         working-directory: app/src-tauri
         run: cargo check --locked
+      - name: Rust lint
+        working-directory: app/src-tauri
+        run: cargo clippy --all-targets --locked -- -D warnings

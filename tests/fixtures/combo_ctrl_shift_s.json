@@ -1,0 +1,51 @@
+{
+  "format": "mkyada-macro",
+  "version": 2,
+  "name": "CTRL+SHIFT+S",
+  "kind": "combo",
+  "combo": {
+    "mods": [
+      "CTRL",
+      "SHIFT"
+    ],
+    "key": "s"
+  },
+  "events": [
+    {
+      "delay": 0,
+      "type": "key",
+      "action": "down",
+      "key": "ctrl_l"
+    },
+    {
+      "delay": 10,
+      "type": "key",
+      "action": "down",
+      "key": "shift_l"
+    },
+    {
+      "delay": 10,
+      "type": "key",
+      "action": "down",
+      "key": "s"
+    },
+    {
+      "delay": 30,
+      "type": "key",
+      "action": "up",
+      "key": "s"
+    },
+    {
+      "delay": 10,
+      "type": "key",
+      "action": "up",
+      "key": "shift_l"
+    },
+    {
+      "delay": 10,
+      "type": "key",
+      "action": "up",
+      "key": "ctrl_l"
+    }
+  ]
+}

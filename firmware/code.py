@@ -32,7 +32,7 @@ PIN_ORDER = (
 )
 DEBOUNCE_S = 0.02
 PING_TIMEOUT_S = 5.0
-PROTO_VERSION = 1
+PROTO_VERSION = 2  # v2: key_action + led ops, btn streamed in standalone too
 MACRO_FORMATS = ("mkyada-macro", "asil-macro")
 LAYER_NAMES = "abcdefgh"
 
@@ -192,6 +192,15 @@ class App:
                 self.led.set(layer=self.layer)
                 self.proto.send({"t": "ok", "re": "set_layer"})
                 self.announce_layer()
+        elif t == "led":
+            # app feedback color (e.g. mic muted -> red); "off" restores the
+            # normal LED grammar. Cleared automatically on app disconnect.
+            mode = str(msg.get("mode", "off"))
+            if mode == "off":
+                self.led.clear_override()
+            else:
+                self.led.set_override(mode, msg.get("rgb") or (255, 0, 0))
+            self.proto.send({"t": "ok", "re": "led"})
         return False
 
     def announce_layer(self):
@@ -202,6 +211,34 @@ class App:
         self.mode = mode
         self.led.set(state=ledmod.HOST if mode == "host" else ledmod.IDLE,
                      layer=self.layer)
+
+    # --- key logic (macro format v3) ---
+    def resolve_variant(self, i, variants, settings):
+        """Decide tap / double press / long press for pressed key i.
+        Top-level events are the tap; variants hold the alternatives.
+        Blocks briefly (bounded by hold_ms / double_ms), like playback does.
+        Zero added latency when only a tap exists — callers skip this."""
+        hold_s = (settings.get("hold_ms") or 400) / 1000.0
+        double_s = (settings.get("double_ms") or 250) / 1000.0
+        has_hold = isinstance(variants.get("hold"), dict)
+        has_double = isinstance(variants.get("double"), dict)
+        t0 = time.monotonic()
+        while self.buttons.stable[i]:
+            if has_hold and time.monotonic() - t0 >= hold_s:
+                return "hold"
+            self.buttons.scan()
+            self.led.tick()
+            time.sleep(0.002)
+        if not has_double:
+            return "tap"
+        t1 = time.monotonic()
+        while time.monotonic() - t1 < double_s:
+            for j, pressed in self.buttons.scan():
+                if j == i and pressed:
+                    return "double"
+            self.led.tick()
+            time.sleep(0.002)
+        return "tap"
 
     # --- playback ---
     def play_file(self, path, trigger=None, speed=None, repeat=None):
@@ -226,6 +263,25 @@ class App:
             self.led.error()
             self.proto.send({"t": "err", "re": "play", "code": "bad_format", "msg": path})
             return
+
+        # key logic: standalone presses pick tap/double/hold themselves; the
+        # chosen variant is announced so the app can run host-side variants
+        # (launch/command/sound compile to empty events on the device)
+        variants = data.get("variants")
+        if trigger is not None and isinstance(variants, dict) and variants:
+            choice = self.resolve_variant(trigger, variants,
+                                          data.get("settings") or {})
+            if self.proto.connected:
+                self.proto.send({"t": "key_action", "file": path,
+                                 "key": self.config["key_map"][trigger],
+                                 "layer": LAYER_NAMES[self.layer],
+                                 "variant": choice})
+            if choice != "tap":
+                v = variants.get(choice) or {}
+                data["events"] = v.get("events") or []
+                s = dict(data.get("settings") or {})
+                s.update(v.get("settings") or {})
+                data["settings"] = s
 
         settings = data.get("settings") or {}
         if speed is None:
@@ -296,10 +352,14 @@ class App:
     def on_edge(self, i, pressed):
         c = self.config
         key_no = c["key_map"][i]  # logical key; i is the GPIO (solder) index
-        if self.mode == "host":
+        # stream edges to a connected app in BOTH modes: standalone edges
+        # power computer-side key actions (launch/command/sound) and the live
+        # keypad view even when no profile holds host mode
+        if self.mode == "host" or self.proto.connected:
             self.proto.send({"t": "btn", "key": key_no, "phys": i + 1,
                              "layer": LAYER_NAMES[self.layer],
                              "edge": "down" if pressed else "up"})
+        if self.mode == "host":
             return
         if c["layer_key"] == key_no:
             if pressed:
@@ -328,6 +388,9 @@ class App:
                 if (not self.proto.connected
                         or time.monotonic() - self.last_rx > PING_TIMEOUT_S):
                     self.set_mode("standalone")
+            # app-commanded LED feedback must not outlive the app
+            if self.led.override and not self.proto.connected:
+                self.led.clear_override()
             self.led.tick()
             time.sleep(0.002)
 

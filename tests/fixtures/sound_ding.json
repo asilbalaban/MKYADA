@@ -1,0 +1,8 @@
+{
+  "format": "mkyada-macro",
+  "version": 2,
+  "name": "Sound ding.mp3",
+  "kind": "sound",
+  "sound": "sounds/ding.mp3",
+  "events": []
+}

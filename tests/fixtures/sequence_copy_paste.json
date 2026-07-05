@@ -1,0 +1,82 @@
+{
+  "format": "mkyada-macro",
+  "version": 2,
+  "name": "Sequence (2 steps)",
+  "kind": "sequence",
+  "seq": [
+    {
+      "a": {
+        "kind": "combo",
+        "mods": [
+          "CTRL"
+        ],
+        "key": "c"
+      },
+      "delayMs": 150
+    },
+    {
+      "a": {
+        "kind": "combo",
+        "mods": [
+          "CTRL"
+        ],
+        "key": "v"
+      },
+      "delayMs": 0
+    }
+  ],
+  "events": [
+    {
+      "delay": 0,
+      "type": "key",
+      "action": "down",
+      "key": "ctrl_l"
+    },
+    {
+      "delay": 10,
+      "type": "key",
+      "action": "down",
+      "key": "c"
+    },
+    {
+      "delay": 30,
+      "type": "key",
+      "action": "up",
+      "key": "c"
+    },
+    {
+      "delay": 10,
+      "type": "key",
+      "action": "up",
+      "key": "ctrl_l"
+    },
+    {
+      "delay": 150,
+      "type": "wait"
+    },
+    {
+      "delay": 0,
+      "type": "key",
+      "action": "down",
+      "key": "ctrl_l"
+    },
+    {
+      "delay": 10,
+      "type": "key",
+      "action": "down",
+      "key": "v"
+    },
+    {
+      "delay": 30,
+      "type": "key",
+      "action": "up",
+      "key": "v"
+    },
+    {
+      "delay": 10,
+      "type": "key",
+      "action": "up",
+      "key": "ctrl_l"
+    }
+  ]
+}

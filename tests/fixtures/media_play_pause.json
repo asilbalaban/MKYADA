@@ -1,0 +1,14 @@
+{
+  "format": "mkyada-macro",
+  "version": 2,
+  "name": "play_pause",
+  "kind": "media",
+  "media": "play_pause",
+  "events": [
+    {
+      "delay": 0,
+      "type": "consumer",
+      "usage": "play_pause"
+    }
+  ]
+}

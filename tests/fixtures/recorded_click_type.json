@@ -1,0 +1,57 @@
+{
+  "format": "mkyada-macro",
+  "version": 2,
+  "name": "click-and-type",
+  "kind": "recorded",
+  "screen": {
+    "width": 1920,
+    "height": 1080
+  },
+  "events": [
+    {
+      "delay": 0,
+      "type": "move",
+      "x": 960,
+      "y": 540
+    },
+    {
+      "delay": 10,
+      "type": "button",
+      "action": "down",
+      "button": "left",
+      "x": 960,
+      "y": 540
+    },
+    {
+      "delay": 30,
+      "type": "button",
+      "action": "up",
+      "button": "left",
+      "x": 960,
+      "y": 540
+    },
+    {
+      "delay": 5,
+      "type": "key",
+      "action": "down",
+      "key": "m",
+      "vk": 77
+    },
+    {
+      "delay": 20,
+      "type": "key",
+      "action": "up",
+      "key": "m",
+      "vk": 77
+    },
+    {
+      "delay": 0,
+      "type": "scroll",
+      "dy": -2
+    },
+    {
+      "delay": 50,
+      "type": "wait"
+    }
+  ]
+}

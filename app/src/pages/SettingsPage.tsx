@@ -1,18 +1,25 @@
 import { useEffect, useState } from "react";
 import { getVersion } from "@tauri-apps/api/app";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { Monitor, Moon, Pin, Sun } from "lucide-react";
+import { MicOff, Monitor, Moon, Pin, Power, Rocket, Sun } from "lucide-react";
 import { ipc } from "../lib/ipc";
 import type { UpdateInfo } from "../lib/types";
 import {
   setAlwaysOnTop,
+  setAutostart,
+  setLedMicFeedback,
+  setRunInBackground,
   setThemePref,
   ThemePref,
   useAlwaysOnTop,
+  useAutostart,
+  useLedMicFeedback,
+  useRunInBackground,
   useThemePref,
 } from "../lib/settings";
 import { Badge, Button, Card } from "../components/ui";
 import { PermissionsCard } from "../components/Permissions";
+import { SystemStatusStrip } from "../components/SystemStatus";
 
 const THEME_OPTIONS: { value: ThemePref; label: string; icon: typeof Sun }[] = [
   { value: "system", label: "System", icon: Monitor },
@@ -46,25 +53,98 @@ function AppearanceCard() {
 
 function WindowCard() {
   const pinned = useAlwaysOnTop();
+  const runBg = useRunInBackground();
+  const autostart = useAutostart();
   return (
     <Card title="Window">
-      <div className="flex items-center justify-between gap-4">
-        <div className="flex flex-col gap-0.5 text-sm">
-          <span className="text-fg font-medium">Always on top</span>
-          <span className="text-xs text-fg-faint">
-            Keep MKYADA above other windows (like a game) while you fine-tune macro
-            coordinates.
-          </span>
+      <div className="flex flex-col gap-4">
+        <div className="flex items-center justify-between gap-4">
+          <div className="flex flex-col gap-0.5 text-sm">
+            <span className="text-fg font-medium">Always on top</span>
+            <span className="text-xs text-fg-faint">
+              Keep MKYADA above other windows (like a game) while you fine-tune macro
+              coordinates.
+            </span>
+          </div>
+          <Button
+            variant={pinned ? "primary" : "default"}
+            role="switch"
+            aria-checked={pinned}
+            onClick={() => setAlwaysOnTop(!pinned)}
+          >
+            <Pin size={14} aria-hidden className={pinned ? "" : "rotate-45"} />
+            {pinned ? "On" : "Off"}
+          </Button>
         </div>
-        <Button
-          variant={pinned ? "primary" : "default"}
-          role="switch"
-          aria-checked={pinned}
-          onClick={() => setAlwaysOnTop(!pinned)}
-        >
-          <Pin size={14} aria-hidden className={pinned ? "" : "rotate-45"} />
-          {pinned ? "On" : "Off"}
-        </Button>
+
+        <div className="flex items-center justify-between gap-4">
+          <div className="flex flex-col gap-0.5 text-sm">
+            <span className="text-fg font-medium">Keep running in the background</span>
+            <span className="text-xs text-fg-faint">
+              Closing the window hides MKYADA to the system tray, so key actions
+              (open app, run command, sounds) and per-app profiles keep working.
+              Quit for real from the tray icon.
+            </span>
+          </div>
+          <Button
+            variant={runBg ? "primary" : "default"}
+            role="switch"
+            aria-checked={runBg}
+            onClick={() => setRunInBackground(!runBg)}
+          >
+            <Power size={14} aria-hidden />
+            {runBg ? "On" : "Off"}
+          </Button>
+        </div>
+
+        <div className="flex items-center justify-between gap-4">
+          <div className="flex flex-col gap-0.5 text-sm">
+            <span className="text-fg font-medium">Start at login</span>
+            <span className="text-xs text-fg-faint">
+              Launch MKYADA automatically when you sign in, so the keypad's
+              computer-side actions are always ready.
+            </span>
+          </div>
+          <Button
+            variant={autostart ? "primary" : "default"}
+            role="switch"
+            aria-checked={autostart}
+            onClick={() => setAutostart(!autostart)}
+          >
+            <Rocket size={14} aria-hidden />
+            {autostart ? "On" : "Off"}
+          </Button>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+function FeedbackCard() {
+  const ledMic = useLedMicFeedback();
+  return (
+    <Card title="Live feedback">
+      <div className="flex flex-col gap-3">
+        <SystemStatusStrip />
+        <div className="flex items-center justify-between gap-4">
+          <div className="flex flex-col gap-0.5 text-sm">
+            <span className="text-fg font-medium">Keypad LED shows mic status</span>
+            <span className="text-xs text-fg-faint">
+              The keypad's LED turns solid red while your microphone is muted —
+              a glance tells you if you're live. Reverts the moment the app
+              disconnects.
+            </span>
+          </div>
+          <Button
+            variant={ledMic ? "primary" : "default"}
+            role="switch"
+            aria-checked={ledMic}
+            onClick={() => setLedMicFeedback(!ledMic)}
+          >
+            <MicOff size={14} aria-hidden />
+            {ledMic ? "On" : "Off"}
+          </Button>
+        </div>
       </div>
     </Card>
   );
@@ -96,6 +176,7 @@ export function SettingsPage() {
     <div className="flex flex-col gap-4 max-w-3xl mx-auto w-full">
       <AppearanceCard />
       <WindowCard />
+      <FeedbackCard />
       <PermissionsCard />
       <Card title="About">
         <div className="flex flex-col gap-2 text-sm text-fg">

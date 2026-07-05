@@ -24,9 +24,28 @@ import { useDevice } from "./device";
 /** Holding a sound key this long stops all playing sounds instead of playing. */
 const SOUND_HOLD_STOP_MS = 400;
 import { ipc } from "./ipc";
-import type { Assignment, DriveInfo, ForegroundInfo, MacroFile, Profile, SoundHoldAction } from "./types";
-import { LAYER_NAMES } from "./types";
-import { compileAssignment, macroFileName, profileMacroFileName } from "./macro-model";
+import type {
+  Assignment,
+  DriveInfo,
+  ForegroundInfo,
+  MacroFile,
+  Profile,
+  SequenceStep,
+  SoundHoldAction,
+} from "./types";
+import { DOUBLE_MS_DEFAULT, HOLD_MS_DEFAULT, LAYER_NAMES } from "./types";
+import {
+  AUX_FILE_RE,
+  compileAssignment,
+  compileSequenceParts,
+  compileVariantParts,
+  macroFileName,
+  profileMacroFileName,
+  sequenceIsPureHid,
+  sequencePartFileName,
+  stepIsHid,
+  variantPartFileName,
+} from "./macro-model";
 
 /** Perform a computer-side key action (Stream Deck style): open an
  *  app/file/URL, run a shell command or play a sound. HID can't do these,
@@ -67,12 +86,16 @@ function matches(p: Profile, fg: ForegroundInfo): boolean {
 }
 
 export function ProfilesProvider({ children }: { children: ReactNode }) {
-  const { port, drive, send, onBtn } = useDevice();
+  const { port, drive, send, onBtn, onMsg } = useDevice();
   const driveRef = useRef<DriveInfo | null>(null);
   driveRef.current = drive;
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [foreground, setForeground] = useState<ForegroundInfo>({ exe: "", title: "" });
   const [enabled, setEnabledState] = useState(true);
+  // tray "Pause key actions": suspends profiles AND global host actions
+  const [paused, setPaused] = useState(false);
+  const pausedRef = useRef(false);
+  pausedRef.current = paused;
   const activeRef = useRef<Profile | null>(null);
   const [activeProfile, setActiveProfile] = useState<Profile | null>(null);
 
@@ -84,17 +107,20 @@ export function ProfilesProvider({ children }: { children: ReactNode }) {
       await invoke("foreground_start");
     })();
     const un = listen("foreground:changed", (e) => setForeground(e.payload as ForegroundInfo));
+    const unPause = listen("host:paused", (e) => setPaused(e.payload as boolean));
     return () => {
       un.then((f) => f());
+      unPause.then((f) => f());
     };
   }, []);
 
   // resolve the active profile whenever anything relevant changes
   useEffect(() => {
-    const active = enabled && port ? profiles.find((p) => matches(p, foreground)) ?? null : null;
+    const active =
+      enabled && !paused && port ? profiles.find((p) => matches(p, foreground)) ?? null : null;
     activeRef.current = active;
     setActiveProfile(active);
-  }, [enabled, port, profiles, foreground]);
+  }, [enabled, paused, port, profiles, foreground]);
 
   // hold host mode while a profile is active; release it otherwise.
   // host_enter doubles as the watchdog ping and re-asserts host mode in case
@@ -108,6 +134,133 @@ export function ProfilesProvider({ children }: { children: ReactNode }) {
       void send({ t: "host_leave" });
     };
   }, [port, activeProfile, send]);
+
+  // ---- mixed-sequence orchestration -------------------------------------
+  // Pure-HID sequences are one macro file the keypad plays by itself. Mixed
+  // ones run here: HID steps as pre-compiled part files played over serial
+  // (still hardware HID, awaiting play_done), host steps performed directly.
+  const seqActive = useRef(new Map<string, { cancelled: boolean }>());
+  const playDoneWaiters = useRef<(() => void)[]>([]);
+
+  useEffect(
+    () =>
+      onMsg((m) => {
+        if (m.t === "play_done") playDoneWaiters.current.shift()?.();
+      }),
+    [onMsg],
+  );
+
+  const waitPlayDone = useCallback((timeoutMs = 60_000) => {
+    return new Promise<void>((resolve) => {
+      const entry = () => {
+        clearTimeout(timer);
+        resolve();
+      };
+      playDoneWaiters.current.push(entry);
+      const timer = setTimeout(() => {
+        const idx = playDoneWaiters.current.indexOf(entry);
+        if (idx >= 0) playDoneWaiters.current.splice(idx, 1);
+        resolve();
+      }, timeoutMs);
+    });
+  }, []);
+
+  const runSequence = useCallback(
+    async (keyId: string, steps: SequenceStep[], mainFile: string) => {
+      const running = seqActive.current.get(keyId);
+      if (running) {
+        // pressing the key again mid-sequence stops it (on_repress semantics)
+        running.cancelled = true;
+        void send({ t: "stop" });
+        return;
+      }
+      const state = { cancelled: false };
+      seqActive.current.set(keyId, state);
+      try {
+        for (let i = 0; i < steps.length && !state.cancelled; i++) {
+          const step = steps[i];
+          if (stepIsHid(step)) {
+            const done = waitPlayDone();
+            await send({ t: "play", file: sequencePartFileName(mainFile, i) });
+            await done;
+          } else if (step.a.kind === "sound") {
+            void playSound(step.a.file).catch(() => {});
+          } else {
+            runHostAction(step.a);
+          }
+          if (!state.cancelled && step.delayMs > 0 && i < steps.length - 1) {
+            await new Promise((r) => setTimeout(r, step.delayMs));
+          }
+        }
+      } finally {
+        seqActive.current.delete(keyId);
+      }
+    },
+    [send, waitPlayDone],
+  );
+
+  // ---- key logic (tap / double / hold) for PROFILE keys ------------------
+  // In host mode the device only streams edges — the app is the decider,
+  // using the same timing rules as the firmware's standalone resolver.
+  // (Global keys: the FIRMWARE decides and announces via "key_action".)
+  interface KlState {
+    phase: "down" | "wait2";
+    holdTimer?: number;
+    doubleTimer?: number;
+    hasDouble: boolean;
+    run: (choice: "tap" | "double" | "hold") => void;
+  }
+  const klStates = useRef(new Map<string, KlState>());
+
+  const startKeyLogic = useCallback(
+    (keyId: string, a: Assignment, run: KlState["run"]) => {
+      const st: KlState = {
+        phase: "down",
+        hasDouble: !!a.variants?.double,
+        run,
+      };
+      if (a.variants?.hold) {
+        st.holdTimer = window.setTimeout(() => {
+          klStates.current.delete(keyId);
+          run("hold");
+        }, HOLD_MS_DEFAULT);
+      }
+      klStates.current.set(keyId, st);
+    },
+    [],
+  );
+
+  // firmware announcements for GLOBAL keys with variants: the device chose
+  // tap/double/hold and played any HID events itself; we perform host-side
+  // variants (launch/command/sound, mixed sequences)
+  useEffect(
+    () =>
+      onMsg((m) => {
+        if (m.t !== "key_action" || pausedRef.current) return;
+        const d = driveRef.current;
+        if (!d) return;
+        const file = String(m.file ?? "").replace(/^\//, "");
+        void ipc
+          .driveRead(d.path, file)
+          .then((raw) => {
+            const mf = JSON.parse(raw) as MacroFile;
+            const variant = String(m.variant ?? "tap");
+            const node =
+              variant === "tap" ? mf : mf.variants?.[variant as "double" | "hold"];
+            if (!node) return;
+            if (node.kind === "sound" && node.sound) {
+              void playSound(node.sound).catch(() => {});
+            } else if (node.kind === "launch" || node.kind === "command") {
+              runHostAction(node);
+            } else if (node.kind === "sequence" && !node.events?.length && node.seq?.length) {
+              void runSequence(`${m.key}:${m.layer}`, node.seq, file);
+            }
+          })
+          .catch(() => {});
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [onMsg],
+  );
 
   // Sound keys play on RELEASE: a quick tap plays, holding the key past
   // SOUND_HOLD_STOP_MS stops everything that's playing instead — the escape
@@ -142,6 +295,22 @@ export function ProfilesProvider({ children }: { children: ReactNode }) {
         const keyId = `${e.key}:${e.layer ?? "a"}`;
         if (e.edge === "up") {
           heldKeys.current.delete(keyId);
+          // key logic: a release during the "down" phase means tap —
+          // immediately, or after the double-press window if one exists
+          const kl = klStates.current.get(keyId);
+          if (kl && kl.phase === "down") {
+            if (kl.holdTimer !== undefined) clearTimeout(kl.holdTimer);
+            if (kl.hasDouble) {
+              kl.phase = "wait2";
+              kl.doubleTimer = window.setTimeout(() => {
+                klStates.current.delete(keyId);
+                kl.run("tap");
+              }, DOUBLE_MS_DEFAULT);
+            } else {
+              klStates.current.delete(keyId);
+              kl.run("tap");
+            }
+          }
           const armed = armedSounds.current.get(keyId);
           if (armed) {
             clearTimeout(armed.timer);
@@ -151,13 +320,46 @@ export function ProfilesProvider({ children }: { children: ReactNode }) {
           return;
         }
         heldKeys.current.add(keyId);
+        if (pausedRef.current) return;
+        // key logic: a second press inside the double window fires "double"
+        const klPending = klStates.current.get(keyId);
+        if (klPending?.phase === "wait2") {
+          if (klPending.doubleTimer !== undefined) clearTimeout(klPending.doubleTimer);
+          klStates.current.delete(keyId);
+          klPending.run("double");
+          return;
+        }
         const profile = activeRef.current;
         if (profile) {
           const a = profile.keys[String(e.key)];
           if (!a || a.kind === "none") return;
+          const mainFile = profileMacroFileName(profile.id, e.key);
+          if (a.variants?.double || a.variants?.hold) {
+            // the device is in host mode and won't resolve variants itself —
+            // we time the gesture and play/perform the chosen action
+            return startKeyLogic(keyId, a, (choice) => {
+              const chosen = choice === "tap" ? a : a.variants?.[choice];
+              if (!chosen || chosen.kind === "none") return;
+              if (chosen.kind === "sound") {
+                void playSound(chosen.file).catch(() => {});
+              } else if (chosen.kind === "launch" || chosen.kind === "command") {
+                runHostAction(chosen);
+              } else if (chosen.kind === "sequence" && !sequenceIsPureHid(chosen.steps)) {
+                void runSequence(keyId, chosen.steps, mainFile);
+              } else if (choice === "tap") {
+                void send({ t: "play", file: mainFile });
+              } else {
+                void send({ t: "play", file: variantPartFileName(mainFile, choice) });
+              }
+            });
+          }
           if (a.kind === "sound") return armSound(keyId, a.file, a.holdAction);
           if (a.kind === "launch" || a.kind === "command") return runHostAction(a);
-          void send({ t: "play", file: profileMacroFileName(profile.id, e.key) });
+          if (a.kind === "sequence" && !sequenceIsPureHid(a.steps)) {
+            return void runSequence(keyId, a.steps, mainFile);
+          }
+          // pure-HID sequences compiled into the profile macro file itself
+          void send({ t: "play", file: mainFile });
           return;
         }
         const d = driveRef.current;
@@ -167,12 +369,23 @@ export function ProfilesProvider({ children }: { children: ReactNode }) {
           .driveRead(d.path, macroFileName(e.key, layerIndex))
           .then((raw) => {
             const m = JSON.parse(raw) as MacroFile;
+            // key logic: the firmware resolves tap/double/hold itself and
+            // announces the choice as "key_action" — handled elsewhere
+            if (m.variants && (m.variants.double || m.variants.hold)) return;
+            if (m.kind === "sequence") {
+              // pure-HID: the keypad already played it standalone; mixed:
+              // the main file is a no-op and the steps run here
+              if (!m.events.length && m.seq?.length) {
+                void runSequence(keyId, m.seq, macroFileName(e.key, layerIndex));
+              }
+              return;
+            }
             if (m.kind === "sound" && m.sound) armSound(keyId, m.sound, m.sound_hold);
             else runHostAction(m);
           })
           .catch(() => {}); // unassigned key or drive hiccup — nothing to do
       }),
-    [onBtn, send, armSound],
+    [onBtn, send, armSound, runSequence, startKeyLogic],
   );
 
   const setEnabled = useCallback((on: boolean) => {
@@ -195,6 +408,23 @@ export function ProfilesProvider({ children }: { children: ReactNode }) {
             await ipc.driveWrite(drive.path, file, JSON.stringify(macro));
           } else {
             await ipc.driveDelete(drive.path, file).catch(() => {});
+          }
+          // auxiliary files: mixed-sequence steps + key-logic variants the
+          // app plays over serial in host mode; sweep stale ones
+          const parts = [
+            ...compileSequenceParts(a as Assignment, file),
+            ...compileVariantParts(a as Assignment, file),
+          ];
+          for (const part of parts) {
+            await ipc.driveWrite(drive.path, part.path, JSON.stringify(part.file));
+          }
+          const stem = file.split("/").pop()!.replace(/\.json$/, ".");
+          const keep = new Set(parts.map((part) => part.path.split("/").pop()));
+          const existing = await ipc.driveList(drive.path, "macros").catch(() => [] as string[]);
+          for (const f of existing) {
+            if (f.startsWith(stem) && AUX_FILE_RE.test(f) && !keep.has(f)) {
+              await ipc.driveDelete(drive.path, `macros/${f}`).catch(() => {});
+            }
           }
         }
       }

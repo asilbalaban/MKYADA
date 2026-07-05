@@ -55,7 +55,16 @@ export interface MacroFile {
   version: number;
   name?: string;
   created?: string;
-  kind?: "keystroke" | "combo" | "text" | "media" | "recorded" | "launch" | "command" | "sound";
+  kind?:
+    | "keystroke"
+    | "combo"
+    | "text"
+    | "media"
+    | "recorded"
+    | "launch"
+    | "command"
+    | "sound"
+    | "sequence";
   combo?: { mods: string[]; key: string };
   text?: string;
   media?: string;
@@ -67,6 +76,14 @@ export interface MacroFile {
   sound?: string;
   /** sound kind: what holding the key does (default "stop") */
   sound_hold?: SoundHoldAction;
+  /** sequence kind: the editable steps. Pure-HID sequences also compile
+   * their steps into `events` (standalone); mixed ones leave `events` empty
+   * and the desktop app orchestrates the steps. */
+  seq?: SequenceStep[];
+  /** Key logic (format v3): top-level `events` is the tap action; double
+   * press / long press play these instead. Old firmware ignores this field
+   * and simply plays the tap — graceful degradation. */
+  variants?: { double?: MacroFile; hold?: MacroFile };
   screen?: { width: number; height: number };
   settings?: MacroSettings;
   events: MacroEvent[];
@@ -79,7 +96,15 @@ export interface MacroSettings {
   on_repress?: "stop" | "restart";
   /** replay while the physical key is held — like holding a letter key down */
   hold_repeat?: boolean;
+  /** key logic: press-and-hold threshold in ms (default 400) */
+  hold_ms?: number;
+  /** key logic: double-press window in ms (default 250) */
+  double_ms?: number;
 }
+
+/** Key-logic timing defaults, shared with the firmware. */
+export const HOLD_MS_DEFAULT = 400;
+export const DOUBLE_MS_DEFAULT = 250;
 
 /** What holding a sound key (~half a second) does. */
 export type SoundHoldAction = "stop" | "fade" | "restart";
@@ -102,7 +127,24 @@ export type Assignment = (
   | { kind: "launch"; target: string }
   | { kind: "command"; command: string }
   | { kind: "sound"; file: string; holdAction?: SoundHoldAction }
-) & { behavior?: AssignmentBehavior };
+  // Stream Deck-style multi action: run several actions with one press
+  | { kind: "sequence"; steps: SequenceStep[] }
+) & { behavior?: AssignmentBehavior; variants?: AssignmentVariants };
+
+/** One step of a sequence; `delayMs` is an extra pause AFTER the step. */
+export interface SequenceStep {
+  /** any assignment except another sequence (no nesting) */
+  a: Assignment;
+  delayMs: number;
+}
+
+/** Key logic: alternative actions for double press / long press. The main
+ * assignment itself is the tap. Variant assignments carry no variants of
+ * their own and can't be sequences. Mutually exclusive with hold_repeat. */
+export interface AssignmentVariants {
+  double?: Assignment;
+  hold?: Assignment;
+}
 
 export interface Profile {
   id: string;

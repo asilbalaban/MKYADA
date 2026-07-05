@@ -1,0 +1,153 @@
+{
+  "format": "mkyada-macro",
+  "version": 2,
+  "name": "Type: Hello 123!",
+  "kind": "text",
+  "text": "Hello 123!",
+  "events": [
+    {
+      "delay": 0,
+      "type": "key",
+      "action": "down",
+      "key": "shift_l"
+    },
+    {
+      "delay": 5,
+      "type": "key",
+      "action": "down",
+      "key": "h"
+    },
+    {
+      "delay": 20,
+      "type": "key",
+      "action": "up",
+      "key": "h"
+    },
+    {
+      "delay": 5,
+      "type": "key",
+      "action": "up",
+      "key": "shift_l"
+    },
+    {
+      "delay": 10,
+      "type": "key",
+      "action": "down",
+      "key": "e"
+    },
+    {
+      "delay": 20,
+      "type": "key",
+      "action": "up",
+      "key": "e"
+    },
+    {
+      "delay": 10,
+      "type": "key",
+      "action": "down",
+      "key": "l"
+    },
+    {
+      "delay": 20,
+      "type": "key",
+      "action": "up",
+      "key": "l"
+    },
+    {
+      "delay": 10,
+      "type": "key",
+      "action": "down",
+      "key": "l"
+    },
+    {
+      "delay": 20,
+      "type": "key",
+      "action": "up",
+      "key": "l"
+    },
+    {
+      "delay": 10,
+      "type": "key",
+      "action": "down",
+      "key": "o"
+    },
+    {
+      "delay": 20,
+      "type": "key",
+      "action": "up",
+      "key": "o"
+    },
+    {
+      "delay": 10,
+      "type": "key",
+      "action": "down",
+      "key": "space"
+    },
+    {
+      "delay": 20,
+      "type": "key",
+      "action": "up",
+      "key": "space"
+    },
+    {
+      "delay": 10,
+      "type": "key",
+      "action": "down",
+      "key": "1"
+    },
+    {
+      "delay": 20,
+      "type": "key",
+      "action": "up",
+      "key": "1"
+    },
+    {
+      "delay": 10,
+      "type": "key",
+      "action": "down",
+      "key": "2"
+    },
+    {
+      "delay": 20,
+      "type": "key",
+      "action": "up",
+      "key": "2"
+    },
+    {
+      "delay": 10,
+      "type": "key",
+      "action": "down",
+      "key": "3"
+    },
+    {
+      "delay": 20,
+      "type": "key",
+      "action": "up",
+      "key": "3"
+    },
+    {
+      "delay": 10,
+      "type": "key",
+      "action": "down",
+      "key": "shift_l"
+    },
+    {
+      "delay": 5,
+      "type": "key",
+      "action": "down",
+      "key": "1"
+    },
+    {
+      "delay": 20,
+      "type": "key",
+      "action": "up",
+      "key": "1"
+    },
+    {
+      "delay": 5,
+      "type": "key",
+      "action": "up",
+      "key": "shift_l"
+    }
+  ]
+}

@@ -1,4 +1,4 @@
-# mkyada-macro JSON format (v2)
+# mkyada-macro JSON format (v2 / v3)
 
 A macro is a single JSON file. **Everything a key can do is a macro file** — a
 plain Ctrl+A binding, a typed text snippet, a media key, or a full recorded
@@ -24,17 +24,58 @@ identically.
 | Field | Required | Meaning |
 |---|---|---|
 | `format` | yes | `"mkyada-macro"`. Legacy `"asil-macro"` (v1) files are also accepted. |
-| `version` | yes | `2` |
+| `version` | yes | `2`, or `3` when the file carries key-logic `variants` |
 | `name` | no | Display name |
 | `created` | no | ISO 8601 timestamp |
-| `kind` | no | UI metadata: `"combo"` \| `"keystroke"` \| `"text"` \| `"media"` \| `"recorded"`. The firmware ignores it; the app uses it to show and re-edit the assignment. |
-| `combo` / `text` | no | UI metadata matching `kind` |
+| `kind` | no | UI metadata: `"combo"` \| `"keystroke"` \| `"text"` \| `"media"` \| `"recorded"` \| `"launch"` \| `"command"` \| `"sound"` \| `"sequence"`. The firmware ignores it; the app uses it to show and re-edit the assignment. |
+| `combo` / `text` / `seq` … | no | UI metadata matching `kind` |
 | `screen` | for mouse macros | Capture resolution; absolute coordinates are rescaled from it (`x * 32767 / (width-1)`). |
 | `settings.speed` | no | Playback speed multiplier (default `1.0`) |
 | `settings.repeat` | no | Repeat count. **`0` = loop until the key is pressed again.** Default `1`. |
 | `settings.on_repress` | no | What pressing the macro's own key does while it plays: `"stop"` (default) or `"restart"` (play again from the top). |
-| `settings.hold_repeat` | no | `true` = replay while the physical key is held down, like holding a letter key. Default `false`. |
-| `events` | yes | Ordered event list |
+| `settings.hold_repeat` | no | `true` = replay while the physical key is held down, like holding a letter key. Default `false`. Ignored when `variants` exist. |
+| `settings.hold_ms` | no | Key logic: press-and-hold threshold in ms (default `400`). |
+| `settings.double_ms` | no | Key logic: double-press window in ms (default `250`). |
+| `events` | yes | Ordered event list (the **tap** action when `variants` exist) |
+| `variants` | no | Key logic (v3), see below |
+
+## Key logic — `variants` (v3, firmware ≥ 0.3.0)
+
+One key can do three things: tap, double press, and long press. The top-level
+`events` are the **tap**; `variants.double` / `variants.hold` each carry their
+own `events` (and optional `settings`):
+
+```json
+{
+  "format": "mkyada-macro",
+  "version": 3,
+  "events": [ ...tap events... ],
+  "settings": { "hold_ms": 400, "double_ms": 250 },
+  "variants": {
+    "double": { "kind": "combo", "combo": {...}, "events": [ ... ] },
+    "hold":   { "kind": "launch", "target": "https://…", "events": [] }
+  }
+}
+```
+
+- The firmware resolves the gesture itself in standalone mode and announces
+  the choice to a connected app as `{"t":"key_action", ...}` (see
+  serial-protocol.md) so host-side variants (launch/command/sound) still work.
+- A `double` variant necessarily delays the tap by up to `double_ms`; without
+  one the tap fires with **zero added latency**.
+- **Graceful degradation:** firmware older than 0.3.0 ignores `variants` and
+  simply plays the tap.
+
+## Multi actions — `kind: "sequence"`
+
+A sequence chains several actions on one press. If every step is HID-expressible
+(keystroke/combo/text/media/recorded), the steps are compiled **into the single
+`events` list** (with `wait` events in between) — fully standalone. If a step
+needs the computer (launch/command/sound), `events` stays empty, the editable
+step list lives in `seq`, and the desktop app orchestrates: HID steps are
+pre-compiled into sibling part files (`key3.s0.json`, `key3.s2.json`, …) it
+plays over serial — still hardware HID — while host steps run on the computer.
+Part files are inert on the device (the firmware only plays exact key-file names).
 
 ## Events
 

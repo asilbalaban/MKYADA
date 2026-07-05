@@ -6,7 +6,7 @@
 
 import { ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { emit } from "@tauri-apps/api/event";
+import { emit, listen } from "@tauri-apps/api/event";
 import {
   ArrowDown,
   ArrowUp,
@@ -17,10 +17,12 @@ import {
   MousePointerClick,
   MoveRight,
   Music,
+  Redo2,
   Scissors,
   Spline,
   Timer,
   Trash2,
+  Undo2,
   UnfoldVertical,
 } from "lucide-react";
 import type { MacroEvent, MacroFile } from "../lib/types";
@@ -41,6 +43,7 @@ import {
 } from "../lib/recorder-model";
 import { IS_MAC } from "../lib/macro-model";
 import { displayKey } from "../lib/layout";
+import { undoRedoFromEvent, type History } from "../lib/history";
 import { Button, Card, Field, Input, Select } from "./ui";
 import { KeyCapture } from "./AssignmentEditor";
 import { useToast } from "./toast";
@@ -48,9 +51,12 @@ import { useToast } from "./toast";
 interface Props {
   macro: MacroFile;
   onChange: (m: MacroFile) => void;
+  /** When the owner keeps the macro in a useHistory stack, the editor shows
+   * undo/redo buttons and answers ⌘Z/⇧⌘Z (Ctrl+Z/Ctrl+Y). */
+  history?: Pick<History<unknown>, "canUndo" | "canRedo" | "undo" | "redo">;
 }
 
-export function MacroEditor({ macro, onChange }: Props) {
+export function MacroEditor({ macro, onChange, history }: Props) {
   const items = useMemo(() => groupEvents(macro.events), [macro.events]);
   // Multi-select: click = single, shift+click = range from anchor,
   // cmd/ctrl+click = toggle. Sorted list of row indices.
@@ -63,6 +69,23 @@ export function MacroEditor({ macro, onChange }: Props) {
   const overlayRef = useRef(overlayOn);
   overlayRef.current = overlayOn;
   const toast = useToast();
+  const historyRef = useRef(history);
+  historyRef.current = history;
+
+  // ⌘Z / ⇧⌘Z while the editor is on screen (text fields keep their own undo)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const h = historyRef.current;
+      if (!h) return;
+      const op = undoRedoFromEvent(e);
+      if (!op) return;
+      e.preventDefault();
+      if (op === "undo") h.undo();
+      else h.redo();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   function commit(newItems: EditorItem[]) {
     onChange({ ...macro, events: flattenItems(newItems) });
@@ -133,9 +156,17 @@ export function MacroEditor({ macro, onChange }: Props) {
   // overlay can close itself if we disappear (it's a topmost window)
   useEffect(() => {
     if (!overlayOn) return;
-    void emit("overlay:data", { macro, selected, onlySelected: overlayOnlySelected });
+    const push = () =>
+      void emit("overlay:data", { macro, selected, onlySelected: overlayOnlySelected });
+    push();
+    // The overlay webview can finish loading long after our first push
+    // (WebView2 cold start on Windows) — it announces itself, we push again.
+    const ready = listen("overlay:ready", push);
     const ping = setInterval(() => void emit("overlay:ping"), 1000);
-    return () => clearInterval(ping);
+    return () => {
+      ready.then((f) => f());
+      clearInterval(ping);
+    };
   }, [overlayOn, macro, selected, overlayOnlySelected]);
 
   useEffect(
@@ -151,11 +182,9 @@ export function MacroEditor({ macro, onChange }: Props) {
       setOverlayOn(false);
     } else {
       await invoke("overlay_show");
+      // the sync effect pushes data now and again when the overlay window
+      // reports in with overlay:ready
       setOverlayOn(true);
-      setTimeout(
-        () => void emit("overlay:data", { macro, selected, onlySelected: overlayOnlySelected }),
-        400,
-      );
     }
   }
 
@@ -182,6 +211,16 @@ export function MacroEditor({ macro, onChange }: Props) {
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap gap-3 items-end">
+        {history && (
+          <div className="flex gap-1 pb-0.5">
+            <Button onClick={history.undo} disabled={!history.canUndo} title={IS_MAC ? "Undo (⌘Z)" : "Undo (Ctrl+Z)"}>
+              <Undo2 size={14} aria-hidden /> Undo
+            </Button>
+            <Button onClick={history.redo} disabled={!history.canRedo} title={IS_MAC ? "Redo (⇧⌘Z)" : "Redo (Ctrl+Y)"}>
+              <Redo2 size={14} aria-hidden /> Redo
+            </Button>
+          </div>
+        )}
         <Field label="Name">
           <Input value={macro.name ?? ""} onChange={(e) => onChange({ ...macro, name: e.target.value })} />
         </Field>

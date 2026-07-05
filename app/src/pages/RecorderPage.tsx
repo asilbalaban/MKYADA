@@ -13,6 +13,7 @@ import { useDevice } from "../lib/device";
 import type { MacroEvent, MacroFile } from "../lib/types";
 import { captureScreen, thinForDevice } from "../lib/recorder-model";
 import { macroFileName, migrateMacro } from "../lib/macro-model";
+import { useHistory } from "../lib/history";
 import { takeRecorderEdit } from "../lib/recorder-handoff";
 import { Badge, Button, Card, Field, Input, Select } from "../components/ui";
 import { useToast } from "../components/toast";
@@ -28,7 +29,11 @@ export function RecorderPage() {
   const [recording, setRecording] = useState(false);
   const [count, setCount] = useState(0);
   const [countdown, setCountdown] = useState(0);
-  const [macro, setMacro] = useState<MacroFile | null>(null);
+  // Edits push onto an undo stack; loading a fresh document (record/import/
+  // handoff) resets it so ⌘Z can't walk back into the previous macro.
+  const macroHistory = useHistory<MacroFile | null>(null);
+  const macro = macroHistory.present;
+  const setMacro = macroHistory.reset;
   const [status, setStatus] = useState("");
   const [startDelay, setStartDelay] = useState(3);
   const [assignKey, setAssignKey] = useState(1);
@@ -177,7 +182,9 @@ export function RecorderPage() {
     const file = macroFileName(assignKey, assignLayer);
     try {
       await ipc.driveWrite(drive.path, file, JSON.stringify(out));
-      await send({ t: "reload" });
+      // Best-effort: a read-only drive makes the backend restart the keypad
+      // (it reboots with the new file); the port is briefly down then.
+      await send({ t: "reload" }).catch(() => {});
       setStatus(`Assigned to ${file}`);
       toast.success(
         `Macro saved to key ${assignKey}`,
@@ -235,7 +242,7 @@ export function RecorderPage() {
 
       {macro && (
         <>
-          <MacroEditor macro={macro} onChange={setMacro} />
+          <MacroEditor macro={macro} onChange={macroHistory.set} history={macroHistory} />
 
           <div className="grid md:grid-cols-3 gap-3">
             <Card title="1 · Try it">

@@ -2,23 +2,27 @@
 // file on the device ("everything is JSON").
 
 import { useEffect, useState } from "react";
-import { FolderOpen, Keyboard, Play, Volume2 } from "lucide-react";
+import { ArrowDown, ArrowUp, FolderOpen, Keyboard, Play, Plus, Trash2, Volume2 } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { SOUND_EXTENSIONS, playSound } from "../lib/sound";
 import { readTextFile } from "../lib/fs";
-import type { Assignment, MacroFile, SoundHoldAction } from "../lib/types";
+import type { Assignment, AssignmentVariants, MacroFile, SequenceStep, SoundHoldAction } from "../lib/types";
 import {
   IS_MAC,
   MEDIA_USAGES,
   MODIFIERS,
   MODIFIER_CODE_TO_KEY,
+  compileAssignment,
+  describeAssignment,
   keyFromEvent,
   migrateMacro,
   modifierDisplay,
   modsFromEvent,
+  sequenceIsPureHid,
+  stepIsHid,
 } from "../lib/macro-model";
 import { displayKey, untypeableChars } from "../lib/layout";
-import { Button, Field, Input, Select } from "./ui";
+import { Badge, Button, Field, Input, Select } from "./ui";
 
 const KINDS: { value: Assignment["kind"]; label: string }[] = [
   { value: "none", label: "Not assigned" },
@@ -30,6 +34,7 @@ const KINDS: { value: Assignment["kind"]; label: string }[] = [
   { value: "launch", label: "Open app / file / URL" },
   { value: "command", label: "Run terminal command" },
   { value: "sound", label: "Play a sound" },
+  { value: "sequence", label: "Multi action (sequence)" },
 ];
 
 /**
@@ -101,11 +106,21 @@ export function KeyCapture({
 export function AssignmentEditor({
   value,
   onChange,
+  nested = false,
+  fwVersion,
 }: {
   value: Assignment;
   onChange: (a: Assignment) => void;
+  /** Rendering a sequence step or key-logic variant: no nesting, no
+   * behavior options, no key logic of its own. */
+  nested?: boolean;
+  /** Connected keypad's firmware version — used to warn when key logic
+   * needs a firmware update (variants shipped with 0.3.0). */
+  fwVersion?: string;
 }) {
   const [importError, setImportError] = useState("");
+  const kinds = nested ? KINDS.filter((k) => k.value !== "sequence") : KINDS;
+  const hasVariants = !!(value.variants?.double || value.variants?.hold);
 
   async function importMacro() {
     setImportError("");
@@ -140,10 +155,12 @@ export function AssignmentEditor({
             else if (kind === "launch") onChange({ kind: "launch", target: "" });
             else if (kind === "command") onChange({ kind: "command", command: "" });
             else if (kind === "sound") onChange({ kind: "sound", file: "" });
+            else if (kind === "sequence")
+              onChange({ kind: "sequence", steps: [{ a: { kind: "keystroke", key: "" }, delayMs: 0 }] });
             else importMacro();
           }}
         >
-          {KINDS.map((k) => (
+          {kinds.map((k) => (
             <option key={k.value} value={k.value}>
               {k.label}
             </option>
@@ -328,7 +345,11 @@ export function AssignmentEditor({
         </div>
       )}
 
-      {value.kind !== "none" && value.kind !== "launch" && value.kind !== "command" && value.kind !== "sound" && (
+      {value.kind === "sequence" && (
+        <SequenceEditor value={value.steps} onChange={(steps) => onChange({ ...value, steps })} />
+      )}
+
+      {!nested && value.kind !== "none" && value.kind !== "launch" && value.kind !== "command" && value.kind !== "sound" && (
         <div className="flex flex-wrap gap-3 border-t border-line pt-3">
           <Field label="Press again while playing">
             <Select
@@ -347,24 +368,201 @@ export function AssignmentEditor({
               <option value="restart">Restart it from the top</option>
             </Select>
           </Field>
-          <Field label="While the key is held down">
-            <Select
-              value={value.behavior?.hold_repeat ? "repeat" : "once"}
-              onChange={(e) =>
-                onChange({
-                  ...value,
-                  behavior: { ...value.behavior, hold_repeat: e.target.value === "repeat" },
-                })
-              }
-            >
-              <option value="once">Play once</option>
-              <option value="repeat">Repeat — like holding a letter key</option>
-            </Select>
-          </Field>
+          {!hasVariants && (
+            <Field label="While the key is held down">
+              <Select
+                value={value.behavior?.hold_repeat ? "repeat" : "once"}
+                onChange={(e) =>
+                  onChange({
+                    ...value,
+                    behavior: { ...value.behavior, hold_repeat: e.target.value === "repeat" },
+                  })
+                }
+              >
+                <option value="once">Play once</option>
+                <option value="repeat">Repeat — like holding a letter key</option>
+              </Select>
+            </Field>
+          )}
+        </div>
+      )}
+
+      {!nested && value.kind !== "none" && (
+        <div className="flex flex-col gap-3 border-t border-line pt-3">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-semibold text-fg-muted">
+              Key logic — extra actions on the same key
+            </span>
+            {hasVariants && fwVersion && !fwSupportsVariants(fwVersion) && (
+              <Badge tone="amber">needs firmware 0.3.0 — update on the Devices page</Badge>
+            )}
+          </div>
+          <VariantSlot
+            label="Double press"
+            hint="A quick tap then waits a moment before firing — only when this is set."
+            value={value.variants?.double}
+            onChange={(v) => onChange({ ...value, variants: setVariant(value.variants, "double", v) })}
+          />
+          <VariantSlot
+            label="Long press (hold)"
+            hint="Fires after holding the key ~0.4 s. Replaces the hold-to-repeat option."
+            value={value.variants?.hold}
+            onChange={(v) => onChange({ ...value, variants: setVariant(value.variants, "hold", v) })}
+          />
         </div>
       )}
 
       {importError && <p className="text-danger text-xs">{importError}</p>}
+    </div>
+  );
+}
+
+function setVariant(
+  variants: AssignmentVariants | undefined,
+  which: "double" | "hold",
+  v: Assignment | undefined,
+): AssignmentVariants | undefined {
+  const next = { ...variants };
+  if (v) next[which] = v;
+  else delete next[which];
+  return next.double || next.hold ? next : undefined;
+}
+
+/** Firmware resolves key-logic variants since 0.3.0. */
+function fwSupportsVariants(fw: string): boolean {
+  const [maj = 0, min = 0] = fw.split(".").map((n) => parseInt(n) || 0);
+  return maj > 0 || min >= 3;
+}
+
+function VariantSlot({
+  label,
+  hint,
+  value,
+  onChange,
+}: {
+  label: string;
+  hint: string;
+  value?: Assignment;
+  onChange: (a: Assignment | undefined) => void;
+}) {
+  if (!value) {
+    return (
+      <Button className="self-start" onClick={() => onChange({ kind: "keystroke", key: "" })}>
+        <Plus size={14} aria-hidden /> Add {label.toLowerCase()} action
+      </Button>
+    );
+  }
+  return (
+    <div className="rounded-md border border-line bg-panel2 p-3 flex flex-col gap-2">
+      <div className="flex items-center gap-2">
+        <span className="text-xs font-semibold text-fg-muted">
+          {label} · {describeAssignment(value)}
+        </span>
+        <Button variant="danger" className="ml-auto" onClick={() => onChange(undefined)} title={`Remove ${label.toLowerCase()} action`}>
+          <Trash2 size={13} aria-hidden />
+        </Button>
+      </div>
+      <AssignmentEditor nested value={value} onChange={onChange} />
+      <p className="text-xs text-fg-faint">{hint}</p>
+    </div>
+  );
+}
+
+/** Step list of a multi-action sequence: reorder, per-step editor, delay
+ * after each step, plus an honest standalone/app-required badge and the
+ * device size budget (pure-HID sequences compile into one macro file). */
+function SequenceEditor({
+  value,
+  onChange,
+}: {
+  value: SequenceStep[];
+  onChange: (steps: SequenceStep[]) => void;
+}) {
+  const pure = sequenceIsPureHid(value);
+  const hostSteps = value
+    .map((s, i) => (stepIsHid(s) ? null : i + 1))
+    .filter((n): n is number => n !== null);
+
+  function updateStep(i: number, step: SequenceStep) {
+    const next = [...value];
+    next[i] = step;
+    onChange(next);
+  }
+
+  function moveStep(i: number, dir: -1 | 1) {
+    const j = i + dir;
+    if (j < 0 || j >= value.length) return;
+    const next = [...value];
+    [next[i], next[j]] = [next[j], next[i]];
+    onChange(next);
+  }
+
+  // device budget: pure sequences become one macro file on the keypad
+  const compiled = pure ? compileAssignment({ kind: "sequence", steps: value }) : null;
+  const bytes = compiled ? JSON.stringify(compiled).length : 0;
+  const overBudget = compiled ? compiled.events.length > 2000 || bytes > 120 * 1024 : false;
+
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center gap-2 flex-wrap">
+        {pure ? (
+          <Badge tone="green">runs on the keypad — works standalone</Badge>
+        ) : (
+          <Badge tone="amber">
+            step {hostSteps.join(", ")} need{hostSteps.length === 1 ? "s" : ""} the MKYADA app running
+          </Badge>
+        )}
+        {compiled && (
+          <span className={`text-xs ${overBudget ? "text-danger" : "text-fg-faint"}`}>
+            {compiled.events.length} events · {(bytes / 1024).toFixed(1)} KB
+            {overBudget && " — too big for the keypad, trim some steps"}
+          </span>
+        )}
+      </div>
+
+      {value.map((step, i) => (
+        <div key={i} className="rounded-md border border-line bg-panel2 p-3 flex flex-col gap-2">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-semibold text-fg-muted">
+              Step {i + 1} · {describeAssignment(step.a)}
+            </span>
+            <div className="ml-auto flex gap-1">
+              <Button onClick={() => moveStep(i, -1)} disabled={i === 0} title="Move up">
+                <ArrowUp size={13} aria-hidden />
+              </Button>
+              <Button onClick={() => moveStep(i, 1)} disabled={i === value.length - 1} title="Move down">
+                <ArrowDown size={13} aria-hidden />
+              </Button>
+              <Button
+                variant="danger"
+                onClick={() => onChange(value.filter((_, k) => k !== i))}
+                title="Delete step"
+              >
+                <Trash2 size={13} aria-hidden />
+              </Button>
+            </div>
+          </div>
+          <AssignmentEditor nested value={step.a} onChange={(a) => updateStep(i, { ...step, a })} />
+          {i < value.length - 1 && (
+            <Field label="Wait before the next step (ms)">
+              <Input
+                type="number" min="0" step="50" className="w-28"
+                value={step.delayMs}
+                onChange={(e) =>
+                  updateStep(i, { ...step, delayMs: Math.max(0, parseInt(e.target.value) || 0) })
+                }
+              />
+            </Field>
+          )}
+        </div>
+      ))}
+
+      <Button
+        className="self-start"
+        onClick={() => onChange([...value, { a: { kind: "keystroke", key: "" }, delayMs: 0 }])}
+      >
+        <Plus size={14} aria-hidden /> Add step
+      </Button>
     </div>
   );
 }

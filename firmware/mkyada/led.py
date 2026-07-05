@@ -4,6 +4,10 @@
 #   playing     amber fast blink; looping macro -> slow amber blink
 #   host mode   layer color breathing toward white
 #   error       red triple-blink overlay, then back to current state
+#   override    app-commanded feedback color (serial "led" op, e.g. mic muted
+#               -> solid red). Shown when idle/host; playback blinks win.
+#               Cleared when the app disconnects, so the standalone LED
+#               grammar is untouched without a host.
 
 import time
 
@@ -30,6 +34,7 @@ class Led:
         self.state = IDLE
         self.layer = 0
         self.error_until = 0
+        self.override = None  # ("solid"|"blink", (r, g, b)) from the app
         self._apply()
 
     def _color(self):
@@ -52,6 +57,21 @@ class Led:
     def error(self):
         self.error_until = time.monotonic() + 1.2
 
+    def set_override(self, mode, rgb):
+        """App-commanded feedback color; mode "off" clears it."""
+        if mode not in ("solid", "blink") or not rgb:
+            self.override = None
+        else:
+            try:
+                self.override = (mode, (int(rgb[0]), int(rgb[1]), int(rgb[2])))
+            except (TypeError, ValueError, IndexError):
+                self.override = None
+        self._apply()
+
+    def clear_override(self):
+        self.override = None
+        self._apply()
+
     def tick(self):
         """Animate; call every main-loop iteration."""
         if not self.px:
@@ -64,6 +84,12 @@ class Led:
             self._apply(AMBER if int(now * 2) % 2 == 0 else (0, 0, 0))
         elif self.state == PLAYING:                      # fast amber blink
             self._apply(AMBER if int(now * 4) % 2 == 0 else (0, 0, 0))
+        elif self.override:                              # app feedback color
+            mode, rgb = self.override
+            if mode == "blink":
+                self._apply(rgb if int(now * 2) % 2 == 0 else (0, 0, 0))
+            else:
+                self._apply(rgb)
         elif self.state == HOST:                         # breathe layer color -> white
             phase = (now % 2.0) / 2.0
             level = phase * 2 if phase < 0.5 else (1 - phase) * 2

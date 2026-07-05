@@ -21,6 +21,7 @@ import type { UpdateInfo } from "./lib/types";
 import { Badge, Button } from "./components/ui";
 import { ToastProvider } from "./components/toast";
 import { ConfirmProvider } from "./components/dialog";
+import { LedFeedback } from "./components/SystemStatus";
 import { PermissionsBanner } from "./components/Permissions";
 import { DevicesPage } from "./pages/DevicesPage";
 import { SetupPage } from "./pages/SetupPage";
@@ -169,6 +170,7 @@ export default function App() {
       <ProfilesProvider>
         <ToastProvider>
           <ConfirmProvider>
+            <LedFeedback />
             <Shell />
           </ConfirmProvider>
         </ToastProvider>

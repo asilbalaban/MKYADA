@@ -1,0 +1,24 @@
+{
+  "format": "mkyada-macro",
+  "version": 2,
+  "name": "f5",
+  "kind": "keystroke",
+  "combo": {
+    "mods": [],
+    "key": "f5"
+  },
+  "events": [
+    {
+      "delay": 0,
+      "type": "key",
+      "action": "down",
+      "key": "f5"
+    },
+    {
+      "delay": 30,
+      "type": "key",
+      "action": "up",
+      "key": "f5"
+    }
+  ]
+}

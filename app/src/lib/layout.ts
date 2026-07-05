@@ -52,15 +52,20 @@ function rebuildReverse() {
   }
 }
 
+/** Install a layout map (from the Rust side, or a fixture in tests). */
+export function applyLayoutMap(map: Record<string, KeyChars>) {
+  MAP = map;
+  rebuildReverse();
+  version++;
+  listeners.forEach((l) => l());
+}
+
 async function refresh() {
   // lazy import so this module stays loadable outside Tauri (unit tests)
   const { invoke } = await import("@tauri-apps/api/core");
   const map = await invoke<Record<string, KeyChars>>("keyboard_layout");
   if (!map || Object.keys(map).length === 0) return;
-  MAP = map;
-  rebuildReverse();
-  version++;
-  listeners.forEach((l) => l());
+  applyLayoutMap(map);
 }
 
 /** Load the layout map and keep it fresh when the user switches layouts. */

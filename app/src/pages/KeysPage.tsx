@@ -9,14 +9,17 @@ import { ipc } from "../lib/ipc";
 import type { Assignment, DeviceConfig, MacroFile } from "../lib/types";
 import { layerLabel } from "../lib/types";
 import {
+  AUX_FILE_RE,
   assignmentComplete,
   compileAssignment,
+  compileSequenceParts,
   defaultConfig,
   macroFileName,
   migrateMacro,
   parseAssignment,
 } from "../lib/macro-model";
 import { stashRecorderEdit } from "../lib/recorder-handoff";
+import { undoRedoFromEvent, useHistory } from "../lib/history";
 import { Button, Card, EmptyState, Spinner } from "../components/ui";
 import { useToast } from "../components/toast";
 import { Keypad } from "../components/Keypad";
@@ -30,9 +33,26 @@ export function KeysPage() {
   const [layer, setLayer] = useState(0);
   const [selected, setSelected] = useState<number | null>(null);
   const [assignments, setAssignments] = useState<Map<string, Assignment>>(new Map());
-  const [draft, setDraft] = useState<Assignment | null>(null);
+  // Draft edits are undoable (⌘Z); switching key/layer or saving resets the stack.
+  const draftHistory = useHistory<Assignment | null>(null);
+  const draft = draftHistory.present;
+  const setDraft = draftHistory.reset;
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState("");
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const op = undoRedoFromEvent(e);
+      if (!op) return;
+      e.preventDefault();
+      if (op === "undo") draftHistory.undo();
+      else draftHistory.redo();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // stable callbacks from useHistory
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const slotKey = (keyNo: number, layerIdx: number) => `${keyNo}:${layerIdx}`;
 
@@ -142,6 +162,21 @@ export function KeysPage() {
           await ipc.driveDelete(drive.path, file);
         } catch {
           // was already unassigned
+        }
+      }
+      // mixed sequences keep their HID steps in sibling part files
+      // (key3.s0.json…) the app plays over serial; write the current set and
+      // sweep any stale ones from a previous, longer sequence
+      const parts = draft.kind === "sequence" ? compileSequenceParts(draft, file) : [];
+      for (const p of parts) {
+        await ipc.driveWrite(drive.path, p.path, JSON.stringify(p.file));
+      }
+      const stem = file.split("/").pop()!.replace(/\.json$/, ".");
+      const keep = new Set(parts.map((p) => p.path.split("/").pop()));
+      const existing = await ipc.driveList(drive.path, "macros").catch(() => [] as string[]);
+      for (const f of existing) {
+        if (f.startsWith(stem) && AUX_FILE_RE.test(f) && !keep.has(f)) {
+          await ipc.driveDelete(drive.path, `macros/${f}`).catch(() => {});
         }
       }
     } catch (e) {
@@ -255,7 +290,8 @@ export function KeysPage() {
           <div className="flex flex-col gap-4">
             <AssignmentEditor
               value={draft ?? current ?? { kind: "none" }}
-              onChange={setDraft}
+              onChange={draftHistory.set}
+              fwVersion={hello?.fw}
             />
             <div className="flex justify-end gap-2">
               <Button onClick={() => setDraft(null)} disabled={!draft}>

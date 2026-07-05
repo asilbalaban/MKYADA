@@ -2,7 +2,7 @@
 // parsing them back for editing. "Everything is JSON": every assignment —
 // even a plain Ctrl+A — becomes a macro file on the device.
 
-import type { Assignment, DeviceConfig, MacroEvent, MacroFile } from "./types";
+import type { Assignment, DeviceConfig, MacroEvent, MacroFile, SequenceStep } from "./types";
 import { LAYER_NAMES } from "./types";
 import { charToKeystroke, displayKey } from "./layout";
 
@@ -95,6 +95,74 @@ export function macroFileName(keyNo: number, layerIndex: number): string {
   return `macros/key${keyNo}${suffix}.json`;
 }
 
+// ------------------------------------------------------------- sequences ---
+// A sequence made only of HID-expressible steps compiles into ONE macro file
+// (steps concatenated with waits) and plays standalone on the keypad. As soon
+// as a host step (launch/command/sound) is involved, the main file stays a
+// no-op carrier of the step list and the desktop app orchestrates: HID steps
+// are pre-compiled to sibling "part" files it plays over serial (still
+// hardware HID), host steps it performs itself.
+
+const HID_KINDS = new Set(["keystroke", "combo", "text", "media", "recorded"]);
+
+export function stepIsHid(step: SequenceStep): boolean {
+  return HID_KINDS.has(step.a.kind);
+}
+
+export function sequenceIsPureHid(steps: SequenceStep[]): boolean {
+  return steps.every(stepIsHid);
+}
+
+/** Sibling file holding one pre-compiled HID step of a mixed sequence:
+ * "macros/key3-b.json" step 2 -> "macros/key3-b.s2.json". The firmware only
+ * ever plays exact key file names, so part files are inert on the device. */
+export function sequencePartFileName(mainFile: string, stepIndex: number): string {
+  return mainFile.replace(/\.json$/, `.s${stepIndex}.json`);
+}
+
+/** Pre-compiled part files a mixed sequence needs next to its main file.
+ * Empty for pure-HID sequences (everything lives in the main file). */
+export function compileSequenceParts(
+  a: Assignment,
+  mainFile: string,
+): { path: string; file: MacroFile }[] {
+  if (a.kind !== "sequence" || sequenceIsPureHid(a.steps)) return [];
+  const parts: { path: string; file: MacroFile }[] = [];
+  a.steps.forEach((step, i) => {
+    if (!stepIsHid(step)) return;
+    const file = compileAssignment(step.a, `Step ${i + 1}`);
+    if (file) parts.push({ path: sequencePartFileName(mainFile, i), file });
+  });
+  return parts;
+}
+
+/** Sibling file for a key-logic variant of a PROFILE key: in host mode the
+ * app decides tap/double/hold from the btn stream and plays these over
+ * serial. (Global keys don't need parts — the firmware resolves variants
+ * embedded in the main file itself.) */
+export function variantPartFileName(mainFile: string, which: "double" | "hold"): string {
+  return mainFile.replace(/\.json$/, which === "double" ? ".vd.json" : ".vh.json");
+}
+
+export function compileVariantParts(
+  a: Assignment,
+  mainFile: string,
+): { path: string; file: MacroFile }[] {
+  const parts: { path: string; file: MacroFile }[] = [];
+  for (const which of ["double", "hold"] as const) {
+    const va = a.variants?.[which];
+    if (!va || va.kind === "none" || !HID_KINDS.has(va.kind)) continue;
+    const file = compileAssignment(va);
+    if (file) parts.push({ path: variantPartFileName(mainFile, which), file });
+  }
+  return parts;
+}
+
+/** Matches every auxiliary file a key's main macro may own on the drive
+ * (sequence steps .sN.json, key-logic variants .vd/.vh.json) — used to
+ * sweep stale ones after a re-save. */
+export const AUX_FILE_RE = /\.(s\d+|vd|vh)\.json$/;
+
 function keyTap(key: string, delayBefore: number, holdMs = 30): MacroEvent[] {
   return [
     { delay: delayBefore, type: "key", action: "down", key },
@@ -155,6 +223,11 @@ export function assignmentComplete(a: Assignment): boolean {
       return a.command.length > 0;
     case "sound":
       return a.file.length > 0;
+    case "sequence":
+      return (
+        a.steps.length > 0 &&
+        a.steps.every((s) => s.a.kind !== "none" && s.a.kind !== "sequence" && assignmentComplete(s.a))
+      );
     default:
       return true;
   }
@@ -209,6 +282,27 @@ export function compileAssignment(a: Assignment, name?: string): MacroFile | nul
           ...(a.holdAction && a.holdAction !== "stop" ? { sound_hold: a.holdAction } : {}),
           events: [],
         };
+      case "sequence": {
+        const pure = sequenceIsPureHid(a.steps);
+        const events: MacroEvent[] = [];
+        if (pure) {
+          // one standalone macro file: steps back to back, waits in between
+          a.steps.forEach((step, i) => {
+            const compiled = compileAssignment(step.a);
+            if (compiled) events.push(...compiled.events);
+            if (step.delayMs > 0 && i < a.steps.length - 1) {
+              events.push({ delay: step.delayMs, type: "wait" });
+            }
+          });
+        }
+        return {
+          ...base,
+          name: name ?? `Sequence (${a.steps.length} steps)`,
+          kind: "sequence",
+          seq: a.steps,
+          events,
+        };
+      }
     }
   })();
   // behavior options ride along in settings, whatever the kind
@@ -217,14 +311,52 @@ export function compileAssignment(a: Assignment, name?: string): MacroFile | nul
     compiled.settings = {
       ...compiled.settings,
       ...(on_repress && on_repress !== "stop" ? { on_repress } : {}),
-      ...(hold_repeat ? { hold_repeat } : {}),
+      // hold_repeat and key-logic variants are mutually exclusive: holding
+      // the key IS the "hold" gesture once variants exist
+      ...(hold_repeat && !hasVariants(a) ? { hold_repeat } : {}),
     };
+  }
+  // key logic (macro format v3): tap = the top-level events, double/hold
+  // compiled as embedded variant files. Old firmware ignores `variants`
+  // and plays the tap — graceful degradation.
+  if (compiled && hasVariants(a)) {
+    const vs: NonNullable<MacroFile["variants"]> = {};
+    for (const which of ["double", "hold"] as const) {
+      const va = a.variants?.[which];
+      if (!va || va.kind === "none") continue;
+      const vf = compileAssignment(va);
+      if (vf) {
+        delete vf.created;
+        vs[which] = vf;
+      }
+    }
+    if (Object.keys(vs).length) {
+      compiled.variants = vs;
+      compiled.version = 3;
+    }
   }
   return compiled;
 }
 
+function hasVariants(a: Assignment): boolean {
+  const d = a.variants?.double;
+  const h = a.variants?.hold;
+  return !!((d && d.kind !== "none") || (h && h.kind !== "none"));
+}
+
 /** Parse a macro file back into an editable assignment via its kind metadata. */
 export function parseAssignment(m: MacroFile): Assignment {
+  const a = parseAssignmentBase(m);
+  if (m.variants && (m.variants.double || m.variants.hold)) {
+    a.variants = {
+      ...(m.variants.double ? { double: parseAssignmentBase(m.variants.double) } : {}),
+      ...(m.variants.hold ? { hold: parseAssignmentBase(m.variants.hold) } : {}),
+    };
+  }
+  return a;
+}
+
+function parseAssignmentBase(m: MacroFile): Assignment {
   const behavior =
     m.settings?.on_repress === "restart" || m.settings?.hold_repeat
       ? {
@@ -254,6 +386,8 @@ export function parseAssignment(m: MacroFile): Assignment {
         ...(m.sound_hold ? { holdAction: m.sound_hold } : {}),
         ...behavior,
       };
+    case "sequence":
+      return { kind: "sequence", steps: m.seq ?? [], ...behavior };
     default:
       return { kind: "recorded", name: m.name ?? "macro", macro: m, ...behavior };
   }
@@ -291,6 +425,8 @@ export function describeAssignment(a: Assignment): string {
       const short = fileBaseName(a.file);
       return `♪ ${short.length > 20 ? short.slice(0, 20) + "…" : short}`;
     }
+    case "sequence":
+      return `⧉ ${a.steps.length} step${a.steps.length === 1 ? "" : "s"}`;
   }
 }
 

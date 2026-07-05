@@ -1,0 +1,28 @@
+{
+  "format": "mkyada-macro",
+  "version": 2,
+  "name": "a",
+  "kind": "keystroke",
+  "combo": {
+    "mods": [],
+    "key": "a"
+  },
+  "events": [
+    {
+      "delay": 0,
+      "type": "key",
+      "action": "down",
+      "key": "a"
+    },
+    {
+      "delay": 30,
+      "type": "key",
+      "action": "up",
+      "key": "a"
+    }
+  ],
+  "settings": {
+    "on_repress": "restart",
+    "hold_repeat": true
+  }
+}

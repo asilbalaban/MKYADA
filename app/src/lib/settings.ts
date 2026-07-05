@@ -74,6 +74,100 @@ export function useThemePref(): ThemePref {
 let alwaysOnTop = false;
 const aotListeners = new Set<() => void>();
 
+// ---------------------------------------------------- background & login ---
+// Closing the window hides MKYADA to the system tray so key actions and
+// per-app profiles keep working; the Rust side reads "runInBackground" from
+// the store on every close request. Autostart is owned by the OS via
+// tauri-plugin-autostart — the plugin is the source of truth, not the store.
+
+let runInBackground = true;
+const ribListeners = new Set<() => void>();
+
+export function initRunInBackground() {
+  void getSetting("runInBackground", true).then((stored) => {
+    runInBackground = stored;
+    ribListeners.forEach((l) => l());
+  });
+}
+
+export function setRunInBackground(on: boolean) {
+  runInBackground = on;
+  void setSetting("runInBackground", on);
+  ribListeners.forEach((l) => l());
+}
+
+export function useRunInBackground(): boolean {
+  return useSyncExternalStore(
+    (cb) => {
+      ribListeners.add(cb);
+      return () => ribListeners.delete(cb);
+    },
+    () => runInBackground,
+  );
+}
+
+// ---------------------------------------------------------- LED feedback ---
+// Mirror mic-mute state onto the keypad's status LED (solid red while the
+// default microphone is muted). Sent over serial; the firmware drops the
+// override the moment the app disconnects.
+
+let ledMicFeedback = false;
+const lmfListeners = new Set<() => void>();
+
+export function initLedMicFeedback() {
+  void getSetting("ledMicFeedback", false).then((stored) => {
+    ledMicFeedback = stored;
+    lmfListeners.forEach((l) => l());
+  });
+}
+
+export function setLedMicFeedback(on: boolean) {
+  ledMicFeedback = on;
+  void setSetting("ledMicFeedback", on);
+  lmfListeners.forEach((l) => l());
+}
+
+export function useLedMicFeedback(): boolean {
+  return useSyncExternalStore(
+    (cb) => {
+      lmfListeners.add(cb);
+      return () => lmfListeners.delete(cb);
+    },
+    () => ledMicFeedback,
+  );
+}
+
+let autostart = false;
+const asListeners = new Set<() => void>();
+
+export function initAutostart() {
+  void import("@tauri-apps/plugin-autostart")
+    .then((m) => m.isEnabled())
+    .then((on) => {
+      autostart = on;
+      asListeners.forEach((l) => l());
+    })
+    .catch(() => {});
+}
+
+export function setAutostart(on: boolean) {
+  autostart = on;
+  void import("@tauri-apps/plugin-autostart")
+    .then((m) => (on ? m.enable() : m.disable()))
+    .catch(() => {});
+  asListeners.forEach((l) => l());
+}
+
+export function useAutostart(): boolean {
+  return useSyncExternalStore(
+    (cb) => {
+      asListeners.add(cb);
+      return () => asListeners.delete(cb);
+    },
+    () => autostart,
+  );
+}
+
 /** Call once at boot — re-applies the stored preference to the window. */
 export function initAlwaysOnTop() {
   void getSetting("alwaysOnTop", false).then((stored) => {
