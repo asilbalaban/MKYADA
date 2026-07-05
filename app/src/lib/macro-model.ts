@@ -201,7 +201,14 @@ export function compileAssignment(a: Assignment, name?: string): MacroFile | nul
       case "command":
         return { ...base, name: name ?? `Run ${a.command.slice(0, 24)}`, kind: "command", command: a.command, events: [] };
       case "sound":
-        return { ...base, name: name ?? `Sound ${fileBaseName(a.file)}`, kind: "sound", sound: a.file, events: [] };
+        return {
+          ...base,
+          name: name ?? `Sound ${fileBaseName(a.file)}`,
+          kind: "sound",
+          sound: a.file,
+          ...(a.holdAction && a.holdAction !== "stop" ? { sound_hold: a.holdAction } : {}),
+          events: [],
+        };
     }
   })();
   // behavior options ride along in settings, whatever the kind
@@ -241,7 +248,12 @@ export function parseAssignment(m: MacroFile): Assignment {
     case "command":
       return { kind: "command", command: m.command ?? "", ...behavior };
     case "sound":
-      return { kind: "sound", file: m.sound ?? "", ...behavior };
+      return {
+        kind: "sound",
+        file: m.sound ?? "",
+        ...(m.sound_hold ? { holdAction: m.sound_hold } : {}),
+        ...behavior,
+      };
     default:
       return { kind: "recorded", name: m.name ?? "macro", macro: m, ...behavior };
   }

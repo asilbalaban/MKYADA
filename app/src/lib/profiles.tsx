@@ -18,13 +18,13 @@ import {
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { LazyStore } from "@tauri-apps/plugin-store";
-import { playSound, stopAllSounds } from "./sound";
+import { fadeOutSounds, playSound, stopAllSounds } from "./sound";
 import { useDevice } from "./device";
 
 /** Holding a sound key this long stops all playing sounds instead of playing. */
 const SOUND_HOLD_STOP_MS = 400;
 import { ipc } from "./ipc";
-import type { Assignment, DriveInfo, ForegroundInfo, MacroFile, Profile } from "./types";
+import type { Assignment, DriveInfo, ForegroundInfo, MacroFile, Profile, SoundHoldAction } from "./types";
 import { LAYER_NAMES } from "./types";
 import { compileAssignment, macroFileName, profileMacroFileName } from "./macro-model";
 
@@ -115,7 +115,7 @@ export function ProfilesProvider({ children }: { children: ReactNode }) {
   const heldKeys = useRef(new Set<string>());
   const armedSounds = useRef(new Map<string, { timer: number; path: string }>());
 
-  const armSound = useCallback((keyId: string, path: string) => {
+  const armSound = useCallback((keyId: string, path: string, holdAction?: SoundHoldAction) => {
     if (!heldKeys.current.has(keyId)) {
       // released before we even resolved the assignment — that's a tap
       void playSound(path).catch(() => {});
@@ -123,7 +123,11 @@ export function ProfilesProvider({ children }: { children: ReactNode }) {
     }
     const timer = window.setTimeout(() => {
       armedSounds.current.delete(keyId);
-      stopAllSounds();
+      if (holdAction === "fade") fadeOutSounds();
+      else if (holdAction === "restart") {
+        stopAllSounds();
+        void playSound(path).catch(() => {});
+      } else stopAllSounds();
     }, SOUND_HOLD_STOP_MS);
     armedSounds.current.set(keyId, { timer, path });
   }, []);
@@ -151,7 +155,7 @@ export function ProfilesProvider({ children }: { children: ReactNode }) {
         if (profile) {
           const a = profile.keys[String(e.key)];
           if (!a || a.kind === "none") return;
-          if (a.kind === "sound") return armSound(keyId, a.file);
+          if (a.kind === "sound") return armSound(keyId, a.file, a.holdAction);
           if (a.kind === "launch" || a.kind === "command") return runHostAction(a);
           void send({ t: "play", file: profileMacroFileName(profile.id, e.key) });
           return;
@@ -163,7 +167,7 @@ export function ProfilesProvider({ children }: { children: ReactNode }) {
           .driveRead(d.path, macroFileName(e.key, layerIndex))
           .then((raw) => {
             const m = JSON.parse(raw) as MacroFile;
-            if (m.kind === "sound" && m.sound) armSound(keyId, m.sound);
+            if (m.kind === "sound" && m.sound) armSound(keyId, m.sound, m.sound_hold);
             else runHostAction(m);
           })
           .catch(() => {}); // unassigned key or drive hiccup — nothing to do

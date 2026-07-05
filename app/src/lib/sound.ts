@@ -41,3 +41,19 @@ export function stopAllSounds(): void {
   for (const audio of playing) audio.pause();
   playing.clear();
 }
+
+/** Ease every playing sound down to silence over `ms`, then stop it. */
+export function fadeOutSounds(ms = 800): void {
+  for (const audio of [...playing]) {
+    playing.delete(audio); // a new press during the fade starts fresh
+    const startVolume = audio.volume;
+    const t0 = performance.now();
+    const step = () => {
+      const k = Math.min(1, (performance.now() - t0) / ms);
+      audio.volume = startVolume * (1 - k);
+      if (k < 1 && !audio.paused) requestAnimationFrame(step);
+      else audio.pause();
+    };
+    requestAnimationFrame(step);
+  }
+}

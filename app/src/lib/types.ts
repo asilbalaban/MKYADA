@@ -65,6 +65,8 @@ export interface MacroFile {
   command?: string;
   /** sound kind: audio file path — played by the desktop app */
   sound?: string;
+  /** sound kind: what holding the key does (default "stop") */
+  sound_hold?: SoundHoldAction;
   screen?: { width: number; height: number };
   settings?: MacroSettings;
   events: MacroEvent[];
@@ -78,6 +80,9 @@ export interface MacroSettings {
   /** replay while the physical key is held — like holding a letter key down */
   hold_repeat?: boolean;
 }
+
+/** What holding a sound key (~half a second) does. */
+export type SoundHoldAction = "stop" | "fade" | "restart";
 
 /** Per-key behavior options shared by every assignment kind. */
 export interface AssignmentBehavior {
@@ -96,7 +101,7 @@ export type Assignment = (
   // command, play a sound effect
   | { kind: "launch"; target: string }
   | { kind: "command"; command: string }
-  | { kind: "sound"; file: string }
+  | { kind: "sound"; file: string; holdAction?: SoundHoldAction }
 ) & { behavior?: AssignmentBehavior };
 
 export interface Profile {

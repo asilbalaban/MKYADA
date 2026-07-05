@@ -6,7 +6,7 @@ import { FolderOpen, Keyboard, Play, Volume2 } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { SOUND_EXTENSIONS, playSound } from "../lib/sound";
 import { readTextFile } from "../lib/fs";
-import type { Assignment, MacroFile } from "../lib/types";
+import type { Assignment, MacroFile, SoundHoldAction } from "../lib/types";
 import {
   IS_MAC,
   MEDIA_USAGES,
@@ -302,9 +302,21 @@ export function AssignmentEditor({
           </div>
           <p className="text-fg-faint text-xs mt-1">
             Tap the key to play it on this computer's speakers — sounds can overlap.
-            Hold the key for half a second to stop everything that's playing.
             Works while the MKYADA app is running (also minimized).
           </p>
+        </Field>
+      )}
+
+      {value.kind === "sound" && (
+        <Field label="Holding the key for half a second">
+          <Select
+            value={value.holdAction ?? "stop"}
+            onChange={(e) => onChange({ ...value, holdAction: e.target.value as SoundHoldAction })}
+          >
+            <option value="stop">Stops all playing sounds</option>
+            <option value="fade">Fades all playing sounds out</option>
+            <option value="restart">Restarts this sound from the top</option>
+          </Select>
         </Field>
       )}
 
