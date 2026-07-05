@@ -36,6 +36,14 @@ export function OverlayView() {
     // on Windows) — without the handshake we'd sit blank forever.
     void emit("overlay:ready");
 
+    // Proof-of-life from THIS window's JS. The Rust side force-hides the
+    // overlay if it's visible but these stop arriving — so a webview that
+    // died/hung while topmost (which would otherwise be an inescapable black
+    // full-screen trap, since none of the failsafes below can run) tears
+    // itself down within a couple of seconds instead.
+    void emit("overlay:alive");
+    const alive = setInterval(() => void emit("overlay:alive"), 500);
+
     // FAILSAFE 1: this window is supposed to be click-through. If any input
     // reaches us, click-through is broken (seen on Windows) and we'd be a
     // fullscreen topmost click trap — close immediately.
@@ -55,6 +63,7 @@ export function OverlayView() {
       window.removeEventListener("mousedown", bail, true);
       window.removeEventListener("keydown", bail, true);
       clearInterval(watchdog);
+      clearInterval(alive);
     };
   }, []);
 
@@ -71,7 +80,14 @@ export function OverlayView() {
 
   const items = groupEvents(macro.events);
   const paths: { d: string; hot: boolean }[] = [];
-  const clicks: { x: number; y: number; button: string; hot: boolean; n: number }[] = [];
+  const clicks: {
+    x: number;
+    y: number;
+    button: string;
+    hot: boolean;
+    n: number;
+    up: boolean;
+  }[] = [];
   let clickNo = 0;
   items.forEach((item: EditorItem, idx) => {
     const hot = selectedSet.has(idx);
@@ -79,14 +95,18 @@ export function OverlayView() {
     if (isMoveGroup(item)) {
       const d = item.points.map((p, i) => `${i === 0 ? "M" : "L"}${p.x * sx},${p.y * sy}`).join(" ");
       paths.push({ d, hot });
-    } else if (item.type === "button" && item.action === "down") {
-      clickNo += 1;
+    } else if (item.type === "button") {
+      // down = green/red ring (by button) with the click number; up = smaller
+      // yellow ring, so where the button was RELEASED (end of a drag) is
+      // visible too.
+      if (item.action === "down") clickNo += 1;
       clicks.push({
         x: (item.x ?? 0) * sx,
         y: (item.y ?? 0) * sy,
         button: item.button,
         hot,
         n: clickNo,
+        up: item.action === "up",
       });
     }
   });
@@ -112,22 +132,32 @@ export function OverlayView() {
           <circle
             cx={c.x}
             cy={c.y}
-            r={c.hot ? 14 : 11}
+            r={c.hot ? (c.up ? 11 : 14) : c.up ? 8 : 11}
             fill="none"
-            stroke={c.hot ? "#fbbf24" : c.button === "right" ? "#f87171" : "#4ade80"}
-            strokeWidth={3}
+            stroke={
+              c.hot
+                ? "#fbbf24"
+                : c.up
+                  ? "#facc15"
+                  : c.button === "right"
+                    ? "#f87171"
+                    : "#4ade80"
+            }
+            strokeWidth={c.up ? 2.5 : 3}
           />
           <circle cx={c.x} cy={c.y} r={2.5} fill={c.hot ? "#fbbf24" : "#ffffff"} />
-          <text
-            x={c.x + 16}
-            y={c.y - 10}
-            fill={c.hot ? "#fbbf24" : "#e2e8f0"}
-            fontSize={14}
-            fontWeight={700}
-            style={{ paintOrder: "stroke", stroke: "rgba(0,0,0,0.8)", strokeWidth: 3 }}
-          >
-            {c.n} · {c.button}
-          </text>
+          {!c.up && (
+            <text
+              x={c.x + 16}
+              y={c.y - 10}
+              fill={c.hot ? "#fbbf24" : "#e2e8f0"}
+              fontSize={14}
+              fontWeight={700}
+              style={{ paintOrder: "stroke", stroke: "rgba(0,0,0,0.8)", strokeWidth: 3 }}
+            >
+              {c.n} · {c.button}
+            </text>
+          )}
         </g>
       ))}
       <text

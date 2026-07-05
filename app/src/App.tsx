@@ -149,7 +149,13 @@ function Shell() {
             {page === "devices" && <DevicesPage onConnected={() => setPage("keys")} />}
             {page === "setup" && <SetupPage onDone={() => setPage("keys")} />}
             {page === "keys" && <KeysPage />}
-            {page === "recorder" && <RecorderPage />}
+            {/* The Recorder stays mounted across page switches (hidden via CSS):
+                a recording in progress captures via global hooks and must keep
+                collecting events — and the recorded macro + its undo history
+                must survive a trip to Keys/Setup and back. */}
+            <div className={page === "recorder" ? undefined : "hidden"}>
+              <RecorderPage active={page === "recorder"} />
+            </div>
             {page === "profiles" && <ProfilesPage />}
             {page === "settings" && <SettingsPage />}
           </main>

@@ -20,7 +20,7 @@ import { useToast } from "../components/toast";
 import { MacroEditor } from "../components/MacroEditor";
 import { usePermissions, useRecordError } from "../components/Permissions";
 
-export function RecorderPage() {
+export function RecorderPage({ active = true }: { active?: boolean }) {
   const { hello, drive, send } = useDevice();
   const { status: perms } = usePermissions();
   const toast = useToast();
@@ -43,8 +43,11 @@ export function RecorderPage() {
   const countdownTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // "Edit in Recorder" from the Keys page: load that key's macro into the
-  // editor as if it was just recorded, with its key preselected below.
+  // editor as if it was just recorded, with its key preselected below. The
+  // page stays mounted across tab switches, so consume the handoff whenever
+  // the page becomes the active tab (not just on first mount).
   useEffect(() => {
+    if (!active) return;
     const edit = takeRecorderEdit();
     if (!edit) return;
     setMacro(edit.macro);
@@ -53,7 +56,7 @@ export function RecorderPage() {
     setStatus(
       `Editing the macro from key ${edit.key} — "Save to key ${edit.key}" below writes it back.`,
     );
-  }, []);
+  }, [active]);
 
   const stopRecording = useCallback(async () => {
     await invoke("recorder_stop");

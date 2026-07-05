@@ -1,6 +1,6 @@
 [package]
 name = "mkyada"
-version = "0.3.1"
+version = "0.4.0"
 description = "MKYADA — Macro Keypad You Always Dream About"
 authors = ["Asil Balaban"]
 license = "MIT"
@@ -36,13 +36,19 @@ active-win-pos-rs = "0.9"
 # live system variables (CPU/RAM) for the feedback status strip
 sysinfo = "0.33"
 
-# WASAPI mic-mute state for live feedback
+# WASAPI mic-mute state for live feedback; GDI+ layered-window path overlay
+# (WebView2 transparent windows render black on some Windows machines, so the
+# on-screen macro overlay is drawn natively instead — see overlay_win.rs).
 [target.'cfg(target_os = "windows")'.dependencies]
 windows = { version = "0.58", features = [
     "Win32_Media_Audio",
     "Win32_Media_Audio_Endpoints",
     "Win32_System_Com",
     "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_Graphics_GdiPlus",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_System_LibraryLoader",
 ] }
 
 # rdev and enigo both resolve keys through TSM/HIToolbox APIs that modern

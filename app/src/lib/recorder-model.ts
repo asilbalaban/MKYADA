@@ -160,21 +160,23 @@ export function thinForDevice(events: MacroEvent[], tolerancePx = 3, maxPerSecon
   return flattenItems(items);
 }
 
+/** Every row reads the same way: `Category Action · detail · detail`. */
 export function describeItem(item: EditorItem): string {
   if (isMoveGroup(item)) {
     const first = item.points[0];
     const last = item.points[item.points.length - 1];
-    return `Mouse path · ${item.points.length} pts · (${first.x},${first.y}) → (${last.x},${last.y}) · ${groupDuration(item)} ms`;
+    return `Mouse Path · ${item.points.length} pts · (${first.x},${first.y}) → (${last.x},${last.y}) · ${groupDuration(item)} ms`;
   }
+  const cap = (s: string) => (s ? s[0].toUpperCase() + s.slice(1) : s);
   switch (item.type) {
     case "key":
-      return `Key ${item.action}: ${displayKey(item.key)}`;
+      return `Keyboard Key ${cap(item.action)} · "${displayKey(item.key)}"`;
     case "button":
-      return `${item.button} ${item.action} @ (${item.x},${item.y})`;
+      return `Mouse ${cap(item.button)} ${cap(item.action)} · (${item.x},${item.y})`;
     case "scroll":
-      return `Scroll ${item.dy > 0 ? "up" : "down"} (${item.dy})`;
+      return `Scroll ${item.dy > 0 ? "Up" : "Down"} · ${item.dy}`;
     case "move":
-      return `Move to (${item.x},${item.y})`;
+      return `Mouse Move · (${item.x},${item.y})`;
     case "wait":
       return "Wait";
     default:

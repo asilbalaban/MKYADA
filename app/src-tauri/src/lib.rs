@@ -1,5 +1,7 @@
 mod device;
 mod layout;
+#[cfg(target_os = "windows")]
+mod overlay_win;
 mod permissions;
 mod player;
 mod profiles;
@@ -20,6 +22,12 @@ use tauri::{AppHandle, Manager, State};
 /// topmost window — if the editor stops vouching for it, tear it down from
 /// the Rust side even when the overlay webview itself is dead/blank.
 struct OverlayLiveness(Arc<Mutex<Instant>>);
+
+/// Last time the overlay's OWN webview proved it's alive (via `overlay:alive`).
+/// Distinct from `OverlayLiveness` (which the editor emits): this proves the
+/// overlay's JS is actually running, so a dead/hung overlay can be force-hidden
+/// before it becomes an inescapable black full-screen trap.
+struct OverlayAlive(Arc<Mutex<Instant>>);
 
 /// Bring the main window back from the tray / a second launch / a dock click.
 fn show_main(app: &AppHandle) {
@@ -454,34 +462,22 @@ fn harden_click_through(w: &tauri::WebviewWindow) {
 #[cfg(not(target_os = "windows"))]
 fn harden_click_through(_w: &tauri::WebviewWindow) {}
 
-/// Full-screen, click-through, transparent overlay window used to draw the
-/// recorded mouse path on the real screen (port of the old tkinter overlay).
-#[tauri::command]
-fn overlay_show(app: AppHandle, liveness: State<OverlayLiveness>) -> Result<(), String> {
+/// Build the full-screen, transparent, click-through overlay window (hidden).
+///
+/// macOS/Linux only: it's created ONCE at startup and kept warm for the app's
+/// lifetime, then only ever shown/hidden. (On Windows WebView2 transparent
+/// windows render opaque black — tauri#8308 — so there the overlay is a native
+/// GDI layered window instead; see [`overlay_win`].)
+#[cfg(not(target_os = "windows"))]
+fn build_overlay(app: &AppHandle) -> Result<tauri::WebviewWindow, String> {
     use tauri::{WebviewUrl, WebviewWindowBuilder};
-    // fresh grace period — the watchdog must not kill the window we're
-    // about to show before the editor's first ping arrives
-    *liveness.0.lock().unwrap() = Instant::now();
-    if let Some(w) = app.get_webview_window("overlay") {
-        if let Err(e) = w.set_ignore_cursor_events(true) {
-            let _ = w.destroy();
-            return Err(format!("overlay click-through failed: {e}"));
-        }
-        harden_click_through(&w);
-        w.show().map_err(|e| e.to_string())?;
-        return Ok(());
-    }
     let monitor = app
         .primary_monitor()
         .map_err(|e| e.to_string())?
         .ok_or("no monitor")?;
     let scale = monitor.scale_factor();
     let size = monitor.size().to_logical::<f64>(scale);
-    // Build hidden, make it click-through FIRST, then show. If the window
-    // became visible before ignore_cursor_events landed (or that call
-    // failed), a fullscreen topmost invisible window would swallow every
-    // click on the machine — the user couldn't even reach Task Manager.
-    let w = WebviewWindowBuilder::new(&app, "overlay", WebviewUrl::App("index.html".into()))
+    WebviewWindowBuilder::new(app, "overlay", WebviewUrl::App("index.html".into()))
         .title("MKYADA overlay")
         .decorations(false)
         .transparent(true)
@@ -494,14 +490,51 @@ fn overlay_show(app: AppHandle, liveness: State<OverlayLiveness>) -> Result<(), 
         .position(0.0, 0.0)
         .inner_size(size.width, size.height)
         .build()
-        .map_err(|e| e.to_string())?;
-    if let Err(e) = w.set_ignore_cursor_events(true) {
-        let _ = w.destroy(); // never leave a click-eating window behind
-        return Err(format!("overlay click-through failed: {e}"));
+        .map_err(|e| e.to_string())
+}
+
+/// Full-screen, click-through, transparent overlay used to draw the recorded
+/// mouse path on the real screen (port of the old tkinter overlay). Native GDI
+/// layered window on Windows; transparent WebView2 window elsewhere.
+#[tauri::command]
+fn overlay_show(
+    app: AppHandle,
+    liveness: State<OverlayLiveness>,
+    alive: State<OverlayAlive>,
+) -> Result<(), String> {
+    // fresh grace period — the watchdog must not kill the window we're about to
+    // show before the editor's first ping (last) or the overlay webview's first
+    // overlay:alive land. Both get up to their timeout from NOW.
+    *liveness.0.lock().unwrap() = Instant::now();
+    *alive.0.lock().unwrap() = Instant::now();
+
+    #[cfg(target_os = "windows")]
+    {
+        let _ = &app;
+        // Native layered-window overlay. The scene is fed separately by the
+        // `overlay:data` listener (from the editor); here we just show it.
+        overlay_win::show();
+        return Ok(());
     }
-    harden_click_through(&w);
-    w.show().map_err(|e| e.to_string())?;
-    Ok(())
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        // The overlay is pre-created at startup; only build here as a fallback.
+        let w = match app.get_webview_window("overlay") {
+            Some(w) => w,
+            None => build_overlay(&app)?,
+        };
+        // Click-through: the overlay must never eat a click. Applied BEFORE
+        // showing so the window is never a click trap while visible.
+        if let Err(e) = w.set_ignore_cursor_events(true) {
+            let _ = w.hide();
+            return Err(format!("overlay click-through failed: {e}"));
+        }
+        harden_click_through(&w);
+        w.show().map_err(|e| e.to_string())?;
+        harden_click_through(&w);
+        Ok(())
+    }
 }
 
 /// Keep the main window above the game while fine-tuning macro coordinates.
@@ -513,10 +546,16 @@ fn window_set_pin(app: AppHandle, pinned: bool) -> Result<(), String> {
 
 #[tauri::command]
 fn overlay_hide(app: AppHandle) {
+    #[cfg(target_os = "windows")]
+    {
+        let _ = &app;
+        overlay_win::hide();
+    }
+    #[cfg(not(target_os = "windows"))]
     if let Some(w) = app.get_webview_window("overlay") {
-        // destroy, not close: a blank/hung overlay webview (seen on Windows)
-        // never answers a polite close request
-        let _ = w.destroy();
+        // hide, not destroy: the window is created once at startup and kept
+        // warm for the app's lifetime. Hidden, it can't trap clicks.
+        let _ = w.hide();
     }
 }
 
@@ -542,32 +581,82 @@ pub fn run() {
             }
             setup_tray(app)?;
             vars::start(app.handle().clone());
-            // Overlay watchdog: the editor heartbeats overlay:ping/overlay:data
-            // every second while its overlay is up. If those stop (editor gone,
-            // main webview dead) OR keep coming while nobody can see the app,
-            // a fullscreen topmost window must never linger — destroy it.
+            // macOS/Linux WebView2-overlay setup: harden click-through once the
+            // overlay webview signals `overlay:ready`, and pre-create it hidden
+            // at startup so it warm-inits undisturbed. (Windows draws the overlay
+            // natively — see overlay_win — so none of this applies there.)
+            #[cfg(not(target_os = "windows"))]
+            {
+                let h = app.handle().clone();
+                app.listen("overlay:ready", move |_| {
+                    if let Some(w) = h.get_webview_window("overlay") {
+                        let _ = w.set_ignore_cursor_events(true);
+                        harden_click_through(&w);
+                    }
+                });
+                if let Err(e) = build_overlay(app.handle()) {
+                    eprintln!("overlay pre-create failed: {e}");
+                }
+            }
+            // Overlay watchdog. Two independent heartbeats guard the fullscreen
+            // topmost window; if EITHER goes quiet while the overlay is visible,
+            // hide it (keep it warm, though):
+            //   * `last`  — the editor (main window) proves it's alive via
+            //     overlay:ping/overlay:data. Stops if the editor closed/died.
+            //   * `alive` — the OVERLAY's own JS proves IT is alive via
+            //     overlay:alive. Stops if the overlay webview died/hung while on
+            //     screen — which would otherwise be an inescapable black
+            //     full-screen trap (the JS failsafes can't run if the JS is
+            //     dead). This is the escape hatch that must never be missing.
             let last = Arc::new(Mutex::new(Instant::now()));
+            let alive = Arc::new(Mutex::new(Instant::now()));
             app.manage(OverlayLiveness(last.clone()));
+            app.manage(OverlayAlive(alive.clone()));
             {
                 let l = last.clone();
                 app.listen("overlay:ping", move |_| {
                     *l.lock().unwrap() = Instant::now();
                 });
                 let l = last.clone();
-                app.listen("overlay:data", move |_| {
+                app.listen("overlay:data", move |_event| {
                     *l.lock().unwrap() = Instant::now();
+                    // Windows draws the overlay natively — parse the editor's
+                    // macro payload into a scene and push it to the layered
+                    // window. (Elsewhere the overlay webview draws it itself.)
+                    #[cfg(target_os = "windows")]
+                    overlay_win::set_scene_from_payload(_event.payload());
+                });
+                let a = alive.clone();
+                app.listen("overlay:alive", move |_| {
+                    *a.lock().unwrap() = Instant::now();
                 });
             }
             let handle = app.handle().clone();
             std::thread::spawn(move || loop {
-                std::thread::sleep(Duration::from_secs(1));
+                std::thread::sleep(Duration::from_millis(500));
+                let editor_gone = last.lock().unwrap().elapsed() > Duration::from_secs(5);
+                #[cfg(target_os = "windows")]
+                {
+                    let _ = &handle;
+                    let _ = &alive;
+                    // Native overlay: if the editor stops vouching for it while
+                    // it's up, hide it. (It can't hang/black-trap like the
+                    // webview did — we own the drawing thread — so the
+                    // overlay:alive check isn't needed here.)
+                    if overlay_win::is_visible() && editor_gone {
+                        overlay_win::hide();
+                    }
+                }
+                #[cfg(not(target_os = "windows"))]
                 if let Some(w) = handle.get_webview_window("overlay") {
-                    if last.lock().unwrap().elapsed() > Duration::from_secs(5) {
-                        let _ = w.destroy();
-                    } else {
-                        // WebView2 spawns child HWNDs late; keep re-applying
-                        // the click-through styles while the overlay lives
-                        harden_click_through(&w);
+                    if !w.is_visible().unwrap_or(false) {
+                        continue;
+                    }
+                    // The overlay emits overlay:alive every 500ms; ~2s of silence
+                    // means its webview is dead/hung — tear the trap down fast.
+                    let overlay_dead = alive.lock().unwrap().elapsed() > Duration::from_secs(2);
+                    if editor_gone || overlay_dead {
+                        let _ = w.hide();
                     }
                 }
             });
@@ -579,11 +668,13 @@ pub fn run() {
             if window.label() == "main" {
                 if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                     // The path overlay only makes sense while the editor is on
-                    // screen. The hidden-to-tray webview keeps heartbeating, so
-                    // without this the overlay would sit on top of the desktop
-                    // "until reboot" (issue #2).
+                    // screen — hide it when the main window goes to the tray so
+                    // it never sits on top of the desktop "until reboot".
+                    #[cfg(target_os = "windows")]
+                    overlay_win::hide();
+                    #[cfg(not(target_os = "windows"))]
                     if let Some(o) = window.app_handle().get_webview_window("overlay") {
-                        let _ = o.destroy();
+                        let _ = o.hide();
                     }
                     if run_in_background(window.app_handle()) {
                         api.prevent_close();
