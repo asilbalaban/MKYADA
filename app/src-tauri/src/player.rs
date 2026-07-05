@@ -33,6 +33,12 @@ impl Preview {
         let stop = self.stop.clone();
         let speed = speed.max(0.01);
         std::thread::spawn(move || {
+            // Windows quantizes thread::sleep to the system timer (~15.6 ms by
+            // default); a recording is a stream of ~16 ms move deltas, so the
+            // per-event rounding error made previews visibly stutter and lag.
+            #[cfg(windows)]
+            let _timer_res = timer_res::OneMs::acquire();
+
             let mut sink = match sink::Sink::new() {
                 Ok(s) => s,
                 Err(e) => {
@@ -40,18 +46,32 @@ impl Preview {
                     return;
                 }
             };
-            for ev in &events {
-                if stop.load(Ordering::Relaxed) {
-                    break;
-                }
+            // Schedule on absolute deadlines from the start of playback:
+            // sleep overshoot then corrects itself instead of accumulating
+            // across thousands of events.
+            let start = std::time::Instant::now();
+            let mut due = std::time::Duration::ZERO;
+            let spin_margin = std::time::Duration::from_millis(3);
+            'events: for ev in &events {
                 let delay = ev.get("delay").and_then(Value::as_f64).unwrap_or(0.0);
-                if delay > 0.0 {
-                    // sleep in slices so stop stays responsive
-                    let mut remaining = delay / 1000.0 / speed;
-                    while remaining > 0.0 && !stop.load(Ordering::Relaxed) {
-                        let s = remaining.min(0.05);
-                        std::thread::sleep(std::time::Duration::from_secs_f64(s));
-                        remaining -= s;
+                due += std::time::Duration::from_secs_f64(delay / 1000.0 / speed);
+                loop {
+                    if stop.load(Ordering::Relaxed) {
+                        break 'events;
+                    }
+                    let elapsed = start.elapsed();
+                    if elapsed >= due {
+                        break;
+                    }
+                    let remaining = due - elapsed;
+                    if remaining > spin_margin {
+                        // coarse sleep, sliced so stop stays responsive
+                        std::thread::sleep(
+                            (remaining - spin_margin).min(std::time::Duration::from_millis(50)),
+                        );
+                    } else {
+                        // final stretch: yield until the deadline for sub-ms accuracy
+                        std::thread::yield_now();
                     }
                 }
                 sink.apply(ev);
@@ -60,6 +80,34 @@ impl Preview {
             let _ = app.emit("preview:done", String::new());
         });
         Ok(())
+    }
+}
+
+#[cfg(windows)]
+mod timer_res {
+    //! Ask Windows for 1 ms scheduler resolution while a preview is playing
+    //! (winmm timeBeginPeriod), and give it back when done.
+
+    #[allow(non_snake_case)]
+    #[link(name = "winmm")]
+    extern "system" {
+        fn timeBeginPeriod(period: u32) -> u32;
+        fn timeEndPeriod(period: u32) -> u32;
+    }
+
+    pub struct OneMs;
+
+    impl OneMs {
+        pub fn acquire() -> Self {
+            unsafe { timeBeginPeriod(1) };
+            OneMs
+        }
+    }
+
+    impl Drop for OneMs {
+        fn drop(&mut self) {
+            unsafe { timeEndPeriod(1) };
+        }
     }
 }
 

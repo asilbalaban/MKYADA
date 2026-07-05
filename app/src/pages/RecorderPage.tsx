@@ -13,6 +13,7 @@ import { useDevice } from "../lib/device";
 import type { MacroEvent, MacroFile } from "../lib/types";
 import { captureScreen, thinForDevice } from "../lib/recorder-model";
 import { macroFileName, migrateMacro } from "../lib/macro-model";
+import { takeRecorderEdit } from "../lib/recorder-handoff";
 import { Badge, Button, Card, Field, Input, Select } from "../components/ui";
 import { useToast } from "../components/toast";
 import { MacroEditor } from "../components/MacroEditor";
@@ -35,6 +36,19 @@ export function RecorderPage() {
   const raw = useRef<MacroEvent[]>([]);
   const recordingRef = useRef(false);
   const countdownTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // "Edit in Recorder" from the Keys page: load that key's macro into the
+  // editor as if it was just recorded, with its key preselected below.
+  useEffect(() => {
+    const edit = takeRecorderEdit();
+    if (!edit) return;
+    setMacro(edit.macro);
+    setAssignKey(edit.key);
+    setAssignLayer(edit.layer);
+    setStatus(
+      `Editing the macro from key ${edit.key} — "Save to key ${edit.key}" below writes it back.`,
+    );
+  }, []);
 
   const stopRecording = useCallback(async () => {
     await invoke("recorder_stop");

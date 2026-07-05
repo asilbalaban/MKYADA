@@ -194,43 +194,6 @@ export function MacroEditor({ macro, onChange }: Props) {
             }
           />
         </Field>
-        <Field label="Repeat (0 = loop until key)">
-          <Input
-            type="number" min="0" className="w-20"
-            value={macro.settings?.repeat ?? 1}
-            onChange={(e) =>
-              onChange({ ...macro, settings: { ...macro.settings, repeat: Math.max(0, parseInt(e.target.value) || 0) } })
-            }
-          />
-        </Field>
-        <Field label="Press key again while playing">
-          <Select
-            value={macro.settings?.on_repress ?? "stop"}
-            onChange={(e) =>
-              onChange({
-                ...macro,
-                settings: { ...macro.settings, on_repress: e.target.value as "stop" | "restart" },
-              })
-            }
-          >
-            <option value="stop">Stop the macro</option>
-            <option value="restart">Restart it</option>
-          </Select>
-        </Field>
-        <Field label="While key is held">
-          <Select
-            value={macro.settings?.hold_repeat ? "repeat" : "once"}
-            onChange={(e) =>
-              onChange({
-                ...macro,
-                settings: { ...macro.settings, hold_repeat: e.target.value === "repeat" },
-              })
-            }
-          >
-            <option value="once">Play once</option>
-            <option value="repeat">Repeat while held</option>
-          </Select>
-        </Field>
         <Field label="All delays ×">
           <div className="flex gap-1">
             <Input value={bulkFactor} onChange={(e) => setBulkFactor(e.target.value)} className="w-16" />
@@ -238,6 +201,94 @@ export function MacroEditor({ macro, onChange }: Props) {
           </div>
         </Field>
       </div>
+
+      <Card title="When the key is pressed">
+        <div className="grid sm:grid-cols-3 gap-4 items-start">
+          <div className="flex flex-col gap-1">
+            <Field label="Play the macro">
+              <Select
+                value={(macro.settings?.repeat ?? 1) === 0 ? "loop" : "count"}
+                onChange={(e) =>
+                  onChange({
+                    ...macro,
+                    settings: {
+                      ...macro.settings,
+                      repeat: e.target.value === "loop" ? 0 : 1,
+                    },
+                  })
+                }
+              >
+                <option value="count">A number of times</option>
+                <option value="loop">In a loop, until stopped</option>
+              </Select>
+            </Field>
+            {(macro.settings?.repeat ?? 1) !== 0 ? (
+              <div className="flex items-center gap-2 mt-1">
+                <Input
+                  type="number" min="1" className="w-20"
+                  value={macro.settings?.repeat ?? 1}
+                  onChange={(e) =>
+                    onChange({
+                      ...macro,
+                      settings: {
+                        ...macro.settings,
+                        repeat: Math.max(1, parseInt(e.target.value) || 1),
+                      },
+                    })
+                  }
+                />
+                <span className="text-xs text-fg-faint">time(s) per press</span>
+              </div>
+            ) : (
+              <p className="text-xs text-fg-faint">
+                Loops forever — press the key again to stop it.
+              </p>
+            )}
+          </div>
+
+          <div className="flex flex-col gap-1">
+            <Field label="Pressing the key again, while playing">
+              <Select
+                className="w-full"
+                value={macro.settings?.on_repress ?? "stop"}
+                onChange={(e) =>
+                  onChange({
+                    ...macro,
+                    settings: { ...macro.settings, on_repress: e.target.value as "stop" | "restart" },
+                  })
+                }
+              >
+                <option value="stop">Stops the macro</option>
+                <option value="restart">Restarts it from the top</option>
+              </Select>
+            </Field>
+            <p className="text-xs text-fg-faint">
+              What a second press of the same key does mid-playback.
+            </p>
+          </div>
+
+          <div className="flex flex-col gap-1">
+            <Field label="Holding the key down">
+              <Select
+                className="w-full"
+                value={macro.settings?.hold_repeat ? "repeat" : "once"}
+                onChange={(e) =>
+                  onChange({
+                    ...macro,
+                    settings: { ...macro.settings, hold_repeat: e.target.value === "repeat" },
+                  })
+                }
+              >
+                <option value="once">Plays it once</option>
+                <option value="repeat">Replays it while held</option>
+              </Select>
+            </Field>
+            <p className="text-xs text-fg-faint">
+              "Replays" works like holding a letter key on a keyboard.
+            </p>
+          </div>
+        </div>
+      </Card>
 
       <div className="grid grid-cols-[1.2fr_1fr] gap-3 items-start">
         <Card

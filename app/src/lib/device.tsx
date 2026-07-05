@@ -11,7 +11,7 @@ import {
   useState,
 } from "react";
 import { ipc, onDeviceDisconnected, onDeviceMsg } from "./ipc";
-import { rememberDevice } from "./devnames";
+import { rememberDevice, syncNameWithDevice } from "./devnames";
 import type { BtnEvent, DeviceInfo, DriveInfo, Hello } from "./types";
 
 interface DeviceState {
@@ -91,8 +91,36 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
     const drives = await ipc.listDrives();
     const match = drives.find((d) => d.uid.toLowerCase() === info.hello.uid.toLowerCase());
     setDrive(match ?? drives[0] ?? null);
+    if (match) void syncNameWithDevice(match.path, info.hello.uid);
     await ipc.deviceSend({ t: "identify" });
   }, []);
+
+  // The CIRCUITPY drive often mounts seconds after the serial port appears
+  // (especially on Windows) — keep looking for it instead of making the user
+  // unplug and replug the keypad.
+  useEffect(() => {
+    if (!hello || drive) return;
+    let cancelled = false;
+    const find = async () => {
+      try {
+        const drives = await ipc.listDrives();
+        if (cancelled) return;
+        const match = drives.find((d) => d.uid.toLowerCase() === hello.uid.toLowerCase());
+        if (match) {
+          setDrive(match);
+          void syncNameWithDevice(match.path, hello.uid);
+        }
+      } catch {
+        // keep trying on the next tick
+      }
+    };
+    void find();
+    const t = setInterval(() => void find(), 2000);
+    return () => {
+      cancelled = true;
+      clearInterval(t);
+    };
+  }, [hello, drive]);
 
   // Auto-connect: scan on launch and every few seconds while disconnected;
   // if exactly one keypad is plugged in, connect to it without asking.

@@ -1,7 +1,7 @@
 # Status LED on the RP2040-Zero's onboard WS2812 (GP16).
 #
 #   idle        layer color, dim solid (A green / B blue / C purple / D teal)
-#   playing     amber solid; looping macro -> amber blink
+#   playing     amber fast blink; looping macro -> slow amber blink
 #   host mode   layer color breathing toward white
 #   error       red triple-blink overlay, then back to current state
 
@@ -60,10 +60,10 @@ class Led:
         if now < self.error_until:                       # red triple-blink overlay
             self._apply(RED if int(now * 5) % 2 == 0 else (0, 0, 0))
             return
-        if self.state == LOOPING:                        # amber blink
+        if self.state == LOOPING:                        # slow amber blink
             self._apply(AMBER if int(now * 2) % 2 == 0 else (0, 0, 0))
-        elif self.state == PLAYING:
-            self._apply(AMBER)
+        elif self.state == PLAYING:                      # fast amber blink
+            self._apply(AMBER if int(now * 4) % 2 == 0 else (0, 0, 0))
         elif self.state == HOST:                         # breathe layer color -> white
             phase = (now % 2.0) / 2.0
             level = phase * 2 if phase < 0.5 else (1 - phase) * 2

@@ -3,6 +3,7 @@
 // so it can be applied synchronously at boot with no flash.
 
 import { useSyncExternalStore } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { LazyStore } from "@tauri-apps/plugin-store";
 
 const store = new LazyStore("settings.json");
@@ -63,5 +64,36 @@ export function useThemePref(): ThemePref {
       return () => listeners.delete(cb);
     },
     () => themePref,
+  );
+}
+
+// -------------------------------------------------------- always on top ---
+// Keep MKYADA above other windows (games) while fine-tuning macro
+// coordinates. Lives in Settings and persists across launches.
+
+let alwaysOnTop = false;
+const aotListeners = new Set<() => void>();
+
+/** Call once at boot — re-applies the stored preference to the window. */
+export function initAlwaysOnTop() {
+  void getSetting("alwaysOnTop", false).then((stored) => {
+    if (stored) setAlwaysOnTop(true);
+  });
+}
+
+export function setAlwaysOnTop(on: boolean) {
+  alwaysOnTop = on;
+  void setSetting("alwaysOnTop", on);
+  void invoke("window_set_pin", { pinned: on });
+  aotListeners.forEach((l) => l());
+}
+
+export function useAlwaysOnTop(): boolean {
+  return useSyncExternalStore(
+    (cb) => {
+      aotListeners.add(cb);
+      return () => aotListeners.delete(cb);
+    },
+    () => alwaysOnTop,
   );
 }

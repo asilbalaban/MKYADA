@@ -1,10 +1,16 @@
 import { useEffect, useState } from "react";
 import { getVersion } from "@tauri-apps/api/app";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { Monitor, Moon, Sun } from "lucide-react";
+import { Monitor, Moon, Pin, Sun } from "lucide-react";
 import { ipc } from "../lib/ipc";
 import type { UpdateInfo } from "../lib/types";
-import { setThemePref, ThemePref, useThemePref } from "../lib/settings";
+import {
+  setAlwaysOnTop,
+  setThemePref,
+  ThemePref,
+  useAlwaysOnTop,
+  useThemePref,
+} from "../lib/settings";
 import { Badge, Button, Card } from "../components/ui";
 import { PermissionsCard } from "../components/Permissions";
 
@@ -38,6 +44,32 @@ function AppearanceCard() {
   );
 }
 
+function WindowCard() {
+  const pinned = useAlwaysOnTop();
+  return (
+    <Card title="Window">
+      <div className="flex items-center justify-between gap-4">
+        <div className="flex flex-col gap-0.5 text-sm">
+          <span className="text-fg font-medium">Always on top</span>
+          <span className="text-xs text-fg-faint">
+            Keep MKYADA above other windows (like a game) while you fine-tune macro
+            coordinates.
+          </span>
+        </div>
+        <Button
+          variant={pinned ? "primary" : "default"}
+          role="switch"
+          aria-checked={pinned}
+          onClick={() => setAlwaysOnTop(!pinned)}
+        >
+          <Pin size={14} aria-hidden className={pinned ? "" : "rotate-45"} />
+          {pinned ? "On" : "Off"}
+        </Button>
+      </div>
+    </Card>
+  );
+}
+
 export function SettingsPage() {
   const [version, setVersion] = useState("");
   const [update, setUpdate] = useState<UpdateInfo | null>(null);
@@ -63,6 +95,7 @@ export function SettingsPage() {
   return (
     <div className="flex flex-col gap-4 max-w-3xl mx-auto w-full">
       <AppearanceCard />
+      <WindowCard />
       <PermissionsCard />
       <Card title="About">
         <div className="flex flex-col gap-2 text-sm text-fg">

@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import {
@@ -7,7 +6,6 @@ import {
   Keyboard,
   LayoutGrid,
   LucideIcon,
-  Pin,
   Settings,
   SlidersHorizontal,
   Wand2,
@@ -43,7 +41,6 @@ const NAV: { id: Page; label: string; icon: LucideIcon; needsDevice?: boolean }[
 function Shell() {
   const [page, setPage] = useState<Page>("devices");
   const [update, setUpdate] = useState<UpdateInfo | null>(null);
-  const [pinned, setPinned] = useState(false);
   const [nickname, setNickname] = useState("");
   const { hello, port, layer } = useDevice();
   // key labels everywhere show what they type on the user's real keyboard
@@ -62,14 +59,6 @@ function Shell() {
     return onDevnamesChanged(load);
   }, [hello]);
 
-  // "Always on top": keep MKYADA above the game while fine-tuning macro
-  // coordinates — no alt-tab round trips after every small edit.
-  function togglePin() {
-    const next = !pinned;
-    setPinned(next);
-    void invoke("window_set_pin", { pinned: next });
-  }
-
   // Non-blocking update check on launch.
   useEffect(() => {
     ipc
@@ -83,9 +72,13 @@ function Shell() {
       <div className="flex h-screen">
         <aside className="w-48 shrink-0 border-r border-line bg-panel flex flex-col">
           <div className="px-4 py-4 border-b border-line flex items-center gap-3">
-            <img src="/mkyada-logo.png" alt="MKYADA" className="w-12 h-12 rounded-xl shrink-0" />
-            <p className="text-[11px] text-fg-muted leading-snug font-medium">
-              Macro Keypad You Always Dream About
+            <img src="/mkyada-logo.png" alt="MKYADA" className="w-14 h-14 rounded-xl shrink-0" />
+            <p className="text-xs text-fg-muted leading-snug font-medium">
+              Macro Keypad
+              <br />
+              You Always
+              <br />
+              Dream About
             </p>
           </div>
           <nav className="flex-1 py-2" aria-label="Main">
@@ -119,18 +112,6 @@ function Shell() {
             })}
           </nav>
           <div className="px-4 py-3 border-t border-line flex flex-col gap-2">
-            <button
-              onClick={togglePin}
-              aria-pressed={pinned}
-              title="Keep MKYADA above other windows (games) while fine-tuning macros"
-              className={`flex items-center gap-2 text-xs rounded-md px-2 py-1.5 border transition-colors
-                ${pinned
-                  ? "border-accent text-accent bg-accent/10"
-                  : "border-line text-fg-muted hover:text-fg"}`}
-            >
-              <Pin size={13} aria-hidden className={pinned ? "" : "rotate-45"} />
-              {pinned ? "Always on top: ON" : "Always on top"}
-            </button>
             {port && hello ? (
               <div className="flex flex-col gap-1 items-start">
                 <Badge tone="green">

@@ -2,7 +2,7 @@
 // save. Every assignment is compiled to a macro JSON on the device drive.
 
 import { useCallback, useEffect, useState } from "react";
-import { Play, Usb } from "lucide-react";
+import { Play, SquarePen, Usb } from "lucide-react";
 import { useDevice } from "../lib/device";
 import { useNav } from "../lib/nav";
 import { ipc } from "../lib/ipc";
@@ -13,8 +13,10 @@ import {
   compileAssignment,
   defaultConfig,
   macroFileName,
+  migrateMacro,
   parseAssignment,
 } from "../lib/macro-model";
+import { stashRecorderEdit } from "../lib/recorder-handoff";
 import { Button, Card, EmptyState, Spinner } from "../components/ui";
 import { useToast } from "../components/toast";
 import { Keypad } from "../components/Keypad";
@@ -105,9 +107,12 @@ export function KeysPage() {
       <Card>
         <EmptyState
           icon={<Usb size={28} />}
-          title="Keypad connected, but its USB drive wasn't found"
-          description="Assignments are saved as files on the keypad's USB drive (CIRCUITPY). Unplug and replug the keypad so the drive mounts."
+          title="Waiting for the keypad's USB drive…"
+          description="Assignments are saved as files on the keypad's USB drive (CIRCUITPY). It usually mounts a few seconds after the keypad connects — the app keeps looking automatically. If nothing happens for a while, unplug and replug the keypad."
         />
+        <div className="flex justify-center mt-3">
+          <Spinner />
+        </div>
       </Card>
     );
   if (!cfg)
@@ -219,9 +224,26 @@ export function KeysPage() {
         actions={
           selected !== null &&
           current && (
-            <Button onClick={() => void testPlay(selected)}>
-              <Play size={14} aria-hidden /> Test
-            </Button>
+            <div className="flex gap-1.5">
+              {current.kind === "recorded" && (
+                <Button
+                  title="Open this macro in the Recorder's editor — tweak it and save it back"
+                  onClick={() => {
+                    stashRecorderEdit({
+                      macro: migrateMacro(current.macro),
+                      key: selected,
+                      layer,
+                    });
+                    nav("recorder");
+                  }}
+                >
+                  <SquarePen size={14} aria-hidden /> Edit in Recorder
+                </Button>
+              )}
+              <Button onClick={() => void testPlay(selected)}>
+                <Play size={14} aria-hidden /> Test
+              </Button>
+            </div>
           )
         }
       >

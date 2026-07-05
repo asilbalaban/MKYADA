@@ -11,6 +11,7 @@ import {
   displayName,
   rememberDevice,
   rememberedDevices,
+  writeNameToDevice,
 } from "../lib/devnames";
 import { Badge, Button, Card, EmptyState, Field, Input } from "../components/ui";
 import { useToast } from "../components/toast";
@@ -45,6 +46,17 @@ export function DevicesPage({ onConnected }: { onConnected: () => void }) {
     if (!hello) return;
     await rememberDevice(hello.uid, { name: nickname.trim() });
     await refreshRemembered();
+    // Also store it on the keypad itself, so it keeps the name on any computer.
+    if (drive) {
+      try {
+        await writeNameToDevice(drive.path, nickname.trim());
+        toast.success("Nickname saved", "Stored on the keypad too — it travels with the device.");
+        return;
+      } catch {
+        toast.success("Nickname saved", "Couldn't write it to the keypad's drive, saved on this computer only.");
+        return;
+      }
+    }
     toast.success("Nickname saved");
   }
 
