@@ -64,6 +64,75 @@
     [...c.children].forEach((ch, i) => ch.style.setProperty("--i", i));
   });
 
+  /* ---------- action marquee: duplicate the cards for a seamless loop ---------- */
+  document.querySelectorAll("[data-marquee] .act-track").forEach((track) => {
+    [...track.children].forEach((node) => {
+      const clone = node.cloneNode(true);
+      clone.setAttribute("aria-hidden", "true");
+      clone.setAttribute("data-clone", "");
+      track.appendChild(clone);
+    });
+  });
+
+  /* ---------- screenshot slider: arrows, dots, autoplay while visible ---------- */
+  document.querySelectorAll("[data-slider]").forEach((s) => {
+    const track = s.querySelector(".slider-track");
+    const slides = [...track.children];
+    const dotsWrap = s.querySelector(".slider-dots");
+    if (!track || slides.length < 2) return;
+    let i = 0, timer = 0;
+    const dots = slides.map((_, k) => {
+      const d = document.createElement("button");
+      d.type = "button"; d.className = "slider-dot";
+      d.setAttribute("aria-label", "Slide " + (k + 1));
+      d.addEventListener("click", () => { go(k); kick(); });
+      dotsWrap.appendChild(d);
+      return d;
+    });
+    const go = (n) => {
+      i = (n + slides.length) % slides.length;
+      slides.forEach((sl, k) => sl.classList.toggle("on", k === i));
+      dots.forEach((d, k) => d.classList.toggle("on", k === i));
+    };
+    const stop = () => { if (timer) { clearInterval(timer); timer = 0; } };
+    const start = () => { if (!REDUCED && !timer) timer = setInterval(() => go(i + 1), 4500); };
+    const kick = () => { stop(); start(); };
+    s.querySelector(".next").addEventListener("click", () => { go(i + 1); kick(); });
+    s.querySelector(".prev").addEventListener("click", () => { go(i - 1); kick(); });
+    go(0);
+    const vis = new IntersectionObserver((es) => {
+      es.forEach((e) => (e.isIntersecting ? start() : stop()));
+    }, { threshold: 0.3 });
+    vis.observe(s);
+  });
+
+  /* ---------- hero: mouse gently nudges the background orbs (slow) ---------- */
+  if (FINE && !REDUCED) {
+    const hero = document.querySelector("header");
+    if (hero) {
+      hero.addEventListener("pointermove", (e) => {
+        const r = hero.getBoundingClientRect();
+        const mx = (e.clientX - r.left) / r.width - 0.5;
+        const my = (e.clientY - r.top) / r.height - 0.5;
+        hero.style.setProperty("--ox", (mx * 46).toFixed(1) + "px");
+        hero.style.setProperty("--oy", (my * 38).toFixed(1) + "px");
+      });
+      hero.addEventListener("pointerleave", () => {
+        hero.style.setProperty("--ox", "0px");
+        hero.style.setProperty("--oy", "0px");
+      });
+    }
+  }
+
+  /* ---------- growing keypad: show the side rail only while in view ---------- */
+  const growRail = document.querySelector(".grow-rail");
+  const growSec = document.getElementById("grow");
+  if (growRail && growSec) {
+    new IntersectionObserver((es) => {
+      es.forEach((e) => growRail.classList.toggle("on", e.isIntersecting));
+    }, { threshold: 0 }).observe(growSec);
+  }
+
   /* ---------- scroll scrub engine: writes --p (0..1) on [data-scrub] ---------- */
   const scrubs = [];
   document.querySelectorAll("[data-scrub]").forEach((el) => {
