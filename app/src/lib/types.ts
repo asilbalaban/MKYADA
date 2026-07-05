@@ -64,6 +64,7 @@ export interface MacroFile {
     | "launch"
     | "command"
     | "sound"
+    | "mic"
     | "sequence";
   combo?: { mods: string[]; key: string };
   text?: string;
@@ -76,6 +77,8 @@ export interface MacroFile {
   sound?: string;
   /** sound kind: what holding the key does (default "stop") */
   sound_hold?: SoundHoldAction;
+  /** mic kind: what the key does to the system microphone (default "toggle") */
+  mic_mode?: MicMode;
   /** sequence kind: the editable steps. Pure-HID sequences also compile
    * their steps into `events` (standalone); mixed ones leave `events` empty
    * and the desktop app orchestrates the steps. */
@@ -109,6 +112,14 @@ export const DOUBLE_MS_DEFAULT = 250;
 /** What holding a sound key (~half a second) does. */
 export type SoundHoldAction = "stop" | "fade" | "restart";
 
+/**
+ * What a "mic" key does to the system microphone:
+ * - toggle: flip mute state on each press
+ * - mute / unmute: always drive to that state on each press
+ * - push_to_talk: unmute while the key is held down, mute again on release
+ */
+export type MicMode = "toggle" | "mute" | "unmute" | "push_to_talk";
+
 /** Per-key behavior options shared by every assignment kind. */
 export interface AssignmentBehavior {
   on_repress?: "stop" | "restart";
@@ -127,6 +138,7 @@ export type Assignment = (
   | { kind: "launch"; target: string }
   | { kind: "command"; command: string }
   | { kind: "sound"; file: string; holdAction?: SoundHoldAction }
+  | { kind: "mic"; mode?: MicMode }
   // Stream Deck-style multi action: run several actions with one press
   | { kind: "sequence"; steps: SequenceStep[] }
 ) & { behavior?: AssignmentBehavior; variants?: AssignmentVariants };

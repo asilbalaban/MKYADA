@@ -51,7 +51,15 @@ import {
  *  app/file/URL, run a shell command or play a sound. HID can't do these,
  *  so they only work while the desktop app is running. Accepts either an
  *  Assignment ({file}) or a MacroFile ({sound}) shape. */
-function runHostAction(a: { kind?: string; target?: string; command?: string; sound?: string; file?: string }) {
+function runHostAction(a: {
+  kind?: string;
+  target?: string;
+  command?: string;
+  sound?: string;
+  file?: string;
+  mic_mode?: string;
+  mode?: string;
+}) {
   if (a.kind === "launch" && a.target) {
     // open_target handles URLs and paths alike (plugin-opener's openPath
     // is capability-scoped and silently rejects /Applications/*.app)
@@ -61,6 +69,11 @@ function runHostAction(a: { kind?: string; target?: string; command?: string; so
   } else if (a.kind === "sound") {
     const path = a.sound ?? a.file;
     if (path) void playSound(path).catch(() => {});
+  } else if (a.kind === "mic") {
+    // push-to-talk is edge-driven (unmute on down, mute on up) and handled
+    // at the down/up dispatch sites instead — nothing to do on a single fire.
+    const mode = a.mic_mode ?? a.mode ?? "toggle";
+    if (mode !== "push_to_talk") void invoke("mic_action", { mode }).catch(() => {});
   }
 }
 
@@ -250,7 +263,7 @@ export function ProfilesProvider({ children }: { children: ReactNode }) {
             if (!node) return;
             if (node.kind === "sound" && node.sound) {
               void playSound(node.sound).catch(() => {});
-            } else if (node.kind === "launch" || node.kind === "command") {
+            } else if (node.kind === "launch" || node.kind === "command" || node.kind === "mic") {
               runHostAction(node);
             } else if (node.kind === "sequence" && !node.events?.length && node.seq?.length) {
               void runSequence(`${m.key}:${m.layer}`, node.seq, file);
@@ -267,6 +280,8 @@ export function ProfilesProvider({ children }: { children: ReactNode }) {
   // hatch for a sound started by accident.
   const heldKeys = useRef(new Set<string>());
   const armedSounds = useRef(new Map<string, { timer: number; path: string }>());
+  // push-to-talk mic keys currently held down — unmuted on down, muted on up
+  const micDownKeys = useRef(new Set<string>());
 
   const armSound = useCallback((keyId: string, path: string, holdAction?: SoundHoldAction) => {
     if (!heldKeys.current.has(keyId)) {
@@ -295,6 +310,9 @@ export function ProfilesProvider({ children }: { children: ReactNode }) {
         const keyId = `${e.key}:${e.layer ?? "a"}`;
         if (e.edge === "up") {
           heldKeys.current.delete(keyId);
+          if (micDownKeys.current.delete(keyId)) {
+            void invoke("mic_action", { mode: "mute" }).catch(() => {});
+          }
           // key logic: a release during the "down" phase means tap —
           // immediately, or after the double-press window if one exists
           const kl = klStates.current.get(keyId);
@@ -342,7 +360,7 @@ export function ProfilesProvider({ children }: { children: ReactNode }) {
               if (!chosen || chosen.kind === "none") return;
               if (chosen.kind === "sound") {
                 void playSound(chosen.file).catch(() => {});
-              } else if (chosen.kind === "launch" || chosen.kind === "command") {
+              } else if (chosen.kind === "launch" || chosen.kind === "command" || chosen.kind === "mic") {
                 runHostAction(chosen);
               } else if (chosen.kind === "sequence" && !sequenceIsPureHid(chosen.steps)) {
                 void runSequence(keyId, chosen.steps, mainFile);
@@ -355,6 +373,15 @@ export function ProfilesProvider({ children }: { children: ReactNode }) {
           }
           if (a.kind === "sound") return armSound(keyId, a.file, a.holdAction);
           if (a.kind === "launch" || a.kind === "command") return runHostAction(a);
+          if (a.kind === "mic") {
+            if (a.mode === "push_to_talk") {
+              micDownKeys.current.add(keyId);
+              void invoke("mic_action", { mode: "unmute" }).catch(() => {});
+            } else {
+              runHostAction(a);
+            }
+            return;
+          }
           if (a.kind === "sequence" && !sequenceIsPureHid(a.steps)) {
             return void runSequence(keyId, a.steps, mainFile);
           }
@@ -381,7 +408,10 @@ export function ProfilesProvider({ children }: { children: ReactNode }) {
               return;
             }
             if (m.kind === "sound" && m.sound) armSound(keyId, m.sound, m.sound_hold);
-            else runHostAction(m);
+            else if (m.kind === "mic" && m.mic_mode === "push_to_talk") {
+              micDownKeys.current.add(keyId);
+              void invoke("mic_action", { mode: "unmute" }).catch(() => {});
+            } else runHostAction(m);
           })
           .catch(() => {}); // unassigned key or drive hiccup — nothing to do
       }),

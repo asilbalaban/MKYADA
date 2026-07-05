@@ -2,7 +2,7 @@
 // parsing them back for editing. "Everything is JSON": every assignment —
 // even a plain Ctrl+A — becomes a macro file on the device.
 
-import type { Assignment, DeviceConfig, MacroEvent, MacroFile, SequenceStep } from "./types";
+import type { Assignment, DeviceConfig, MacroEvent, MacroFile, MicMode, SequenceStep } from "./types";
 import { LAYER_NAMES } from "./types";
 import { charToKeystroke, displayKey } from "./layout";
 
@@ -110,11 +110,11 @@ export function stepIsHid(step: SequenceStep): boolean {
 }
 
 /** True for kinds that have no HID equivalent and are performed by the
- * desktop app itself (open app/file/URL, run a command, play a sound) —
- * these do nothing on a keypad plugged into a computer without the MKYADA
- * app installed and running. */
+ * desktop app itself (open app/file/URL, run a command, play a sound,
+ * toggle the system mic) — these do nothing on a keypad plugged into a
+ * computer without the MKYADA app installed and running. */
 export function kindRequiresHost(kind: Assignment["kind"]): boolean {
-  return kind === "launch" || kind === "command" || kind === "sound";
+  return kind === "launch" || kind === "command" || kind === "sound" || kind === "mic";
 }
 
 export function sequenceIsPureHid(steps: SequenceStep[]): boolean {
@@ -238,6 +238,8 @@ export function assignmentComplete(a: Assignment): boolean {
       return a.command.length > 0;
     case "sound":
       return a.file.length > 0;
+    case "mic":
+      return true;
     case "sequence":
       return (
         a.steps.length > 0 &&
@@ -295,6 +297,14 @@ export function compileAssignment(a: Assignment, name?: string): MacroFile | nul
           kind: "sound",
           sound: a.file,
           ...(a.holdAction && a.holdAction !== "stop" ? { sound_hold: a.holdAction } : {}),
+          events: [],
+        };
+      case "mic":
+        return {
+          ...base,
+          name: name ?? micActionName(a.mode),
+          kind: "mic",
+          ...(a.mode && a.mode !== "toggle" ? { mic_mode: a.mode } : {}),
           events: [],
         };
       case "sequence": {
@@ -401,6 +411,8 @@ function parseAssignmentBase(m: MacroFile): Assignment {
         ...(m.sound_hold ? { holdAction: m.sound_hold } : {}),
         ...behavior,
       };
+    case "mic":
+      return { kind: "mic", ...(m.mic_mode ? { mode: m.mic_mode } : {}), ...behavior };
     case "sequence":
       return { kind: "sequence", steps: m.seq ?? [], ...behavior };
     default:
@@ -440,9 +452,22 @@ export function describeAssignment(a: Assignment): string {
       const short = fileBaseName(a.file);
       return `♪ ${short.length > 20 ? short.slice(0, 20) + "…" : short}`;
     }
+    case "mic":
+      return `🎤 ${MIC_MODE_LABELS[a.mode ?? "toggle"]}`;
     case "sequence":
       return `⧉ ${a.steps.length} step${a.steps.length === 1 ? "" : "s"}`;
   }
+}
+
+export const MIC_MODE_LABELS: Record<MicMode, string> = {
+  toggle: "Mute/unmute mic",
+  mute: "Mute mic",
+  unmute: "Unmute mic",
+  push_to_talk: "Push-to-talk",
+};
+
+function micActionName(mode?: MicMode): string {
+  return MIC_MODE_LABELS[mode ?? "toggle"];
 }
 
 /** File name for a profile-scoped macro synced to the device drive. */

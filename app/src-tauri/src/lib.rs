@@ -280,6 +280,13 @@ fn run_command(command: String) -> Result<(), String> {
     }
 }
 
+/// Mute/unmute/toggle the computer's default microphone (Stream Deck-style
+/// "mic" key action). `mode` is "mute" | "unmute" | "toggle".
+#[tauri::command]
+fn mic_action(mode: String) -> Result<(), String> {
+    vars::mic_action(&mode)
+}
+
 #[tauri::command]
 async fn check_update() -> Result<updater::UpdateInfo, String> {
     updater::check(env!("CARGO_PKG_VERSION")).await
@@ -601,6 +608,7 @@ pub fn run() {
             drive_eject,
             run_command,
             open_target,
+            mic_action,
             read_local_bytes,
             check_update,
             read_local_file,

@@ -2,14 +2,15 @@
 // file on the device ("everything is JSON").
 
 import { useEffect, useState } from "react";
-import { ArrowDown, ArrowUp, FolderOpen, Keyboard, Play, Plus, Trash2, Volume2 } from "lucide-react";
+import { ArrowDown, ArrowUp, FolderOpen, Keyboard, Mic, Play, Plus, Trash2, Volume2 } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { SOUND_EXTENSIONS, playSound } from "../lib/sound";
 import { readTextFile } from "../lib/fs";
-import type { Assignment, AssignmentVariants, MacroFile, SequenceStep, SoundHoldAction } from "../lib/types";
+import type { Assignment, AssignmentVariants, MacroFile, MicMode, SequenceStep, SoundHoldAction } from "../lib/types";
 import {
   IS_MAC,
   MEDIA_USAGES,
+  MIC_MODE_LABELS,
   MODIFIERS,
   MODIFIER_CODE_TO_KEY,
   compileAssignment,
@@ -35,6 +36,7 @@ const KINDS: { value: Assignment["kind"]; label: string }[] = [
   { value: "launch", label: "Open app / file / URL" },
   { value: "command", label: "Run terminal command" },
   { value: "sound", label: "Play a sound" },
+  { value: "mic", label: "Mute/unmute microphone" },
   { value: "sequence", label: "Multi action (sequence)" },
 ];
 
@@ -158,6 +160,7 @@ export function AssignmentEditor({
               else if (kind === "launch") onChange({ kind: "launch", target: "" });
               else if (kind === "command") onChange({ kind: "command", command: "" });
               else if (kind === "sound") onChange({ kind: "sound", file: "" });
+              else if (kind === "mic") onChange({ kind: "mic", mode: "toggle" });
               else if (kind === "sequence")
                 onChange({ kind: "sequence", steps: [{ a: { kind: "keystroke", key: "" }, delayMs: 0 }] });
               else importMacro();
@@ -348,6 +351,27 @@ export function AssignmentEditor({
         </Field>
       )}
 
+      {value.kind === "mic" && (
+        <Field label="What the key does">
+          <Select
+            value={value.mode ?? "toggle"}
+            onChange={(e) => onChange({ ...value, mode: e.target.value as MicMode })}
+          >
+            {(Object.keys(MIC_MODE_LABELS) as MicMode[]).map((m) => (
+              <option key={m} value={m}>
+                {MIC_MODE_LABELS[m]}
+              </option>
+            ))}
+          </Select>
+          <p className="text-fg-faint text-xs mt-1 inline-flex items-start gap-1.5">
+            <Mic size={13} aria-hidden className="mt-0.5 shrink-0" />
+            {value.mode === "push_to_talk"
+              ? "Unmutes while the key is held down, mutes again the instant you let go."
+              : "Controls the computer's default microphone. Works while the MKYADA app is running (also minimized)."}
+          </p>
+        </Field>
+      )}
+
       {value.kind === "recorded" && (
         <div className="flex items-center gap-2 text-sm">
           <span className="text-fg inline-flex items-center gap-1"><Play size={13} aria-hidden /> {value.name}</span>
@@ -360,7 +384,7 @@ export function AssignmentEditor({
         <SequenceEditor value={value.steps} onChange={(steps) => onChange({ ...value, steps })} />
       )}
 
-      {!nested && value.kind !== "none" && value.kind !== "launch" && value.kind !== "command" && value.kind !== "sound" && (
+      {!nested && value.kind !== "none" && value.kind !== "launch" && value.kind !== "command" && value.kind !== "sound" && value.kind !== "mic" && (
         <div className="flex flex-wrap gap-3 border-t border-line pt-3">
           <Field label="Press again while playing">
             <Select
