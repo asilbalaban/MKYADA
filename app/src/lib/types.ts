@@ -55,10 +55,14 @@ export interface MacroFile {
   version: number;
   name?: string;
   created?: string;
-  kind?: "keystroke" | "combo" | "text" | "media" | "recorded";
+  kind?: "keystroke" | "combo" | "text" | "media" | "recorded" | "launch" | "command";
   combo?: { mods: string[]; key: string };
   text?: string;
   media?: string;
+  /** launch kind: app path, file path or URL — performed by the desktop app */
+  target?: string;
+  /** command kind: shell command line — performed by the desktop app */
+  command?: string;
   screen?: { width: number; height: number };
   settings?: MacroSettings;
   events: MacroEvent[];
@@ -86,8 +90,9 @@ export type Assignment = (
   | { kind: "text"; text: string }
   | { kind: "media"; usage: string }
   | { kind: "recorded"; name: string; macro: MacroFile }
-  // host-mode only: cannot be expressed as HID, runs on the computer
+  // performed by the desktop app (not HID): open an app/file/URL, run a command
   | { kind: "launch"; target: string }
+  | { kind: "command"; command: string }
 ) & { behavior?: AssignmentBehavior };
 
 export interface Profile {

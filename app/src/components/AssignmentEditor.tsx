@@ -2,11 +2,12 @@
 // file on the device ("everything is JSON").
 
 import { useEffect, useState } from "react";
-import { Keyboard, Play } from "lucide-react";
+import { FolderOpen, Keyboard, Play } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { readTextFile } from "../lib/fs";
 import type { Assignment, MacroFile } from "../lib/types";
 import {
+  IS_MAC,
   MEDIA_USAGES,
   MODIFIERS,
   MODIFIER_CODE_TO_KEY,
@@ -18,14 +19,15 @@ import {
 import { displayKey, untypeableChars } from "../lib/layout";
 import { Button, Field, Input, Select } from "./ui";
 
-const KINDS: { value: Assignment["kind"]; label: string; launchOnly?: boolean }[] = [
+const KINDS: { value: Assignment["kind"]; label: string }[] = [
   { value: "none", label: "Not assigned" },
   { value: "keystroke", label: "Single key" },
   { value: "combo", label: "Key combination" },
   { value: "text", label: "Type text" },
   { value: "media", label: "Media key" },
   { value: "recorded", label: "Recorded macro (JSON)" },
-  { value: "launch", label: "Open app / URL (app running only)", launchOnly: true },
+  { value: "launch", label: "Open app / file / URL" },
+  { value: "command", label: "Run terminal command" },
 ];
 
 /**
@@ -97,12 +99,9 @@ export function KeyCapture({
 export function AssignmentEditor({
   value,
   onChange,
-  allowLaunch = false,
 }: {
   value: Assignment;
   onChange: (a: Assignment) => void;
-  /** "Open app/URL" needs the desktop app running — only offered in profiles. */
-  allowLaunch?: boolean;
 }) {
   const [importError, setImportError] = useState("");
 
@@ -137,10 +136,11 @@ export function AssignmentEditor({
             else if (kind === "text") onChange({ kind: "text", text: "" });
             else if (kind === "media") onChange({ kind: "media", usage: "play_pause" });
             else if (kind === "launch") onChange({ kind: "launch", target: "" });
+            else if (kind === "command") onChange({ kind: "command", command: "" });
             else importMacro();
           }}
         >
-          {KINDS.filter((k) => allowLaunch || !k.launchOnly).map((k) => (
+          {KINDS.map((k) => (
             <option key={k.value} value={k.value}>
               {k.label}
             </option>
@@ -229,11 +229,43 @@ export function AssignmentEditor({
 
       {value.kind === "launch" && (
         <Field label="URL or file/app path">
+          <div className="flex gap-2">
+            <Input
+              className="flex-1"
+              value={value.target}
+              placeholder={IS_MAC ? "https://… or /Applications/Google Chrome.app" : "https://… or C:\\Program Files\\…\\app.exe"}
+              onChange={(e) => onChange({ ...value, target: e.target.value })}
+            />
+            <Button
+              onClick={async () => {
+                const picked = await open({
+                  defaultPath: IS_MAC ? "/Applications" : undefined,
+                  title: "Choose an app or file to open",
+                });
+                if (picked) onChange({ ...value, target: picked as string });
+              }}
+            >
+              <FolderOpen size={14} aria-hidden /> Browse…
+            </Button>
+          </div>
+          <p className="text-fg-faint text-xs mt-1">
+            Pressing the key opens this on the computer. Works while the MKYADA app is
+            running (also minimized) — the keypad alone can't open apps.
+          </p>
+        </Field>
+      )}
+
+      {value.kind === "command" && (
+        <Field label="Terminal command">
           <Input
-            value={value.target}
-            placeholder="https://… or C:\\Program Files\\…\\app.exe"
-            onChange={(e) => onChange({ ...value, target: e.target.value })}
+            value={value.command}
+            placeholder={IS_MAC ? 'e.g. say "hello" or open ~/Downloads' : "e.g. explorer.exe %USERPROFILE%\\Downloads"}
+            onChange={(e) => onChange({ ...value, command: e.target.value })}
           />
+          <p className="text-fg-faint text-xs mt-1">
+            Runs {IS_MAC ? "in your shell" : "via cmd"} on this computer when the key is
+            pressed. Works while the MKYADA app is running (also minimized).
+          </p>
         </Field>
       )}
 
@@ -245,7 +277,7 @@ export function AssignmentEditor({
         </div>
       )}
 
-      {value.kind !== "none" && value.kind !== "launch" && (
+      {value.kind !== "none" && value.kind !== "launch" && value.kind !== "command" && (
         <div className="flex flex-wrap gap-3 border-t border-line pt-3">
           <Field label="Press again while playing">
             <Select

@@ -21,8 +21,21 @@ import { LazyStore } from "@tauri-apps/plugin-store";
 import { openPath, openUrl } from "@tauri-apps/plugin-opener";
 import { useDevice } from "./device";
 import { ipc } from "./ipc";
-import type { Assignment, ForegroundInfo, Profile } from "./types";
-import { compileAssignment, profileMacroFileName } from "./macro-model";
+import type { Assignment, DriveInfo, ForegroundInfo, MacroFile, Profile } from "./types";
+import { LAYER_NAMES } from "./types";
+import { compileAssignment, macroFileName, profileMacroFileName } from "./macro-model";
+
+/** Perform a computer-side key action (Stream Deck style): open an
+ *  app/file/URL or run a shell command. HID can't do these, so they only
+ *  work while the desktop app is running. */
+function runHostAction(a: { kind?: string; target?: string; command?: string }) {
+  if (a.kind === "launch" && a.target) {
+    const t = a.target;
+    void (/^https?:\/\//i.test(t) ? openUrl(t) : openPath(t)).catch(() => {});
+  } else if (a.kind === "command" && a.command) {
+    void invoke("run_command", { command: a.command }).catch(() => {});
+  }
+}
 
 const store = new LazyStore("profiles.json");
 
@@ -47,6 +60,8 @@ function matches(p: Profile, fg: ForegroundInfo): boolean {
 
 export function ProfilesProvider({ children }: { children: ReactNode }) {
   const { port, drive, send, onBtn } = useDevice();
+  const driveRef = useRef<DriveInfo | null>(null);
+  driveRef.current = drive;
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [foreground, setForeground] = useState<ForegroundInfo>({ exe: "", title: "" });
   const [enabled, setEnabledState] = useState(true);
@@ -86,20 +101,29 @@ export function ProfilesProvider({ children }: { children: ReactNode }) {
     };
   }, [port, activeProfile, send]);
 
-  // answer device key presses according to the active profile
+  // answer device key presses: profile overrides in host mode, and global
+  // launch/command keys (Keys tab) whenever the app is around to run them —
+  // the device stores those as no-op macro files, so standalone they do
+  // nothing and here we perform the real action.
   useEffect(
     () =>
       onBtn((e) => {
+        if (e.edge !== "down") return;
         const profile = activeRef.current;
-        if (!profile || e.edge !== "down") return;
-        const a = profile.keys[String(e.key)];
-        if (!a || a.kind === "none") return;
-        if (a.kind === "launch") {
-          const t = a.target;
-          void (/^https?:\/\//i.test(t) ? openUrl(t) : openPath(t)).catch(() => {});
+        if (profile) {
+          const a = profile.keys[String(e.key)];
+          if (!a || a.kind === "none") return;
+          if (a.kind === "launch" || a.kind === "command") return runHostAction(a);
+          void send({ t: "play", file: profileMacroFileName(profile.id, e.key) });
           return;
         }
-        void send({ t: "play", file: profileMacroFileName(profile.id, e.key) });
+        const d = driveRef.current;
+        if (!d) return;
+        const layerIndex = Math.max(0, LAYER_NAMES.indexOf(e.layer ?? "a"));
+        void ipc
+          .driveRead(d.path, macroFileName(e.key, layerIndex))
+          .then((raw) => runHostAction(JSON.parse(raw) as MacroFile))
+          .catch(() => {}); // unassigned key or drive hiccup — nothing to do
       }),
     [onBtn, send],
   );

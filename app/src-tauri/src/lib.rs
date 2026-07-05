@@ -69,6 +69,30 @@ fn drive_eject(drive: String) -> Result<(), String> {
     drive::eject(&drive)
 }
 
+/// Run a user-configured shell command (Stream Deck-style key action).
+/// Fire-and-forget: the command is the user's own, output isn't collected.
+#[tauri::command]
+fn run_command(command: String) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        std::process::Command::new("cmd")
+            .args(["/C", &command])
+            .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
+            .spawn()
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        std::process::Command::new("sh")
+            .args(["-lc", &command])
+            .spawn()
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+    }
+}
+
 #[tauri::command]
 async fn check_update() -> Result<updater::UpdateInfo, String> {
     updater::check(env!("CARGO_PKG_VERSION")).await
@@ -268,6 +292,7 @@ pub fn run() {
             drive_delete,
             drive_list,
             drive_eject,
+            run_command,
             check_update,
             read_local_file,
             write_local_file,

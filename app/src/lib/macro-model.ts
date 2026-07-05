@@ -146,6 +146,8 @@ export function assignmentComplete(a: Assignment): boolean {
       return a.text.length > 0;
     case "launch":
       return a.target.length > 0;
+    case "command":
+      return a.command.length > 0;
     default:
       return true;
   }
@@ -184,8 +186,13 @@ export function compileAssignment(a: Assignment, name?: string): MacroFile | nul
         };
       case "recorded":
         return { ...migrateMacro(a.macro), name: name ?? a.name };
+      // launch/command can't be expressed as HID: stored as no-op files
+      // (empty events) so the assignment travels with the device; the
+      // desktop app watches key presses and performs the action.
       case "launch":
-        return null; // host-mode only, never written to the device
+        return { ...base, name: name ?? `Open ${a.target}`, kind: "launch", target: a.target, events: [] };
+      case "command":
+        return { ...base, name: name ?? `Run ${a.command.slice(0, 24)}`, kind: "command", command: a.command, events: [] };
     }
   })();
   // behavior options ride along in settings, whatever the kind
@@ -220,6 +227,10 @@ export function parseAssignment(m: MacroFile): Assignment {
       return { kind: "text", text: m.text ?? "", ...behavior };
     case "media":
       return { kind: "media", usage: m.media ?? "", ...behavior };
+    case "launch":
+      return { kind: "launch", target: m.target ?? "", ...behavior };
+    case "command":
+      return { kind: "command", command: m.command ?? "", ...behavior };
     default:
       return { kind: "recorded", name: m.name ?? "macro", macro: m, ...behavior };
   }
@@ -247,8 +258,13 @@ export function describeAssignment(a: Assignment): string {
       return a.usage.replace(/_/g, " ");
     case "recorded":
       return `▶ ${a.name}`;
-    case "launch":
-      return `↗ ${a.target.length > 20 ? a.target.slice(0, 20) + "…" : a.target}`;
+    case "launch": {
+      // show just the app/file name, not the whole path
+      const short = a.target.replace(/[\\/]+$/, "").split(/[\\/]/).pop() ?? a.target;
+      return `↗ ${short.length > 20 ? short.slice(0, 20) + "…" : short}`;
+    }
+    case "command":
+      return `$ ${a.command.length > 20 ? a.command.slice(0, 20) + "…" : a.command}`;
   }
 }
 

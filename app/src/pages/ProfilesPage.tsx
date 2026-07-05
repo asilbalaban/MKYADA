@@ -173,7 +173,6 @@ export function ProfilesPage() {
                       <AssignmentEditor
                         value={draft ?? selected.keys[String(editKey)] ?? { kind: "none" }}
                         onChange={setDraft}
-                        allowLaunch
                       />
                       <div className="flex justify-end gap-2">
                         <Button onClick={() => setDraft(null)} disabled={!draft}>Revert</Button>
