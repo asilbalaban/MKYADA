@@ -6,7 +6,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open, save } from "@tauri-apps/plugin-dialog";
-import { Circle, FileDown, FileUp, HardDriveDownload, Play, Square } from "lucide-react";
+import { Circle, FileDown, FileUp, HardDriveDownload, Play, Square, X } from "lucide-react";
 import { readTextFile } from "../lib/fs";
 import { ipc } from "../lib/ipc";
 import { useDevice } from "../lib/device";
@@ -17,6 +17,7 @@ import { useHistory } from "../lib/history";
 import { takeRecorderEdit } from "../lib/recorder-handoff";
 import { Badge, Button, Card, Field, Input, Select } from "../components/ui";
 import { useToast } from "../components/toast";
+import { useConfirm } from "../components/dialog";
 import { MacroEditor } from "../components/MacroEditor";
 import { usePermissions, useRecordError } from "../components/Permissions";
 
@@ -24,6 +25,7 @@ export function RecorderPage({ active = true }: { active?: boolean }) {
   const { hello, drive, send } = useDevice();
   const { status: perms } = usePermissions();
   const toast = useToast();
+  const confirm = useConfirm();
   const captureError = useRecordError();
   const canRecord = !perms || perms.platform !== "macos" || perms.input_monitoring === "granted";
   const [recording, setRecording] = useState(false);
@@ -179,6 +181,19 @@ export function RecorderPage({ active = true }: { active?: boolean }) {
     }, startDelay * 1000);
   }
 
+  /** Clear the editor without saving — a fresh start for the next macro. */
+  async function closeWithoutSaving() {
+    const ok = await confirm({
+      title: "Close without saving",
+      message:
+        "Discard this macro from the editor? Anything not saved to a key or exported is lost.",
+      confirmLabel: "Discard",
+    });
+    if (!ok) return;
+    setMacro(null);
+    setStatus("");
+  }
+
   async function assignToKey() {
     if (!macro || !drive) return;
     const out = { ...macro, events: thinForDevice(macro.events) };
@@ -310,6 +325,9 @@ export function RecorderPage({ active = true }: { active?: boolean }) {
                 </Button>
                 <Button onClick={() => void exportJson(true)}>
                   <FileDown size={14} aria-hidden /> Export optimized…
+                </Button>
+                <Button variant="danger" onClick={() => void closeWithoutSaving()}>
+                  <X size={14} aria-hidden /> Close without saving
                 </Button>
                 <p className="text-xs text-fg-faint">
                   A macro file works on any MKYADA — drop it onto another keypad's USB drive or

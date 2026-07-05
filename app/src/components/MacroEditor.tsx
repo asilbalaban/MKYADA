@@ -11,6 +11,7 @@ import {
   ArrowDown,
   ArrowUp,
   Copy,
+  Grab,
   Keyboard,
   Monitor,
   MonitorOff,
@@ -27,19 +28,34 @@ import {
 } from "lucide-react";
 import type { MacroEvent, MacroFile } from "../lib/types";
 import {
+  ClickGroup,
+  DragGroup,
   EditorItem,
-  MoveGroup,
   describeItem,
+  dragDuration,
   flattenItems,
   groupDuration,
   groupEvents,
+  isClickGroup,
+  isDragGroup,
   isMoveGroup,
+  itemDelay,
+  itemLabel,
   macroStats,
+  MoveGroup,
   rdpSimplify,
+  remapDrag,
   remapGroup,
   resample,
+  scaleItemTiming,
+  setDragDuration,
   setGroupDuration,
+  setItemDelay,
+  setItemLabel,
+  simplifyDrag,
   straighten,
+  straightenDrag,
+  thinDrag,
 } from "../lib/recorder-model";
 import { IS_MAC } from "../lib/macro-model";
 import { displayKey } from "../lib/layout";
@@ -63,6 +79,7 @@ export function MacroEditor({ macro, onChange, history }: Props) {
   const [selected, setSelected] = useState<number[]>([]);
   const anchor = useRef<number | null>(null);
   const [bulkFactor, setBulkFactor] = useState("1.0");
+  const [bulkWaitMs, setBulkWaitMs] = useState("100");
   const [overlayOn, setOverlayOn] = useState(false);
   const [overlayOnlySelected, setOverlayOnlySelected] = useState(false);
   const stats = macroStats(macro);
@@ -141,15 +158,20 @@ export function MacroEditor({ macro, onChange, history }: Props) {
   function applyBulk() {
     const f = parseFloat(bulkFactor);
     if (!isFinite(f) || f <= 0) return;
-    commit(
-      items.map((item) => {
-        const scaled = { ...item, delay: Math.round((item.delay ?? 0) * f) };
-        if (isMoveGroup(scaled)) {
-          return setGroupDuration(scaled, Math.round(groupDuration(scaled) * f));
-        }
-        return scaled;
-      }),
-    );
+    commit(items.map((item) => scaleItemTiming(item, f)));
+  }
+
+  /** Set every Wait row to the same duration in one go. */
+  function applyBulkWaits() {
+    const ms = parseInt(bulkWaitMs);
+    if (!isFinite(ms) || ms < 0) return;
+    const count = items.filter((it) => it.type === "wait").length;
+    if (count === 0) {
+      toast.info("No waits", "This macro has no Wait rows to change.");
+      return;
+    }
+    commit(items.map((it) => (it.type === "wait" ? { ...it, delay: ms } : it)));
+    toast.success(`${count} wait${count > 1 ? "s" : ""} set to ${ms} ms`);
   }
 
   // keep the on-screen overlay in sync while it's open, and heartbeat so the
@@ -191,7 +213,11 @@ export function MacroEditor({ macro, onChange, history }: Props) {
   /** Thin mouse paths so the macro fits the keypad's RAM; report the result. */
   function optimizeForDevice() {
     const before = macroStats(macro);
-    const next = items.map((it) => (isMoveGroup(it) ? rdpSimplify(resample(it, 30), 3) : it));
+    const next = items.map((it) => {
+      if (isMoveGroup(it)) return rdpSimplify(resample(it, 30), 3);
+      if (isDragGroup(it)) return thinDrag(it);
+      return it;
+    });
     const events = flattenItems(next);
     onChange({ ...macro, events });
     const after = macroStats({ ...macro, events });
@@ -237,6 +263,18 @@ export function MacroEditor({ macro, onChange, history }: Props) {
           <div className="flex gap-1">
             <Input value={bulkFactor} onChange={(e) => setBulkFactor(e.target.value)} className="w-16" />
             <Button onClick={applyBulk}>Apply</Button>
+          </div>
+        </Field>
+        <Field label="All waits (ms)">
+          <div className="flex gap-1">
+            <Input
+              type="number" min="0" className="w-20"
+              value={bulkWaitMs}
+              onChange={(e) => setBulkWaitMs(e.target.value)}
+            />
+            <Button onClick={applyBulkWaits} title="Set every Wait row to this duration">
+              Set
+            </Button>
           </div>
         </Field>
       </div>
@@ -375,8 +413,17 @@ export function MacroEditor({ macro, onChange, history }: Props) {
               >
                 <span className="w-6 flex justify-center text-fg-muted">{itemIcon(item)}</span>
                 <span className="w-8 text-fg-faint">#{i + 1}</span>
-                <span className="flex-1 text-fg truncate">{describeItem(item)}</span>
-                <span className="text-fg-faint">{item.delay ?? 0} ms</span>
+                <span className="flex-1 text-fg truncate">
+                  {itemLabel(item) ? (
+                    <>
+                      <span className="font-semibold">{itemLabel(item)}</span>
+                      <span className="text-fg-faint"> · {describeItem(item)}</span>
+                    </>
+                  ) : (
+                    describeItem(item)
+                  )}
+                </span>
+                <span className="text-fg-faint">{itemDelay(item)} ms</span>
               </button>
             ))}
             {items.length === 0 && <p className="text-fg-faint text-sm">No events.</p>}
@@ -453,6 +500,8 @@ export function MacroEditor({ macro, onChange, history }: Props) {
 
 function itemIcon(item: EditorItem): ReactNode {
   if (isMoveGroup(item)) return <Spline size={14} aria-hidden />;
+  if (isClickGroup(item)) return <MousePointerClick size={14} aria-hidden />;
+  if (isDragGroup(item)) return <Grab size={14} aria-hidden />;
   const icons: Record<string, ReactNode> = {
     key: <Keyboard size={14} aria-hidden />,
     button: <MousePointerClick size={14} aria-hidden />,
@@ -487,8 +536,110 @@ function Num({
 /** Type-specific numeric/field editing — everything the old EditDialog had. */
 function RowFields({ item, onChange }: { item: EditorItem; onChange: (i: EditorItem) => void }) {
   const delayField = (
-    <Num label="Delay before (ms)" value={item.delay ?? 0} onChange={(n) => onChange({ ...item, delay: Math.max(0, n) })} />
+    <Num label="Delay before (ms)" value={itemDelay(item)} onChange={(n) => onChange(setItemDelay(item, n))} />
   );
+  // A custom title makes long macros navigable ("Select first slot"…)
+  const titleField = (
+    <Field label="Title (optional)">
+      <Input
+        value={itemLabel(item) ?? ""}
+        placeholder="e.g. Select first slot"
+        onChange={(e) => onChange(setItemLabel(item, e.target.value))}
+      />
+    </Field>
+  );
+
+  if (isClickGroup(item)) {
+    const g = item as ClickGroup;
+    const setPos = (x: number, y: number) =>
+      onChange({ ...g, down: { ...g.down, x, y }, up: { ...g.up, x, y } });
+    return (
+      <div className="flex flex-col gap-3">
+        {titleField}
+        <div className="flex flex-wrap gap-3">
+          {delayField}
+          <Field label="Button">
+            <Select
+              value={g.down.button}
+              onChange={(e) =>
+                onChange({
+                  ...g,
+                  down: { ...g.down, button: e.target.value },
+                  up: { ...g.up, button: e.target.value },
+                })
+              }
+            >
+              <option value="left">left</option>
+              <option value="right">right</option>
+              <option value="middle">middle</option>
+            </Select>
+          </Field>
+          <Num label="X" value={g.down.x ?? 0} onChange={(n) => setPos(n, g.down.y ?? 0)} />
+          <Num label="Y" value={g.down.y ?? 0} onChange={(n) => setPos(g.down.x ?? 0, n)} />
+          <Num
+            label="Held for (ms)"
+            value={g.up.delay}
+            onChange={(n) => onChange({ ...g, up: { ...g.up, delay: Math.max(0, n) } })}
+          />
+        </div>
+        <p className="text-xs text-fg-faint">
+          One press + release at this position. "Held for" is the time between them.
+        </p>
+      </div>
+    );
+  }
+
+  if (isDragGroup(item)) {
+    const g = item as DragGroup;
+    const start = { x: g.down.x ?? g.moves[0].x, y: g.down.y ?? g.moves[0].y };
+    const last = g.moves[g.moves.length - 1];
+    const end = { x: g.up.x ?? last.x, y: g.up.y ?? last.y };
+    return (
+      <div className="flex flex-col gap-3">
+        {titleField}
+        <div className="flex flex-wrap gap-3">
+          {delayField}
+          <Field label="Button">
+            <Select
+              value={g.down.button}
+              onChange={(e) =>
+                onChange({
+                  ...g,
+                  down: { ...g.down, button: e.target.value },
+                  up: { ...g.up, button: e.target.value },
+                })
+              }
+            >
+              <option value="left">left</option>
+              <option value="right">right</option>
+              <option value="middle">middle</option>
+            </Select>
+          </Field>
+          <Num label="Duration (ms)" value={dragDuration(g)} onChange={(n) => onChange(setDragDuration(g, Math.max(1, n)))} />
+          <Field label="Points">
+            <span className="text-sm text-fg py-1.5">{g.moves.length + 1}</span>
+          </Field>
+        </div>
+        <p className="text-xs text-fg-faint -mb-1">
+          Press → path → release. Start / end coordinates (path scales to fit):
+        </p>
+        <div className="flex flex-wrap gap-3">
+          <Num label="Start X" value={start.x} onChange={(n) => onChange(remapDrag(g, { x: n, y: start.y }, end))} />
+          <Num label="Start Y" value={start.y} onChange={(n) => onChange(remapDrag(g, { x: start.x, y: n }, end))} />
+          <Num label="End X" value={end.x} onChange={(n) => onChange(remapDrag(g, start, { x: n, y: end.y }))} />
+          <Num label="End Y" value={end.y} onChange={(n) => onChange(remapDrag(g, start, { x: end.x, y: n }))} />
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button onClick={() => onChange(straightenDrag(g))}>
+            <MoveRight size={14} aria-hidden /> Straighten (keep endpoints)
+          </Button>
+          <Button onClick={() => onChange(simplifyDrag(g))}>
+            <Scissors size={14} aria-hidden /> Simplify path
+          </Button>
+        </div>
+      </div>
+    );
+  }
 
   if (isMoveGroup(item)) {
     const g = item as MoveGroup;
@@ -496,6 +647,7 @@ function RowFields({ item, onChange }: { item: EditorItem; onChange: (i: EditorI
     const last = g.points[g.points.length - 1];
     return (
       <div className="flex flex-col gap-3">
+        {titleField}
         <div className="flex flex-wrap gap-3">
           {delayField}
           <Num label="Duration (ms)" value={groupDuration(g)} onChange={(n) => onChange(setGroupDuration(g, Math.max(1, n)))} />
@@ -523,74 +675,82 @@ function RowFields({ item, onChange }: { item: EditorItem; onChange: (i: EditorI
   }
 
   const ev = item as MacroEvent;
-  switch (ev.type) {
-    case "key":
-      return (
-        <div className="flex flex-wrap gap-3">
-          {delayField}
-          <Field label="Key">
-            <KeyCapture
-              value={displayKey(ev.key)}
-              captureModifiers
-              onCapture={(key) => onChange({ ...ev, key })}
-            />
-          </Field>
-          <Field label="Action">
-            <Select value={ev.action} onChange={(e) => onChange({ ...ev, action: e.target.value as "down" | "up" })}>
-              <option value="down">press (down)</option>
-              <option value="up">release (up)</option>
-            </Select>
-          </Field>
-        </div>
-      );
-    case "button":
-      return (
-        <div className="flex flex-wrap gap-3">
-          {delayField}
-          <Field label="Button">
-            <Select value={ev.button} onChange={(e) => onChange({ ...ev, button: e.target.value })}>
-              <option value="left">left</option>
-              <option value="right">right</option>
-              <option value="middle">middle</option>
-            </Select>
-          </Field>
-          <Field label="Action">
-            <Select value={ev.action} onChange={(e) => onChange({ ...ev, action: e.target.value as "down" | "up" })}>
-              <option value="down">press (down)</option>
-              <option value="up">release (up)</option>
-            </Select>
-          </Field>
-          <Num label="X" value={ev.x ?? 0} onChange={(n) => onChange({ ...ev, x: n })} />
-          <Num label="Y" value={ev.y ?? 0} onChange={(n) => onChange({ ...ev, y: n })} />
-        </div>
-      );
-    case "move":
-      return (
-        <div className="flex flex-wrap gap-3">
-          {delayField}
-          <Num label="X" value={ev.x} onChange={(n) => onChange({ ...ev, x: n })} />
-          <Num label="Y" value={ev.y} onChange={(n) => onChange({ ...ev, y: n })} />
-        </div>
-      );
-    case "scroll":
-      return (
-        <div className="flex flex-wrap gap-3">
-          {delayField}
-          <Num label="Scroll dy (+up/−down)" value={ev.dy} onChange={(n) => onChange({ ...ev, dy: n })} />
-          <Num label="X" value={ev.x ?? 0} onChange={(n) => onChange({ ...ev, x: n })} />
-          <Num label="Y" value={ev.y ?? 0} onChange={(n) => onChange({ ...ev, y: n })} />
-        </div>
-      );
-    case "consumer":
-      return (
-        <div className="flex flex-wrap gap-3">
-          {delayField}
-          <Field label="Media action">
-            <Input value={ev.usage} onChange={(e) => onChange({ ...ev, usage: e.target.value })} />
-          </Field>
-        </div>
-      );
-    default: // wait
-      return <div className="flex flex-wrap gap-3">{delayField}</div>;
-  }
+  const fields = (() => {
+    switch (ev.type) {
+      case "key":
+        return (
+          <>
+            {delayField}
+            <Field label="Key">
+              <KeyCapture
+                value={displayKey(ev.key)}
+                captureModifiers
+                onCapture={(key) => onChange({ ...ev, key })}
+              />
+            </Field>
+            <Field label="Action">
+              <Select value={ev.action} onChange={(e) => onChange({ ...ev, action: e.target.value as "down" | "up" })}>
+                <option value="down">press (down)</option>
+                <option value="up">release (up)</option>
+              </Select>
+            </Field>
+          </>
+        );
+      case "button":
+        return (
+          <>
+            {delayField}
+            <Field label="Button">
+              <Select value={ev.button} onChange={(e) => onChange({ ...ev, button: e.target.value })}>
+                <option value="left">left</option>
+                <option value="right">right</option>
+                <option value="middle">middle</option>
+              </Select>
+            </Field>
+            <Field label="Action">
+              <Select value={ev.action} onChange={(e) => onChange({ ...ev, action: e.target.value as "down" | "up" })}>
+                <option value="down">press (down)</option>
+                <option value="up">release (up)</option>
+              </Select>
+            </Field>
+            <Num label="X" value={ev.x ?? 0} onChange={(n) => onChange({ ...ev, x: n })} />
+            <Num label="Y" value={ev.y ?? 0} onChange={(n) => onChange({ ...ev, y: n })} />
+          </>
+        );
+      case "move":
+        return (
+          <>
+            {delayField}
+            <Num label="X" value={ev.x} onChange={(n) => onChange({ ...ev, x: n })} />
+            <Num label="Y" value={ev.y} onChange={(n) => onChange({ ...ev, y: n })} />
+          </>
+        );
+      case "scroll":
+        return (
+          <>
+            {delayField}
+            <Num label="Scroll dy (+up/−down)" value={ev.dy} onChange={(n) => onChange({ ...ev, dy: n })} />
+            <Num label="X" value={ev.x ?? 0} onChange={(n) => onChange({ ...ev, x: n })} />
+            <Num label="Y" value={ev.y ?? 0} onChange={(n) => onChange({ ...ev, y: n })} />
+          </>
+        );
+      case "consumer":
+        return (
+          <>
+            {delayField}
+            <Field label="Media action">
+              <Input value={ev.usage} onChange={(e) => onChange({ ...ev, usage: e.target.value })} />
+            </Field>
+          </>
+        );
+      default: // wait
+        return delayField;
+    }
+  })();
+  return (
+    <div className="flex flex-col gap-3">
+      {titleField}
+      <div className="flex flex-wrap gap-3">{fields}</div>
+    </div>
+  );
 }

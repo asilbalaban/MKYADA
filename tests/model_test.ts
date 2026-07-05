@@ -1,13 +1,20 @@
 // Logic tests for the app's recorder model: group/flatten roundtrip, RDP
 // thinning, resampling. Run: npx tsx tests/model_test.ts
 import {
+  dragDuration,
   flattenItems,
   groupDuration,
   groupEvents,
+  isClickGroup,
+  isDragGroup,
   isMoveGroup,
+  itemLabel,
+  MOVE_SPLIT_MS,
   rdpSimplify,
+  remapDrag,
   resample,
   setGroupDuration,
+  setItemLabel,
   straighten,
   thinForDevice,
 } from "../app/src/lib/recorder-model";
@@ -34,8 +41,10 @@ const events: MacroEvent[] = [
   { delay: 40, type: "button", action: "up", button: "left", x: 595, y: 497 },
 ];
 
+// down + up with no moves between → one Click row
 const items = groupEvents(events);
-check("grouping shape", items.length === 5, String(items.length));
+check("grouping shape", items.length === 4, String(items.length));
+check("click grouped", isClickGroup(items[3]));
 const g = items[2];
 check("movegroup present", isMoveGroup(g));
 if (isMoveGroup(g)) {
@@ -83,6 +92,66 @@ const zig: MacroEvent[] = Array.from({ length: 50 }, (_, i) => ({
   y: i % 2 === 0 ? 100 : 200,
 }));
 check("zigzag survives rdp", thinForDevice(zig).length > 10, String(thinForDevice(zig).length));
+
+// down → moves → up becomes one Drag row; roundtrip stays byte-identical
+const dragEvents: MacroEvent[] = [
+  { delay: 5, type: "button", action: "down", button: "left", x: 10, y: 10 },
+  { delay: 20, type: "move", x: 50, y: 50 },
+  { delay: 20, type: "move", x: 90, y: 90 },
+  { delay: 30, type: "button", action: "up", button: "left", x: 90, y: 90 },
+];
+const dragItems = groupEvents(dragEvents);
+check("drag grouped", dragItems.length === 1 && isDragGroup(dragItems[0]), String(dragItems.length));
+check(
+  "drag roundtrip",
+  JSON.stringify(flattenItems(dragItems)) === JSON.stringify(dragEvents),
+);
+if (isDragGroup(dragItems[0])) {
+  const d = dragItems[0];
+  check("drag duration", dragDuration(d) === 70, String(dragDuration(d)));
+  const remapped = remapDrag(d, { x: 110, y: 110 }, { x: 190, y: 190 });
+  check(
+    "drag remap moves endpoints",
+    remapped.down.x === 110 && remapped.up.x === 190 && remapped.moves[0].x === 150,
+    JSON.stringify([remapped.down.x, remapped.moves[0].x, remapped.up.x]),
+  );
+}
+
+// an unmatched down (up interrupted by a key event) stays ungrouped
+const unmatched: MacroEvent[] = [
+  { delay: 0, type: "button", action: "down", button: "left", x: 1, y: 1 },
+  { delay: 10, type: "key", action: "down", key: "a" },
+  { delay: 10, type: "button", action: "up", button: "left", x: 1, y: 1 },
+];
+check("unmatched down stays raw", groupEvents(unmatched).length === 3);
+check(
+  "unmatched roundtrip",
+  JSON.stringify(flattenItems(groupEvents(unmatched))) === JSON.stringify(unmatched),
+);
+
+// long uninterrupted mouse travel splits into ~MOVE_SPLIT_MS rows
+const longMoves: MacroEvent[] = Array.from({ length: 100 }, (_, i) => ({
+  delay: i === 0 ? 0 : 50, // 99 * 50ms = 4950ms of travel
+  type: "move" as const,
+  x: i,
+  y: i,
+}));
+const longItems = groupEvents(longMoves);
+check("long travel splits", longItems.length === 3, String(longItems.length));
+check(
+  "split respects cap",
+  longItems.every((it) => isMoveGroup(it) && groupDuration(it) <= MOVE_SPLIT_MS),
+);
+check(
+  "split roundtrip",
+  JSON.stringify(flattenItems(longItems)) === JSON.stringify(longMoves),
+);
+
+// row titles survive the flatten/group roundtrip (stored on the first event)
+const titled = setItemLabel(dragItems[0], "Item seçme tıklaması");
+const titledFlat = flattenItems([titled]);
+check("label lands on down event", titledFlat[0].label === "Item seçme tıklaması");
+check("label roundtrip", itemLabel(groupEvents(titledFlat)[0]) === "Item seçme tıklaması");
 
 console.log(failed ? `\n${failed} FAILED` : "\nALL MODEL TESTS PASSED");
 process.exit(failed ? 1 : 0);

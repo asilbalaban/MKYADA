@@ -6,7 +6,13 @@ import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { emit, listen } from "@tauri-apps/api/event";
 import type { MacroFile } from "../lib/types";
-import { EditorItem, groupEvents, isMoveGroup } from "../lib/recorder-model";
+import {
+  EditorItem,
+  groupEvents,
+  isClickGroup,
+  isDragGroup,
+  isMoveGroup,
+} from "../lib/recorder-model";
 
 interface OverlayData {
   macro: MacroFile;
@@ -95,6 +101,30 @@ export function OverlayView() {
     if (isMoveGroup(item)) {
       const d = item.points.map((p, i) => `${i === 0 ? "M" : "L"}${p.x * sx},${p.y * sy}`).join(" ");
       paths.push({ d, hot });
+    } else if (isClickGroup(item) || isDragGroup(item)) {
+      // one editor row = press (+ path) + release; draw all of it
+      if (isDragGroup(item)) {
+        const pts = [{ x: item.down.x ?? 0, y: item.down.y ?? 0 }, ...item.moves];
+        const d = pts.map((p, i) => `${i === 0 ? "M" : "L"}${p.x * sx},${p.y * sy}`).join(" ");
+        paths.push({ d, hot });
+      }
+      clickNo += 1;
+      clicks.push({
+        x: (item.down.x ?? 0) * sx,
+        y: (item.down.y ?? 0) * sy,
+        button: item.down.button,
+        hot,
+        n: clickNo,
+        up: false,
+      });
+      clicks.push({
+        x: (item.up.x ?? 0) * sx,
+        y: (item.up.y ?? 0) * sy,
+        button: item.up.button,
+        hot,
+        n: clickNo,
+        up: true,
+      });
     } else if (item.type === "button") {
       // down = green/red ring (by button) with the click number; up = smaller
       // yellow ring, so where the button was RELEASED (end of a drag) is

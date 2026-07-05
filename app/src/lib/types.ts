@@ -42,13 +42,17 @@ export interface DeviceConfig {
   screen: { width: number; height: number };
 }
 
-export type MacroEvent =
+export type MacroEvent = (
   | { delay: number; type: "key"; action: "down" | "up"; key: string; vk?: number | null }
   | { delay: number; type: "move"; x: number; y: number }
   | { delay: number; type: "button"; action: "down" | "up"; button: string; x?: number; y?: number }
   | { delay: number; type: "scroll"; dx?: number; dy: number; x?: number; y?: number }
   | { delay: number; type: "consumer"; usage: string }
-  | { delay: number; type: "wait" };
+  | { delay: number; type: "wait" }
+) & {
+  /** optional user-given row title, shown in the editor; ignored by playback */
+  label?: string;
+};
 
 export interface MacroFile {
   format: "mkyada-macro" | "asil-macro";
