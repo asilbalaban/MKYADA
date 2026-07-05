@@ -16,6 +16,7 @@ export const ipc = {
   driveRead: (drive: string, path: string) => invoke<string>("drive_read", { drive, path }),
   driveDelete: (drive: string, path: string) => invoke<void>("drive_delete", { drive, path }),
   driveList: (drive: string, path: string) => invoke<string[]>("drive_list", { drive, path }),
+  driveEject: (drive: string) => invoke<void>("drive_eject", { drive }),
   checkUpdate: () => invoke<UpdateInfo>("check_update"),
 };
 

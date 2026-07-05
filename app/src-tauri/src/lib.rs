@@ -62,6 +62,13 @@ fn drive_list(drive: String, path: String) -> Result<Vec<String>, String> {
     drive::list_dir(&drive, &path)
 }
 
+/// Cleanly unmount the drive before a device reset, so the next mount
+/// doesn't come up read-only (macOS FAT dirty-bit behavior).
+#[tauri::command]
+fn drive_eject(drive: String) -> Result<(), String> {
+    drive::eject(&drive)
+}
+
 #[tauri::command]
 async fn check_update() -> Result<updater::UpdateInfo, String> {
     updater::check(env!("CARGO_PKG_VERSION")).await
@@ -260,6 +267,7 @@ pub fn run() {
             drive_read,
             drive_delete,
             drive_list,
+            drive_eject,
             check_update,
             read_local_file,
             write_local_file,

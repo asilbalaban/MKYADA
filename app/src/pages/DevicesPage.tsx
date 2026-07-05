@@ -4,7 +4,8 @@
 
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { Usb } from "lucide-react";
+import { RotateCcw, Usb } from "lucide-react";
+import { ipc } from "../lib/ipc";
 import { useDevice } from "../lib/device";
 import {
   RememberedDevice,
@@ -74,6 +75,9 @@ export function DevicesPage({ onConnected }: { onConnected: () => void }) {
     setUpdating(true);
     try {
       const files = await invoke<string[]>("firmware_update", { drive: drive.path });
+      // Unmount cleanly before the reset — a reset while mounted leaves the
+      // FAT dirty bit set and macOS remounts the drive read-only next time.
+      await ipc.driveEject(drive.path).catch(() => {});
       // New firmware supports {"t":"reset"}; older ones auto-reload code.py,
       // which is enough when boot.py didn't change.
       await send({ t: "reset" }).catch(() => {});
@@ -86,6 +90,14 @@ export function DevicesPage({ onConnected }: { onConnected: () => void }) {
     } finally {
       setUpdating(false);
     }
+  }
+
+  /** Same effect as unplug/replug, without touching the cable: clean unmount
+   *  (keeps the drive from remounting read-only) + reset over serial. */
+  async function restartKeypad() {
+    if (drive) await ipc.driveEject(drive.path).catch(() => {});
+    await send({ t: "reset" }).catch(() => {});
+    toast.success("Keypad restarting", "It will reconnect by itself in a few seconds.");
   }
 
   const fwOutdated =
@@ -103,9 +115,17 @@ export function DevicesPage({ onConnected }: { onConnected: () => void }) {
         title="Connected"
         actions={
           port && (
-            <Button variant="danger" onClick={() => void disconnect()}>
-              Disconnect
-            </Button>
+            <div className="flex gap-2">
+              <Button
+                onClick={() => void restartKeypad()}
+                title="Restart the keypad — fixes a read-only USB drive without replugging"
+              >
+                <RotateCcw size={14} aria-hidden /> Restart keypad
+              </Button>
+              <Button variant="danger" onClick={() => void disconnect()}>
+                Disconnect
+              </Button>
+            </div>
           )
         }
       >
