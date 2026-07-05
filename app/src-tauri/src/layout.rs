@@ -24,6 +24,10 @@ pub struct KeyChars {
 
 /// Single-character positional labels (the keys whose meaning shifts with the
 /// layout). Named keys (enter, f5, …) are layout-independent.
+#[cfg_attr(
+    not(any(target_os = "macos", target_os = "windows")),
+    allow(dead_code) // only the macOS/Windows layout readers consume it
+)]
 pub const CHAR_LABELS: [&str; 47] = [
     "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o",
     "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z", "0", "1", "2", "3",

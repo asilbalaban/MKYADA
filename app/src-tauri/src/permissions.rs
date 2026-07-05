@@ -11,6 +11,8 @@ use serde::Serialize;
 
 #[derive(Serialize, Clone, Copy, PartialEq)]
 #[serde(rename_all = "snake_case")]
+// Denied/Unknown are only ever produced by the macOS TCC checks
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub enum PermState {
     Granted,
     Denied,
