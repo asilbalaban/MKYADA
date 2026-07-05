@@ -109,8 +109,23 @@ export function stepIsHid(step: SequenceStep): boolean {
   return HID_KINDS.has(step.a.kind);
 }
 
+/** True for kinds that have no HID equivalent and are performed by the
+ * desktop app itself (open app/file/URL, run a command, play a sound) —
+ * these do nothing on a keypad plugged into a computer without the MKYADA
+ * app installed and running. */
+export function kindRequiresHost(kind: Assignment["kind"]): boolean {
+  return kind === "launch" || kind === "command" || kind === "sound";
+}
+
 export function sequenceIsPureHid(steps: SequenceStep[]): boolean {
   return steps.every(stepIsHid);
+}
+
+/** True if this assignment needs the MKYADA app running to work at all
+ * (won't do anything from a keypad alone plugged into another computer). */
+export function assignmentRequiresHost(a: Assignment): boolean {
+  if (a.kind === "sequence") return !sequenceIsPureHid(a.steps);
+  return kindRequiresHost(a.kind);
 }
 
 /** Sibling file holding one pre-compiled HID step of a mixed sequence:

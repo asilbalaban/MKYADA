@@ -15,6 +15,7 @@ import {
   compileAssignment,
   describeAssignment,
   keyFromEvent,
+  kindRequiresHost,
   migrateMacro,
   modifierDisplay,
   modsFromEvent,
@@ -143,29 +144,39 @@ export function AssignmentEditor({
   return (
     <div className="flex flex-col gap-3">
       <Field label="Action type">
-        <Select
-          value={value.kind}
-          onChange={(e) => {
-            const kind = e.target.value as Assignment["kind"];
-            if (kind === "none") onChange({ kind: "none" });
-            else if (kind === "keystroke") onChange({ kind: "keystroke", key: "" });
-            else if (kind === "combo") onChange({ kind: "combo", mods: [], key: "" });
-            else if (kind === "text") onChange({ kind: "text", text: "" });
-            else if (kind === "media") onChange({ kind: "media", usage: "play_pause" });
-            else if (kind === "launch") onChange({ kind: "launch", target: "" });
-            else if (kind === "command") onChange({ kind: "command", command: "" });
-            else if (kind === "sound") onChange({ kind: "sound", file: "" });
-            else if (kind === "sequence")
-              onChange({ kind: "sequence", steps: [{ a: { kind: "keystroke", key: "" }, delayMs: 0 }] });
-            else importMacro();
-          }}
-        >
-          {kinds.map((k) => (
-            <option key={k.value} value={k.value}>
-              {k.label}
-            </option>
-          ))}
-        </Select>
+        <div className="flex items-center gap-2 flex-wrap">
+          <Select
+            className="flex-1 min-w-[12rem]"
+            value={value.kind}
+            onChange={(e) => {
+              const kind = e.target.value as Assignment["kind"];
+              if (kind === "none") onChange({ kind: "none" });
+              else if (kind === "keystroke") onChange({ kind: "keystroke", key: "" });
+              else if (kind === "combo") onChange({ kind: "combo", mods: [], key: "" });
+              else if (kind === "text") onChange({ kind: "text", text: "" });
+              else if (kind === "media") onChange({ kind: "media", usage: "play_pause" });
+              else if (kind === "launch") onChange({ kind: "launch", target: "" });
+              else if (kind === "command") onChange({ kind: "command", command: "" });
+              else if (kind === "sound") onChange({ kind: "sound", file: "" });
+              else if (kind === "sequence")
+                onChange({ kind: "sequence", steps: [{ a: { kind: "keystroke", key: "" }, delayMs: 0 }] });
+              else importMacro();
+            }}
+          >
+            {kinds.map((k) => (
+              <option key={k.value} value={k.value}>
+                {k.label}
+              </option>
+            ))}
+          </Select>
+          {value.kind !== "none" && value.kind !== "sequence" && (
+            kindRequiresHost(value.kind) ? (
+              <Badge tone="amber">needs the MKYADA app running on this computer</Badge>
+            ) : (
+              <Badge tone="green">works standalone — no app needed</Badge>
+            )
+          )}
+        </div>
       </Field>
 
       {value.kind === "keystroke" && (

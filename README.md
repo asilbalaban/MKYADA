@@ -26,7 +26,8 @@
 | **Build the keypad** (solder switches, print the case) | [hardware/wiring.md](hardware/wiring.md) · [hardware/case/](hardware/case/) |
 | **Flash the firmware** on a fresh board | [docs/firmware-install.md](docs/firmware-install.md) |
 | **Update the firmware** later | one click in the app (*Devices → Update firmware*) — it ships inside the app |
-| **Put an action on a key** (key, combo, text, media) | app → *Keys*: click the key, press the shortcut, save |
+| **Put an action on a key** (key, combo, text, media, launch app/file/URL, run a command, play a sound, or a multi-step sequence) | app → *Keys*: click the key, press the shortcut or pick an action, save |
+| **Give one key three jobs** (tap / double-press / hold) | app → *Keys*: open the key's variants and assign each gesture |
 | **Record a full mouse + keyboard macro** | app → *Recorder*: F8 to record, assign to a key |
 | **Fine-tune a recording** | app → *Recorder*: edit every event, multi-select rows, draw the path 1:1 on your screen, pin the app above your game |
 | **Different actions per application** | app → *Profiles* (e.g. Save As in Photoshop, inventory macro in your game) |
@@ -43,15 +44,20 @@ Unlike most DIY macro pads that just remap keys, MKYADA plays back **full record
 **On the keypad (no app needed):**
 - **Standalone playback** — macros live as JSON files on the board's own USB drive. Drop `macros/key1.json` on, press the key. Works on any PC, no software installed.
 - **Everything is JSON** — even a plain Ctrl+A binding is a tiny macro file. Copy it to another board and it behaves identically.
-- **Layers** — dedicate one key as a layer switch (toggle or hold): 4 keys become 3×3 = 9 macros (`key1.json`, `key1-b.json`, `key1-c.json`).
+- **Tap · double-press · hold** — one key, three independently assignable actions. The firmware resolves the gesture itself, so it still works with no app running. No double-press assigned? Zero added latency on the tap.
+- **Layers** — dedicate one key as a layer switch (toggle or hold): 4 keys become 3×3 = 9 macros (`key1.json`, `key1-b.json`, `key1-c.json`). A live layer badge in the app always shows which one is active.
 - **Loop mode** — `repeat: 0` plays a macro until you press its key again (grinding, fishing, inventory runs…). Same key also **panic-stops** any running macro.
-- **Status LED** — the onboard RGB LED shows the active layer, playback, host mode and errors.
+- **Status LED** — the onboard RGB LED shows the active layer, playback (fast blink; slow blink while looping), host mode and errors — and can mirror app-side state like "mic muted".
 - **Absolute mouse positioning** — clicks land on screen coordinates, not relative nudges, via a custom HID descriptor proven in-game.
+- **Self-healing connection** — dead/reset serial ports and read-only drives are detected and recovered from automatically; nicknames are stored on the device itself so they follow it between computers.
 
 **In the desktop app (Windows / macOS, Linux planned):**
 - **Point-and-click key setup** — click a key, press the shortcut you want (single keys, combos, text snippets, media keys), save. Live key test shows every physical press.
-- **Macro recorder & editor** — record globally with F8, then edit every event: coordinates, delays, durations; straighten or simplify mouse paths; draw the path 1:1 on your real screen to verify click positions.
+- **Beyond keystrokes** — put a key to launching an app, file or URL, running a terminal command, or playing a sound (tap to play; hold to stop, fade out, or restart it). Chain several of these into one multi-step sequence with delays in between.
+- **Macro recorder & editor** — record globally with F8, then edit every event: coordinates, delays, durations; straighten or simplify mouse paths; draw the path 1:1 on your real screen to verify click positions; multi-select rows with shift/cmd-click; full undo/redo.
 - **Per-app profiles** — with the app running, key 1 can be *Save As* in Photoshop and an inventory macro in your game. No matching profile? The keypad falls back to its own on-board config within 5 seconds.
+- **Runs in the background** — closing the window sends MKYADA to the system tray instead of quitting, so key actions and profiles keep working; an optional "start at login" setting launches it automatically.
+- **Live system status** — a settings strip shows CPU, RAM and mic-mute state at a glance, with an optional rule to turn the keypad's LED red while the mic is muted.
 - **In-app firmware updates**, wrong-solder-order key remapping, device nicknames, multi-device support, light/dark theme, and a GitHub release check on launch.
 
 ## The app
@@ -135,7 +141,7 @@ npx tsx tests/model_test.ts
 
 ## Status
 
-**v0.2.5** — firmware and app verified on real hardware (two boards). Light/dark themed app with onboarding, press-to-capture key assignment, macro recorder/editor with on-screen path overlay, per-app profiles, playback policies (stop/restart, hold-to-repeat), full keyboard-layout awareness (Turkish and any other layout), in-app firmware updates and release checks. CI publishes a Windows installer + macOS universal DMG per release; Linux packages are next.
+**v0.3.0** — firmware and app verified on real hardware (two boards). Light/dark themed app with onboarding, press-to-capture key assignment, macro recorder/editor with on-screen path overlay and undo/redo, per-app profiles, playback policies (stop/restart, hold-to-repeat), tap/double-press/hold key logic, multi-step key sequences, launch/command/sound key actions, system tray + autostart + live system status, full keyboard-layout awareness (Turkish and any other layout), in-app firmware updates and release checks. CI publishes a Windows installer + macOS universal DMG per release; Linux packages are next.
 
 > **Note:** automating input in online games may violate their Terms of Service. You are responsible for how you use this device.
 
@@ -163,10 +169,13 @@ STLs and print notes live in [hardware/case/](hardware/case/).
 
 - **Uygulamasız çalışır** — `key1.json` dosyasını kartın USB sürücüsüne at, tuşa bas.
 - **Her şey JSON** — basit bir Ctrl+A ataması bile küçük bir makro dosyasıdır; başka karta kopyalayınca aynı davranır.
-- **Layer desteği** — bir tuşu layer anahtarı yap: 4 tuş → 3×3 = 9 makro.
+- **Tek dokunuş · çift · basılı tut** — aynı tuşa üç ayrı, bağımsız atanabilir aksiyon; bellenim jesti kendisi çözer, uygulama açık olmasa bile çalışır.
+- **Layer desteği** — bir tuşu layer anahtarı yap: 4 tuş → 3×3 = 9 makro. Uygulamadaki canlı rozet o an hangi layer'da olduğunuzu gösterir.
 - **Döngü modu** — `repeat: 0` ile makro, tuşa tekrar basılana kadar çalar; aynı tuş çalan makroyu anında durdurur (panik durdurma).
 - **Uygulamaya özel profiller** — masaüstü uygulaması açıkken tuş 1 Photoshop'ta *Save As*, oyunda envanter makrosu olabilir.
-- **Kaydet & düzenle** — klavye + mouse kaydı, event bazında düzenleme, mouse yolunu gerçek ekranda 1:1 çizme, hız / tekrar ayarı.
+- **Tuş vuruşunun ötesinde** — bir tuşu uygulama/dosya/URL açmaya, terminal komutu çalıştırmaya ya da ses çalmaya (basılı tutunca durdur, kıs veya baştan başlat) atayın; birkaçını aralarında bekleme ile zincirleyerek tek bir çok adımlı aksiyon yapın.
+- **Kaydet & düzenle** — klavye + mouse kaydı, event bazında düzenleme, çoklu satır seçimi, geri al/ileri al, mouse yolunu gerçek ekranda 1:1 çizme, hız / tekrar ayarı.
+- **Arka planda çalışır** — pencereyi kapatmak uygulamayı kapatmaz, sistem tepsisine gönderir; tuş aksiyonları ve profiller çalışmaya devam eder. İsteğe bağlı "açılışta başlat" seçeneği de var.
 - **Kendin yap** — 6 switch'i RP2040-Zero'ya lehimle, kutuyu 3D yazıcıda bas, firmware'i yükle.
 
 Kurulum: RP2040-Zero'ya CircuitPython yükleyin, firmware release zip içeriğini `CIRCUITPY` sürücüsüne kopyalayın ([docs/firmware-install.md](docs/firmware-install.md)), uygulamayı [son sürümden](https://github.com/asilbalaban/MKYADA/releases/latest) kurun veya JSON dosyalarını elle sürücüye atın.

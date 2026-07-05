@@ -5,7 +5,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useDevice } from "../lib/device";
 import type { Assignment, DeviceConfig } from "../lib/types";
-import { describeAssignment } from "../lib/macro-model";
+import { assignmentRequiresHost, describeAssignment } from "../lib/macro-model";
 
 interface Props {
   config: DeviceConfig;
@@ -69,7 +69,12 @@ export function Keypad({ config, selected, onSelect, assignments }: Props) {
         const isPressed = pressed.has(n);
         const isSelected = selected === n;
         const a = assignments?.get(n);
-        const summary = isLayer ? "layer switch" : a ? describeAssignment(a) : "not assigned";
+        const needsHost = !isLayer && a && assignmentRequiresHost(a);
+        const summary = isLayer
+          ? "layer switch"
+          : a
+            ? describeAssignment(a) + (needsHost ? " — needs the MKYADA app running" : "")
+            : "not assigned";
         return (
           <button
             key={n}
@@ -88,6 +93,12 @@ export function Keypad({ config, selected, onSelect, assignments }: Props) {
             </span>
             {isLayer && (
               <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-layer" />
+            )}
+            {needsHost && (
+              <span
+                className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-warning"
+                title="Needs the MKYADA app running on this computer"
+              />
             )}
           </button>
         );

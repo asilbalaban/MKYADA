@@ -59,6 +59,9 @@
     <symbol id="i-zap" viewBox="0 0 24 24"><path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/></symbol>
     <symbol id="i-map" viewBox="0 0 24 24"><path d="M3 6l6-3 6 3 6-3v15l-6 3-6-3-6 3V6z"/><path d="M9 3v15"/><path d="M15 6v15"/></symbol>
     <symbol id="i-flame" viewBox="0 0 24 24"><path d="M12 3c1 2.5 3.5 4 4.5 6.5A6 6 0 1 1 6 12c0-1 .3-2 .8-3 .7 1.2 1.5 2 2.7 2.5C9 8 10 5 12 3z"/></symbol>
+    <symbol id="i-terminal" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 3 3-3 3"/><path d="M13 15h4"/></symbol>
+    <symbol id="i-tray" viewBox="0 0 24 24"><path d="M21 12v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-6"/><path d="M3 12h4l2 3h6l2-3h4"/><path d="M12 3v9"/><path d="m8.5 8.5 3.5 3.5 3.5-3.5"/></symbol>
+    <symbol id="i-pulse" viewBox="0 0 24 24"><path d="M3 12h4l2 8 4-16 2 8h6"/></symbol>
   </defs>
 </svg>
 
@@ -199,6 +202,34 @@
 
 <div class="divider"></div>
 
+<!-- ============ KEY ACTIONS ============ -->
+<section>
+  <div class="wrap statement reveal seq">
+    <p class="kicker"><span lang="en">Beyond keystrokes</span><span lang="tr">Tuş vuruşunun ötesinde</span></p>
+    <h2 data-split><span lang="en">A key can do more than type.</span><span lang="tr">Bir tuş, yazmaktan fazlasını yapabilir.</span></h2>
+    <p class="lead">
+      <span lang="en">Assign a key to launch an app, open a file or a website, run a terminal command, or play a sound — then chain a few of those together into one press. MKYADA figures out on its own what needs the computer and what can run straight off the keypad.</span>
+      <span lang="tr">Bir tuşu uygulama başlatmaya, dosya ya da site açmaya, terminal komutu çalıştırmaya veya ses çalmaya atayın — sonra birkaçını tek bir basışta zincirleyin. MKYADA neyin bilgisayara ihtiyaç duyduğuna, neyin doğrudan klavyeden çalışabileceğine kendisi karar verir.</span>
+    </p>
+    <div class="grid" data-stagger>
+      <div class="card"><div class="icon"><svg class="ic"><use href="#i-target"/></svg></div>
+        <h3><span lang="en">Tap. Double-tap. Hold.</span><span lang="tr">Tek dokunuş. Çift. Basılı tut.</span></h3>
+        <p><span lang="en">The same key, three independent actions. The keypad resolves the gesture itself, so it still works with no app running — and skip the double-tap variant for zero added latency on the tap.</span><span lang="tr">Aynı tuş, üç bağımsız aksiyon. Jesti klavye kendisi çözer, uygulama açık olmasa bile çalışır — çift dokunuş atamazsanız tek dokunuşta hiç gecikme eklenmez.</span></p>
+      </div>
+      <div class="card"><div class="icon"><svg class="ic"><use href="#i-terminal"/></svg></div>
+        <h3><span lang="en">Launch, run, play</span><span lang="tr">Başlat, çalıştır, çal</span></h3>
+        <p><span lang="en">Open an app, a file or a URL, run a shell command, or play a sound file — tap to play, hold to stop everything, fade it out, or restart it from the top. Your call, per key.</span><span lang="tr">Uygulama, dosya ya da URL açın, kabuk komutu çalıştırın, ya da bir ses dosyası çalın — dokununca çalsın, basılı tutunca hepsini durdursun, kıssın ya da baştan başlatsın. Karar tuş başına sizin.</span></p>
+      </div>
+      <div class="card"><div class="icon"><svg class="ic"><use href="#i-route"/></svg></div>
+        <h3><span lang="en">Chain it into one press</span><span lang="tr">Tek basışta zincirle</span></h3>
+        <p><span lang="en">Stack several actions with a delay in between. All keystrokes? It compiles into one standalone macro. Need the app for a step? The editor flags exactly which ones.</span><span lang="tr">Birkaç aksiyonu aralarında bekleme ile art arda dizin. Hepsi tuş vuruşuysa tek bir bağımsız makroya derlenir. Bir adım uygulamaya ihtiyaç duyuyorsa düzenleyici hangisi olduğunu açıkça belirtir.</span></p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
 <!-- ============ LAYERS & PROFILES — sticky show ============ -->
 <section class="show-track" data-scrub="track" data-steps="3" data-step="0">
   <div class="show-stage">
@@ -268,6 +299,35 @@
     </div>
   </div>
 </section>
+
+<!-- ============ RUNS IN THE BACKGROUND ============ -->
+<section>
+  <div class="wrap split reveal seq">
+    <div class="txt">
+      <p class="kicker"><span lang="en">Always ready</span><span lang="tr">Her zaman hazır</span></p>
+      <h2 data-split><span lang="en">Closing the window doesn't close MKYADA.</span><span lang="tr">Pencereyi kapatmak MKYADA'yı kapatmaz.</span></h2>
+      <p class="lead">
+        <span lang="en">MKYADA lives in the system tray, so your launch/command/sound keys and per-app profiles keep working after you close the window. Turn on "start at login" once and forget about it. A settings strip shows live CPU, RAM and mic status, and can mirror mic-mute onto the keypad's own LED — so a glance at the desk tells you what a glance at the screen would.</span>
+        <span lang="tr">MKYADA sistem tepsisinde yaşar; pencereyi kapatsanız bile başlatma/komut/ses tuşlarınız ve uygulamaya özel profilleriniz çalışmaya devam eder. "Açılışta başlat" seçeneğini bir kez açın, gerisini unutun. Ayarlardaki bir şerit canlı CPU, RAM ve mikrofon durumunu gösterir; mikrofon kapalıyken klavyenin kendi LED'ini kırmızıya çevirebilir — masaya bakmak, ekrana bakmakla aynı şeyi söyler.</span>
+      </p>
+      <div class="grid" data-stagger style="grid-template-columns:1fr;margin-top:28px">
+        <div class="card"><div class="icon"><svg class="ic"><use href="#i-tray"/></svg></div>
+          <h3><span lang="en">Tray, not taskbar</span><span lang="tr">Görev çubuğu değil, tepsi</span></h3>
+          <p><span lang="en">Quit or pause key actions from the tray menu any time; reopening the app just refocuses the same window.</span><span lang="tr">Tepsi menüsünden istediğiniz an çıkın ya da tuş aksiyonlarını duraklatın; uygulamayı yeniden açmak aynı pencereye odaklanır.</span></p>
+        </div>
+        <div class="card"><div class="icon"><svg class="ic"><use href="#i-pulse"/></svg></div>
+          <h3><span lang="en">It reconnects itself</span><span lang="tr">Kendi kendine yeniden bağlanır</span></h3>
+          <p><span lang="en">Unplugged, reset, or a stubborn read-only drive — MKYADA detects it and recovers on its own, no unplug-replug dance required.</span><span lang="tr">Fişi çekilmiş, sıfırlanmış ya da inatçı bir salt-okunur sürücü — MKYADA bunu fark eder ve kendi kendine toparlanır, fişi çekip takmanıza gerek kalmaz.</span></p>
+        </div>
+      </div>
+    </div>
+    <div class="art seq-late">
+      <div class="tilt"><div class="tilt-inner"><img src="images/app-settings.png" width="1600" height="1105" loading="lazy" decoding="async" alt="Settings screen — background mode, autostart and live system status"><span class="shine" aria-hidden="true"></span></div></div>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
 
 <!-- ============ THE APP ============ -->
 <section id="app">
