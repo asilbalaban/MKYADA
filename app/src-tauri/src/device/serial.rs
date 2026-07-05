@@ -183,7 +183,18 @@ pub fn connect(app: AppHandle, mgr: &DeviceManager, port: &str) -> Result<(), St
                         let _ = app.emit("device:msg", &v);
                     }
                 }
-                Err(e) if e.kind() == std::io::ErrorKind::TimedOut => continue,
+                Err(e) if e.kind() == std::io::ErrorKind::TimedOut => {
+                    // macOS quirk: reads on an unplugged/reset device keep
+                    // timing out forever instead of erroring, so the app
+                    // would show "connected" to a dead port. The /dev node
+                    // disappears on removal — use that as the drop signal.
+                    #[cfg(unix)]
+                    if !std::path::Path::new(&port_name).exists() {
+                        let _ = app.emit("device:disconnected", &port_name);
+                        break;
+                    }
+                    continue;
+                }
                 Err(_) => {
                     let _ = app.emit("device:disconnected", &port_name);
                     break;

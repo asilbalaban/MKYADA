@@ -81,6 +81,8 @@ export function DevicesPage({ onConnected }: { onConnected: () => void }) {
       // New firmware supports {"t":"reset"}; older ones auto-reload code.py,
       // which is enough when boot.py didn't change.
       await send({ t: "reset" }).catch(() => {});
+      // Drop the now-dead connection so auto-connect reattaches cleanly.
+      await disconnect().catch(() => {});
       toast.success(
         `Firmware updated (${files.length} files written)`,
         "The keypad is restarting — it will reconnect in a few seconds.",
@@ -97,6 +99,9 @@ export function DevicesPage({ onConnected }: { onConnected: () => void }) {
   async function restartKeypad() {
     if (drive) await ipc.driveEject(drive.path).catch(() => {});
     await send({ t: "reset" }).catch(() => {});
+    // The port is about to vanish — drop the connection now so the
+    // auto-connect loop picks the keypad up as soon as it re-enumerates.
+    await disconnect().catch(() => {});
     toast.success("Keypad restarting", "It will reconnect by itself in a few seconds.");
   }
 
