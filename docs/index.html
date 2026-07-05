@@ -19,7 +19,7 @@
     document.documentElement.classList.add("js");
   })();
 </script>
-<link rel="preload" as="image" href="images/mkyada-topview.jpg" imagesrcset="images/mkyada-topview.jpg 1400w, images/mkyada-topview-1800.jpg 1800w" imagesizes="(max-width: 900px) 92vw, 860px">
+<link rel="preload" as="image" href="images/mkyada-topview-1800.jpg">
 <link rel="stylesheet" href="styles.css">
 <script src="main.js" defer></script>
 </head>
@@ -99,9 +99,9 @@
     <div class="hero-img" data-scrub>
       <div class="hero-3d">
         <div class="hero-flat">
-          <div class="tilt">
+          <div class="tilt bare">
             <div class="tilt-inner">
-              <img src="images/mkyada-topview.jpg" srcset="images/mkyada-topview.jpg 1400w, images/mkyada-topview-1800.jpg 1800w" sizes="(max-width: 900px) 92vw, 860px" width="1400" height="1400" fetchpriority="high" alt="MKYADA macro keypad, top view">
+              <img src="images/mkyada-topview-1800.jpg" width="1800" height="1800" fetchpriority="high" alt="MKYADA macro keypad, top view">
               <span class="shine" aria-hidden="true"></span>
             </div>
           </div>
@@ -155,9 +155,9 @@
       </p>
     </div>
     <div class="art seq-late">
-      <div class="tilt">
+      <div class="tilt bare">
         <div class="tilt-inner">
-          <img src="images/mkyada-backview.jpg" srcset="images/mkyada-backview.jpg 1400w, images/mkyada-backview-1800.jpg 1800w" sizes="(max-width: 900px) 92vw, 508px" width="1400" height="1400" loading="lazy" decoding="async" alt="MKYADA keypad, back view with USB-C">
+          <img src="images/mkyada-backview-1800.jpg" width="1800" height="1800" loading="lazy" decoding="async" alt="MKYADA keypad, back view with USB-C">
           <span class="shine" aria-hidden="true"></span>
         </div>
       </div>
@@ -190,6 +190,10 @@
         <p><span lang="en">Press again to stop or restart. Hold the key to repeat like a held letter. Loop until you press again. Speed it up 10×. You decide.</span><span lang="tr">Tekrar basınca dursun ya da baştan başlasın. Basılı tutunca harf gibi tekrarlasın. Siz basana kadar dönsün. 10 kat hızlansın. Karar sizin.</span></p>
       </div>
     </div>
+    <figure class="big-shot seq-late">
+      <div class="tilt"><div class="tilt-inner"><img src="images/app-recorder.png" width="1600" height="1105" loading="lazy" decoding="async" alt="MKYADA recorder — every captured event as an editable row"><span class="shine" aria-hidden="true"></span></div></div>
+      <figcaption><span lang="en">The recorder — 16 captured events, every row editable, playback rules per key</span><span lang="tr">Kaydedici — yakalanan 16 olay, her satır düzenlenebilir, tuş başına oynatma kuralları</span></figcaption>
+    </figure>
   </div>
 </section>
 
@@ -276,12 +280,20 @@
     </p>
     <div class="shots" data-stagger>
       <figure>
-        <div class="tilt"><div class="tilt-inner"><img src="images/app-keys.png" width="1100" height="760" loading="lazy" decoding="async" alt="Keys screen"><span class="shine" aria-hidden="true"></span></div></div>
+        <div class="tilt"><div class="tilt-inner"><img src="images/app-keys.png" width="1600" height="1105" loading="lazy" decoding="async" alt="Keys screen"><span class="shine" aria-hidden="true"></span></div></div>
         <figcaption><span lang="en">Every key, one glance — press-to-capture assignment</span><span lang="tr">Tüm tuşlar tek bakışta — bas-yakala atama</span></figcaption>
       </figure>
       <figure>
-        <div class="tilt"><div class="tilt-inner"><img src="images/app-devices.png" width="1100" height="760" loading="lazy" decoding="async" alt="Devices screen"><span class="shine" aria-hidden="true"></span></div></div>
+        <div class="tilt"><div class="tilt-inner"><img src="images/app-devices.png" width="1600" height="1105" loading="lazy" decoding="async" alt="Devices screen"><span class="shine" aria-hidden="true"></span></div></div>
         <figcaption><span lang="en">Devices with nicknames — “Doruk connected”</span><span lang="tr">Takma adlı cihazlar — “Doruk connected”</span></figcaption>
+      </figure>
+      <figure>
+        <div class="tilt"><div class="tilt-inner"><img src="images/app-profiles.png" width="1600" height="1105" loading="lazy" decoding="async" alt="Profiles screen"><span class="shine" aria-hidden="true"></span></div></div>
+        <figcaption><span lang="en">Per-app profiles — the active window picks the assignments</span><span lang="tr">Uygulamaya özel profiller — atamaları öndeki pencere seçer</span></figcaption>
+      </figure>
+      <figure>
+        <div class="tilt"><div class="tilt-inner"><img src="images/app-keys-dark.png" width="1600" height="1105" loading="lazy" decoding="async" alt="Keys screen in dark theme"><span class="shine" aria-hidden="true"></span></div></div>
+        <figcaption><span lang="en">Light and dark — the whole app, both ways</span><span lang="tr">Açık ve koyu — uygulamanın tamamı iki temada</span></figcaption>
       </figure>
     </div>
   </div>
@@ -330,7 +342,7 @@
     <div class="specs reveal" data-stagger>
       <div class="spec"><b>RP2040-Zero</b><span lang="en">the whole brain, ~$5</span><span lang="tr">tüm beyin, ~150₺</span></div>
       <div class="spec"><b><span data-count="20" data-prefix="1–">1–20</span></b><span lang="en">keys, your choice</span><span lang="tr">tuş, seçim sizin</span></div>
-      <div class="spec"><b><span data-count="3" data-suffix="×">3×</span></b><span lang="en">layers per keypad</span><span lang="tr">katman her klavyede</span></div>
+      <div class="spec"><b><span data-count="8" data-prefix="2–">2–8</span></b><span lang="en">layers per keypad</span><span lang="tr">katman her klavyede</span></div>
       <div class="spec"><b>JSON</b><span lang="en">everything, hand-editable</span><span lang="tr">her şey, elle düzenlenebilir</span></div>
     </div>
   </div>

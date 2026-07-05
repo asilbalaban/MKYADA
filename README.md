@@ -7,7 +7,7 @@
 **M**acro **K**eyboard **Y**ou **A**lways **D**ream **A**bout — an open-source, DIY **macro keypad** (6 keys in the reference build, up to 20 supported) built on the Waveshare **RP2040-Zero**, with a cross-platform desktop configurator. It records your mouse and keyboard, then replays them as **real hardware HID input** — so your macros work even in games that ignore software automation.
 
 <p align="center">
-  <img src="docs/images/mkyada-topview.jpg" alt="MKYADA — 6-key macro keypad with backlit mechanical keys and USB-C" width="560">
+  <img src="docs/images/mkyada-topview-1800.jpg" alt="MKYADA — 6-key macro keypad with backlit mechanical keys and USB-C" width="560">
 </p>
 
 ```
@@ -59,6 +59,16 @@ Unlike most DIY macro pads that just remap keys, MKYADA plays back **full record
 | Assign keys | Manage devices |
 |---|---|
 | ![Keys page — click a key, pick what it does](docs/images/app-keys.png) | ![Devices page — connected keypad with nickname and firmware info](docs/images/app-devices.png) |
+| **Record & edit macros** | **Per-app profiles** |
+| ![Recorder — every event is an editable row, playback rules per key](docs/images/app-recorder.png) | ![Profiles — the active window picks the assignments](docs/images/app-profiles.png) |
+| **Setup at a glance** | **Settings & permissions** |
+| ![Setup — keypad summary and live key test](docs/images/app-setup.png) | ![Settings — theme, always-on-top, macOS permissions, updates](docs/images/app-settings.png) |
+
+Prefer dark? The whole app ships with light and dark themes:
+
+<p align="center">
+  <img src="docs/images/app-keys-dark.png" alt="Keys page in dark theme, with a key selected" width="640">
+</p>
 
 ## Hardware
 

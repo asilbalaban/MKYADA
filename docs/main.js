@@ -139,26 +139,6 @@
       tilt.addEventListener("pointerleave", () => { tx = 0; ty = 0; kick(); });
     });
 
-    /* magnetic primary buttons */
-    document.querySelectorAll(".btn.primary").forEach((btn) => {
-      let tx = 0, ty = 0, cx = 0, cy = 0, raf = 0;
-      const step = () => {
-        cx += (tx - cx) * 0.16;
-        cy += (ty - cy) * 0.16;
-        btn.style.transform = `translate(${cx.toFixed(2)}px, ${cy.toFixed(2)}px)`;
-        if (Math.abs(cx - tx) > 0.05 || Math.abs(cy - ty) > 0.05) raf = requestAnimationFrame(step);
-        else raf = 0;
-      };
-      const kick = () => { if (!raf) raf = requestAnimationFrame(step); };
-      btn.addEventListener("pointermove", (ev) => {
-        const r = btn.getBoundingClientRect();
-        tx = (ev.clientX - (r.left + r.width / 2)) * 0.22;
-        ty = (ev.clientY - (r.top + r.height / 2)) * 0.35;
-        kick();
-      });
-      btn.addEventListener("pointerleave", () => { tx = 0; ty = 0; kick(); });
-    });
-
     /* cursor glow on cards */
     document.querySelectorAll(".card").forEach((card) => {
       card.addEventListener("pointermove", (ev) => {
