@@ -140,6 +140,17 @@ struct CaptureState {
 /// Ensure the global hook thread is running. Idempotent.
 pub fn ensure_listener(app: AppHandle) {
     LISTENER.call_once(move || {
+        // The rdev callback runs INSIDE the OS low-level hook. On Windows
+        // every input event in the system waits on that callback, and
+        // app.emit does webview IPC — slow enough to lag or drop clicks
+        // machine-wide (issue #2). Hand events to a channel and emit from a
+        // separate thread so the hook returns in microseconds.
+        let (tx, rx) = std::sync::mpsc::channel::<(&'static str, serde_json::Value)>();
+        std::thread::spawn(move || {
+            for (name, payload) in rx {
+                let _ = app.emit(name, payload);
+            }
+        });
         std::thread::spawn(move || {
             let state = Mutex::new(CaptureState {
                 last: Instant::now(),
@@ -154,7 +165,7 @@ pub fn ensure_listener(app: AppHandle) {
                 // F8 works even when not capturing, so the UI can arm/stop
                 // the recorder while another window has focus.
                 if let EventType::KeyPress(Key::F8) = event.event_type {
-                    let _ = app.emit("record:hotkey", ());
+                    let _ = tx.send(("record:hotkey", serde_json::Value::Null));
                     return;
                 }
                 if let EventType::KeyRelease(Key::F8) = event.event_type {
@@ -208,7 +219,7 @@ pub fn ensure_listener(app: AppHandle) {
                 let mut obj = payload;
                 obj["delay"] = json!(st.last.elapsed().as_millis() as u64);
                 st.last = Instant::now();
-                let _ = app.emit("record:event", obj);
+                let _ = tx.send(("record:event", obj));
             });
             if let Err(e) = result {
                 // Typical on macOS without Accessibility permission.

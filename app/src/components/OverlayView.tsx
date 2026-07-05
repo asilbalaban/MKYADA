@@ -4,7 +4,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
+import { emit, listen } from "@tauri-apps/api/event";
 import type { MacroFile } from "../lib/types";
 import { EditorItem, groupEvents, isMoveGroup } from "../lib/recorder-model";
 
@@ -31,6 +31,10 @@ export function OverlayView() {
     const unPing = listen("overlay:ping", () => {
       lastPing.current = Date.now();
     });
+    // Tell the editor we're ready to draw. This window can finish loading
+    // well after the editor's first overlay:data emit (WebView2 cold start
+    // on Windows) — without the handshake we'd sit blank forever.
+    void emit("overlay:ready");
 
     // FAILSAFE 1: this window is supposed to be click-through. If any input
     // reaches us, click-through is broken (seen on Windows) and we'd be a

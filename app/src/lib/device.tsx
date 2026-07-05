@@ -162,7 +162,10 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
       for (const f of files) {
         await ipc.driveWrite(drive.path, f.path, f.content);
       }
-      await ipc.deviceSend({ t: "reload" });
+      // Best-effort: if the write hit a read-only drive, the backend already
+      // restarted the keypad (which boots with the fresh files) and the
+      // serial port is momentarily down — that's not a failure.
+      await ipc.deviceSend({ t: "reload" }).catch(() => {});
     },
     [drive],
   );
