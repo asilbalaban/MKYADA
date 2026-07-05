@@ -1,6 +1,6 @@
 [package]
 name = "mkyada"
-version = "0.4.0"
+version = "0.4.1"
 description = "MKYADA — Macro Keypad You Always Dream About"
 authors = ["Asil Balaban"]
 license = "MIT"
@@ -59,6 +59,13 @@ windows = { version = "0.58", features = [
 [target.'cfg(not(target_os = "macos"))'.dependencies]
 rdev = "0.5"
 enigo = "0.3"
+
+# AXIsProcessTrustedWithOptions needs a CFDictionary with the
+# kAXTrustedCheckOptionPrompt key to both show the system prompt and register
+# the app in the Accessibility list — plain AXIsProcessTrusted() (status-only)
+# never adds an unlisted app to that list.
+[target.'cfg(target_os = "macos")'.dependencies]
+macos-accessibility-client = "0.0.1"
 
 [profile.release]
 strip = true

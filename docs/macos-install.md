@@ -46,7 +46,15 @@ Notes:
 
 The app is unsigned, so **every update gets a new code signature** and macOS
 ties permissions to the old one — the toggle you see belongs to the previous
-version and does nothing. Fix:
+version and does nothing. Fastest fix, in Terminal:
+
+```sh
+tccutil reset Accessibility com.mkyada.app
+tccutil reset ListenEvent com.mkyada.app   # this is the Input Monitoring service
+```
+
+Then restart MKYADA and grant both permissions again when it asks. If
+`tccutil` isn't available or the fix doesn't take, do it by hand instead:
 
 1. System Settings → Privacy & Security → **Input Monitoring** (and
    **Accessibility**),

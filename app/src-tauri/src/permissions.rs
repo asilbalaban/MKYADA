@@ -54,6 +54,13 @@ mod imp {
         }
     }
 
+    /// Show the system prompt and register the app in the Accessibility
+    /// list (plain `AXIsProcessTrusted()` never does this for an app the OS
+    /// hasn't seen ask before — e.g. right after a `tccutil reset`).
+    pub fn request_accessibility() -> bool {
+        macos_accessibility_client::accessibility::application_is_trusted_with_prompt()
+    }
+
     pub fn input_monitoring() -> PermState {
         match unsafe { IOHIDCheckAccess(LISTEN_EVENT) } {
             0 => PermState::Granted,
@@ -101,7 +108,13 @@ pub fn request(kind: &str) {
                 imp::open_settings("input_monitoring");
             }
         }
-        "accessibility" => imp::open_settings("accessibility"),
+        "accessibility" => {
+            if !imp::request_accessibility() {
+                // already denied once: the prompt won't reappear, guide the
+                // user to the settings pane instead
+                imp::open_settings("accessibility");
+            }
+        }
         _ => {}
     }
 }

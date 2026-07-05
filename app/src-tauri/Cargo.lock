@@ -2306,6 +2306,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "macos-accessibility-client"
+version = "0.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "edf7710fbff50c24124331760978fb9086d6de6288dcdb38b25a97f8b1bdebbb"
+dependencies = [
+ "core-foundation 0.9.4",
+ "core-foundation-sys 0.8.7",
+]
+
+[[package]]
 name = "malloc_buf"
 version = "0.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2384,10 +2394,11 @@ dependencies = [
 
 [[package]]
 name = "mkyada"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "active-win-pos-rs",
  "enigo",
+ "macos-accessibility-client",
  "rdev",
  "reqwest 0.12.28",
  "semver",

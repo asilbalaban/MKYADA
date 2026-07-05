@@ -116,6 +116,11 @@ Details: [docs/macro-format.md](docs/macro-format.md) · [docs/serial-protocol.m
 >
 > (Alternative: System Settings → Privacy & Security → **Open Anyway**.
 > Details in [docs/macos-install.md](docs/macos-install.md).)
+>
+> Granted **Input Monitoring**/**Accessibility** but the app still shows
+> **DENIED**? Each unsigned build gets a new code signature, so macOS ties
+> the permission to the old one. Reset it and grant again:
+> [docs/macos-install.md#permission-shows-on-but-the-app-still-says-denied](docs/macos-install.md#permission-shows-on-but-the-app-still-says-denied)
 
 ## Repository layout
 
