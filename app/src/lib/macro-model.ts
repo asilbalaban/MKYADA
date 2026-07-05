@@ -85,6 +85,11 @@ export function modsFromEvent(e: KeyboardEvent): string[] {
   return mods;
 }
 
+/** Last path segment — for showing "Google Chrome.app" instead of the full path. */
+export function fileBaseName(path: string): string {
+  return path.replace(/[\\/]+$/, "").split(/[\\/]/).pop() ?? path;
+}
+
 export function macroFileName(keyNo: number, layerIndex: number): string {
   const suffix = layerIndex > 0 ? `-${LAYER_NAMES[layerIndex]}` : "";
   return `macros/key${keyNo}${suffix}.json`;
@@ -148,6 +153,8 @@ export function assignmentComplete(a: Assignment): boolean {
       return a.target.length > 0;
     case "command":
       return a.command.length > 0;
+    case "sound":
+      return a.file.length > 0;
     default:
       return true;
   }
@@ -193,6 +200,8 @@ export function compileAssignment(a: Assignment, name?: string): MacroFile | nul
         return { ...base, name: name ?? `Open ${a.target}`, kind: "launch", target: a.target, events: [] };
       case "command":
         return { ...base, name: name ?? `Run ${a.command.slice(0, 24)}`, kind: "command", command: a.command, events: [] };
+      case "sound":
+        return { ...base, name: name ?? `Sound ${fileBaseName(a.file)}`, kind: "sound", sound: a.file, events: [] };
     }
   })();
   // behavior options ride along in settings, whatever the kind
@@ -231,6 +240,8 @@ export function parseAssignment(m: MacroFile): Assignment {
       return { kind: "launch", target: m.target ?? "", ...behavior };
     case "command":
       return { kind: "command", command: m.command ?? "", ...behavior };
+    case "sound":
+      return { kind: "sound", file: m.sound ?? "", ...behavior };
     default:
       return { kind: "recorded", name: m.name ?? "macro", macro: m, ...behavior };
   }
@@ -259,12 +270,15 @@ export function describeAssignment(a: Assignment): string {
     case "recorded":
       return `▶ ${a.name}`;
     case "launch": {
-      // show just the app/file name, not the whole path
-      const short = a.target.replace(/[\\/]+$/, "").split(/[\\/]/).pop() ?? a.target;
+      const short = fileBaseName(a.target);
       return `↗ ${short.length > 20 ? short.slice(0, 20) + "…" : short}`;
     }
     case "command":
       return `$ ${a.command.length > 20 ? a.command.slice(0, 20) + "…" : a.command}`;
+    case "sound": {
+      const short = fileBaseName(a.file);
+      return `♪ ${short.length > 20 ? short.slice(0, 20) + "…" : short}`;
+    }
   }
 }
 

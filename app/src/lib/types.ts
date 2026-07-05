@@ -55,7 +55,7 @@ export interface MacroFile {
   version: number;
   name?: string;
   created?: string;
-  kind?: "keystroke" | "combo" | "text" | "media" | "recorded" | "launch" | "command";
+  kind?: "keystroke" | "combo" | "text" | "media" | "recorded" | "launch" | "command" | "sound";
   combo?: { mods: string[]; key: string };
   text?: string;
   media?: string;
@@ -63,6 +63,8 @@ export interface MacroFile {
   target?: string;
   /** command kind: shell command line — performed by the desktop app */
   command?: string;
+  /** sound kind: audio file path — played by the desktop app */
+  sound?: string;
   screen?: { width: number; height: number };
   settings?: MacroSettings;
   events: MacroEvent[];
@@ -90,9 +92,11 @@ export type Assignment = (
   | { kind: "text"; text: string }
   | { kind: "media"; usage: string }
   | { kind: "recorded"; name: string; macro: MacroFile }
-  // performed by the desktop app (not HID): open an app/file/URL, run a command
+  // performed by the desktop app (not HID): open an app/file/URL, run a
+  // command, play a sound effect
   | { kind: "launch"; target: string }
   | { kind: "command"; command: string }
+  | { kind: "sound"; file: string }
 ) & { behavior?: AssignmentBehavior };
 
 export interface Profile {

@@ -18,7 +18,7 @@ import {
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { LazyStore } from "@tauri-apps/plugin-store";
-import { openPath, openUrl } from "@tauri-apps/plugin-opener";
+import { playSound } from "./sound";
 import { useDevice } from "./device";
 import { ipc } from "./ipc";
 import type { Assignment, DriveInfo, ForegroundInfo, MacroFile, Profile } from "./types";
@@ -26,14 +26,19 @@ import { LAYER_NAMES } from "./types";
 import { compileAssignment, macroFileName, profileMacroFileName } from "./macro-model";
 
 /** Perform a computer-side key action (Stream Deck style): open an
- *  app/file/URL or run a shell command. HID can't do these, so they only
- *  work while the desktop app is running. */
-function runHostAction(a: { kind?: string; target?: string; command?: string }) {
+ *  app/file/URL, run a shell command or play a sound. HID can't do these,
+ *  so they only work while the desktop app is running. Accepts either an
+ *  Assignment ({file}) or a MacroFile ({sound}) shape. */
+function runHostAction(a: { kind?: string; target?: string; command?: string; sound?: string; file?: string }) {
   if (a.kind === "launch" && a.target) {
-    const t = a.target;
-    void (/^https?:\/\//i.test(t) ? openUrl(t) : openPath(t)).catch(() => {});
+    // open_target handles URLs and paths alike (plugin-opener's openPath
+    // is capability-scoped and silently rejects /Applications/*.app)
+    void invoke("open_target", { target: a.target }).catch(() => {});
   } else if (a.kind === "command" && a.command) {
     void invoke("run_command", { command: a.command }).catch(() => {});
+  } else if (a.kind === "sound") {
+    const path = a.sound ?? a.file;
+    if (path) void playSound(path).catch(() => {});
   }
 }
 
@@ -113,7 +118,8 @@ export function ProfilesProvider({ children }: { children: ReactNode }) {
         if (profile) {
           const a = profile.keys[String(e.key)];
           if (!a || a.kind === "none") return;
-          if (a.kind === "launch" || a.kind === "command") return runHostAction(a);
+          if (a.kind === "launch" || a.kind === "command" || a.kind === "sound")
+            return runHostAction(a);
           void send({ t: "play", file: profileMacroFileName(profile.id, e.key) });
           return;
         }

@@ -2,8 +2,9 @@
 // file on the device ("everything is JSON").
 
 import { useEffect, useState } from "react";
-import { FolderOpen, Keyboard, Play } from "lucide-react";
+import { FolderOpen, Keyboard, Play, Volume2 } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
+import { SOUND_EXTENSIONS, playSound } from "../lib/sound";
 import { readTextFile } from "../lib/fs";
 import type { Assignment, MacroFile } from "../lib/types";
 import {
@@ -28,6 +29,7 @@ const KINDS: { value: Assignment["kind"]; label: string }[] = [
   { value: "recorded", label: "Recorded macro (JSON)" },
   { value: "launch", label: "Open app / file / URL" },
   { value: "command", label: "Run terminal command" },
+  { value: "sound", label: "Play a sound" },
 ];
 
 /**
@@ -137,6 +139,7 @@ export function AssignmentEditor({
             else if (kind === "media") onChange({ kind: "media", usage: "play_pause" });
             else if (kind === "launch") onChange({ kind: "launch", target: "" });
             else if (kind === "command") onChange({ kind: "command", command: "" });
+            else if (kind === "sound") onChange({ kind: "sound", file: "" });
             else importMacro();
           }}
         >
@@ -269,6 +272,41 @@ export function AssignmentEditor({
         </Field>
       )}
 
+      {value.kind === "sound" && (
+        <Field label="Sound file">
+          <div className="flex gap-2 items-center">
+            <Input
+              className="flex-1"
+              value={value.file}
+              placeholder="e.g. ~/Sounds/applause.mp3"
+              onChange={(e) => onChange({ ...value, file: e.target.value })}
+            />
+            <Button
+              onClick={async () => {
+                const picked = await open({
+                  filters: [{ name: "Audio", extensions: SOUND_EXTENSIONS }],
+                  title: "Choose a sound file",
+                });
+                if (picked) onChange({ ...value, file: picked as string });
+              }}
+            >
+              <FolderOpen size={14} aria-hidden /> Browse…
+            </Button>
+            <Button
+              disabled={!value.file}
+              title="Preview the sound"
+              onClick={() => void playSound(value.file).catch((e) => setImportError(String(e)))}
+            >
+              <Volume2 size={14} aria-hidden /> Play
+            </Button>
+          </div>
+          <p className="text-fg-faint text-xs mt-1">
+            Plays on this computer's speakers when the key is pressed. Works while the
+            MKYADA app is running (also minimized).
+          </p>
+        </Field>
+      )}
+
       {value.kind === "recorded" && (
         <div className="flex items-center gap-2 text-sm">
           <span className="text-fg inline-flex items-center gap-1"><Play size={13} aria-hidden /> {value.name}</span>
@@ -277,7 +315,7 @@ export function AssignmentEditor({
         </div>
       )}
 
-      {value.kind !== "none" && value.kind !== "launch" && value.kind !== "command" && (
+      {value.kind !== "none" && value.kind !== "launch" && value.kind !== "command" && value.kind !== "sound" && (
         <div className="flex flex-wrap gap-3 border-t border-line pt-3">
           <Field label="Press again while playing">
             <Select

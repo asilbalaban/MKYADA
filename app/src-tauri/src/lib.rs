@@ -69,6 +69,48 @@ fn drive_eject(drive: String) -> Result<(), String> {
     drive::eject(&drive)
 }
 
+/// `open`/`start` don't go through a shell, so expand a leading `~/` for
+/// hand-typed paths.
+fn expand_home(p: &str) -> String {
+    if let Some(rest) = p.strip_prefix("~/") {
+        if let Some(home) = std::env::var_os("HOME") {
+            return format!("{}/{rest}", home.to_string_lossy());
+        }
+    }
+    p.to_string()
+}
+
+/// Open an app, file or URL with the OS default handler. Used by "launch"
+/// key actions — plugin-opener's openPath is scoped out for arbitrary
+/// paths, and the OS launchers handle both URLs and paths anyway.
+#[tauri::command]
+fn open_target(target: String) -> Result<(), String> {
+    let target = expand_home(&target);
+    #[cfg(target_os = "macos")]
+    let r = std::process::Command::new("open").arg(&target).spawn();
+    #[cfg(target_os = "windows")]
+    let r = {
+        use std::os::windows::process::CommandExt;
+        // `start` needs an explicit (empty) window title before the target.
+        std::process::Command::new("cmd")
+            .args(["/C", "start", "", &target])
+            .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
+            .spawn()
+    };
+    #[cfg(target_os = "linux")]
+    let r = std::process::Command::new("xdg-open").arg(&target).spawn();
+    r.map(|_| ()).map_err(|e| e.to_string())
+}
+
+/// Raw bytes of a local file (sound effects for key actions). Returned as a
+/// raw IPC response so the frontend gets an ArrayBuffer, not a JSON array.
+#[tauri::command]
+fn read_local_bytes(path: String) -> Result<tauri::ipc::Response, String> {
+    std::fs::read(expand_home(&path))
+        .map(tauri::ipc::Response::new)
+        .map_err(|e| e.to_string())
+}
+
 /// Run a user-configured shell command (Stream Deck-style key action).
 /// Fire-and-forget: the command is the user's own, output isn't collected.
 #[tauri::command]
@@ -293,6 +335,8 @@ pub fn run() {
             drive_list,
             drive_eject,
             run_command,
+            open_target,
+            read_local_bytes,
             check_update,
             read_local_file,
             write_local_file,
