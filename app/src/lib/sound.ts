@@ -19,6 +19,7 @@ const MIME: Record<string, string> = {
 export const SOUND_EXTENSIONS = Object.keys(MIME);
 
 const cache = new Map<string, string>();
+const playing = new Set<HTMLAudioElement>();
 
 export async function playSound(path: string): Promise<void> {
   let url = cache.get(path);
@@ -29,5 +30,14 @@ export async function playSound(path: string): Promise<void> {
     cache.set(path, url);
   }
   // A fresh Audio per press so rapid presses overlap instead of restarting.
-  await new Audio(url).play();
+  const audio = new Audio(url);
+  playing.add(audio);
+  audio.addEventListener("ended", () => playing.delete(audio));
+  await audio.play();
+}
+
+/** Silence every sound effect that is currently playing (hold-to-stop). */
+export function stopAllSounds(): void {
+  for (const audio of playing) audio.pause();
+  playing.clear();
 }

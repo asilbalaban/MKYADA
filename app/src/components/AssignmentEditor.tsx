@@ -301,8 +301,9 @@ export function AssignmentEditor({
             </Button>
           </div>
           <p className="text-fg-faint text-xs mt-1">
-            Plays on this computer's speakers when the key is pressed. Works while the
-            MKYADA app is running (also minimized).
+            Tap the key to play it on this computer's speakers — sounds can overlap.
+            Hold the key for half a second to stop everything that's playing.
+            Works while the MKYADA app is running (also minimized).
           </p>
         </Field>
       )}

@@ -18,8 +18,11 @@ import {
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { LazyStore } from "@tauri-apps/plugin-store";
-import { playSound } from "./sound";
+import { playSound, stopAllSounds } from "./sound";
 import { useDevice } from "./device";
+
+/** Holding a sound key this long stops all playing sounds instead of playing. */
+const SOUND_HOLD_STOP_MS = 400;
 import { ipc } from "./ipc";
 import type { Assignment, DriveInfo, ForegroundInfo, MacroFile, Profile } from "./types";
 import { LAYER_NAMES } from "./types";
@@ -106,20 +109,50 @@ export function ProfilesProvider({ children }: { children: ReactNode }) {
     };
   }, [port, activeProfile, send]);
 
+  // Sound keys play on RELEASE: a quick tap plays, holding the key past
+  // SOUND_HOLD_STOP_MS stops everything that's playing instead — the escape
+  // hatch for a sound started by accident.
+  const heldKeys = useRef(new Set<string>());
+  const armedSounds = useRef(new Map<string, { timer: number; path: string }>());
+
+  const armSound = useCallback((keyId: string, path: string) => {
+    if (!heldKeys.current.has(keyId)) {
+      // released before we even resolved the assignment — that's a tap
+      void playSound(path).catch(() => {});
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      armedSounds.current.delete(keyId);
+      stopAllSounds();
+    }, SOUND_HOLD_STOP_MS);
+    armedSounds.current.set(keyId, { timer, path });
+  }, []);
+
   // answer device key presses: profile overrides in host mode, and global
-  // launch/command keys (Keys tab) whenever the app is around to run them —
-  // the device stores those as no-op macro files, so standalone they do
-  // nothing and here we perform the real action.
+  // launch/command/sound keys (Keys tab) whenever the app is around to run
+  // them — the device stores those as no-op macro files, so standalone they
+  // do nothing and here we perform the real action.
   useEffect(
     () =>
       onBtn((e) => {
-        if (e.edge !== "down") return;
+        const keyId = `${e.key}:${e.layer ?? "a"}`;
+        if (e.edge === "up") {
+          heldKeys.current.delete(keyId);
+          const armed = armedSounds.current.get(keyId);
+          if (armed) {
+            clearTimeout(armed.timer);
+            armedSounds.current.delete(keyId);
+            void playSound(armed.path).catch(() => {});
+          }
+          return;
+        }
+        heldKeys.current.add(keyId);
         const profile = activeRef.current;
         if (profile) {
           const a = profile.keys[String(e.key)];
           if (!a || a.kind === "none") return;
-          if (a.kind === "launch" || a.kind === "command" || a.kind === "sound")
-            return runHostAction(a);
+          if (a.kind === "sound") return armSound(keyId, a.file);
+          if (a.kind === "launch" || a.kind === "command") return runHostAction(a);
           void send({ t: "play", file: profileMacroFileName(profile.id, e.key) });
           return;
         }
@@ -128,10 +161,14 @@ export function ProfilesProvider({ children }: { children: ReactNode }) {
         const layerIndex = Math.max(0, LAYER_NAMES.indexOf(e.layer ?? "a"));
         void ipc
           .driveRead(d.path, macroFileName(e.key, layerIndex))
-          .then((raw) => runHostAction(JSON.parse(raw) as MacroFile))
+          .then((raw) => {
+            const m = JSON.parse(raw) as MacroFile;
+            if (m.kind === "sound" && m.sound) armSound(keyId, m.sound);
+            else runHostAction(m);
+          })
           .catch(() => {}); // unassigned key or drive hiccup — nothing to do
       }),
-    [onBtn, send],
+    [onBtn, send, armSound],
   );
 
   const setEnabled = useCallback((on: boolean) => {
