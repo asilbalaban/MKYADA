@@ -3,6 +3,7 @@
 //! Only macOS gates the features we use:
 //!   - Input Monitoring (TCC ListenEvent) -> global capture for the recorder
 //!   - Accessibility                      -> enigo local-preview playback
+//!
 //! Device configuration and hardware-HID playback need no permissions on any
 //! OS. Windows/Linux report everything as granted.
 

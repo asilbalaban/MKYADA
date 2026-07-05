@@ -16,6 +16,7 @@ pub struct DriveInfo {
     pub board: String,
 }
 
+#[allow(clippy::vec_init_then_push)] // pushes are cfg-gated per OS
 fn mount_roots() -> Vec<PathBuf> {
     let mut roots = Vec::new();
     #[cfg(target_os = "macos")]
@@ -93,6 +94,18 @@ fn safe_join(drive: &str, rel: &str) -> Result<PathBuf, String> {
     Ok(Path::new(drive).join(rel_path))
 }
 
+/// Error prefix that marks "the drive is write-protected" — callers
+/// (lib.rs drive_write) key off it to restart the keypad and retry. Kept out
+/// of the raw OS message because io::Error text is localized on Windows.
+pub const READONLY_MARKER: &str = "READONLY:";
+
+/// UID of the board that owns a mounted drive (from its boot_out.txt).
+pub fn uid_of(mount: &str) -> Option<String> {
+    parse_boot_out(Path::new(mount))
+        .map(|d| d.uid)
+        .filter(|u| !u.is_empty())
+}
+
 pub fn write_file(drive: &str, rel: &str, content: &str) -> Result<(), String> {
     let path = safe_join(drive, rel)?;
     match write_file_raw(&path, content) {
@@ -100,9 +113,14 @@ pub fn write_file(drive: &str, rel: &str, content: &str) -> Result<(), String> {
             // macOS mounts CIRCUITPY read-only when its FAT dirty bit is set
             // (the keypad reset/unplugged while mounted). A remount runs fsck
             // and restores write access — same effect as unplug/replug.
-            remount_read_write(drive)
-                .map_err(|re| format!("{e} — auto-remount failed: {re}. Unplug and replug the keypad."))?;
-            write_file_raw(&path, content).map_err(|e| e.to_string())
+            #[cfg(target_os = "macos")]
+            if remount_read_write(drive).is_ok() {
+                return write_file_raw(&path, content).map_err(|e| e.to_string());
+            }
+            // No host-side fix (Windows: the firmware holds the filesystem
+            // and reports the drive write-protected) — flag it so the caller
+            // can restart the keypad and retry.
+            Err(format!("{READONLY_MARKER} the keypad's USB drive is read-only ({e})."))
         }
         r => r.map_err(|e| e.to_string()),
     }
@@ -138,11 +156,6 @@ fn remount_read_write(mount: &str) -> Result<(), String> {
     unmounted?;
     diskutil(&["mount", &node])?;
     Ok(())
-}
-
-#[cfg(not(target_os = "macos"))]
-fn remount_read_write(_mount: &str) -> Result<(), String> {
-    Err("remount is only supported on macOS".into())
 }
 
 /// Cleanly unmount the drive so the FAT dirty bit is cleared BEFORE the

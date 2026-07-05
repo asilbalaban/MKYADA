@@ -85,7 +85,7 @@ pub fn candidate_ports() -> Vec<String> {
         .into_iter()
         .filter(|(name, _, _)| {
             name.strip_prefix("/dev/tty.")
-                .map_or(true, |suffix| !cu_names.contains(suffix))
+                .is_none_or(|suffix| !cu_names.contains(suffix))
         })
         .collect();
 
@@ -167,6 +167,8 @@ pub fn connect(app: AppHandle, mgr: &DeviceManager, port: &str) -> Result<(), St
     std::thread::spawn(move || {
         let mut reader = BufReader::new(sp);
         let mut line = Vec::new();
+        #[cfg(windows)]
+        let mut timeouts: u32 = 0;
         loop {
             if stop.load(Ordering::Relaxed) {
                 break;
@@ -179,6 +181,10 @@ pub fn connect(app: AppHandle, mgr: &DeviceManager, port: &str) -> Result<(), St
                     break;
                 }
                 Ok(_) => {
+                    #[cfg(windows)]
+                    {
+                        timeouts = 0;
+                    }
                     if let Ok(v) = serde_json::from_slice::<Value>(&line) {
                         let _ = app.emit("device:msg", &v);
                     }
@@ -193,6 +199,25 @@ pub fn connect(app: AppHandle, mgr: &DeviceManager, port: &str) -> Result<(), St
                         let _ = app.emit("device:disconnected", &port_name);
                         break;
                     }
+                    // Windows has the same quirk with usbser.sys, but no
+                    // /dev node to watch — ask the OS port list (~1×/s at
+                    // the 100 ms read timeout) whether the COM port is gone.
+                    // Without this the app stayed "connected" to a dead
+                    // port forever and never rescanned (issue #3).
+                    #[cfg(windows)]
+                    {
+                        timeouts += 1;
+                        if timeouts >= 10 {
+                            timeouts = 0;
+                            let gone = serialport::available_ports()
+                                .map(|ps| ps.iter().all(|p| p.port_name != port_name))
+                                .unwrap_or(false);
+                            if gone {
+                                let _ = app.emit("device:disconnected", &port_name);
+                                break;
+                            }
+                        }
+                    }
                     continue;
                 }
                 Err(_) => {
@@ -200,6 +225,15 @@ pub fn connect(app: AppHandle, mgr: &DeviceManager, port: &str) -> Result<(), St
                     break;
                 }
             }
+        }
+        // Drop the dead connection from the manager (unless a newer one
+        // already replaced it) so send() fails fast with "not connected"
+        // instead of writing into a void.
+        use tauri::Manager;
+        let mgr = app.state::<DeviceManager>();
+        let mut guard = mgr.0.lock().unwrap();
+        if guard.as_ref().is_some_and(|c| Arc::ptr_eq(&c.stop, &stop)) {
+            guard.take();
         }
     });
     Ok(())
