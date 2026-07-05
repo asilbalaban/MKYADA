@@ -44,9 +44,18 @@ Notes:
 
 ### Permission shows "on" but the app still says DENIED
 
-The app is unsigned, so **every update gets a new code signature** and macOS
-ties permissions to the old one — the toggle you see belongs to the previous
-version and does nothing. Fastest fix, in Terminal:
+Builds before **v0.4.2** weren't properly ad-hoc signed at the `.app` bundle
+level — CI shipped whatever ad-hoc signature the Rust linker slapped on the
+raw executable, which carries a different, unstable identifier on every
+single build and never binds `Info.plist`. macOS ties Accessibility/Input
+Monitoring grants to that identifier, so it could never survive an update —
+toggling the permission on did nothing. From v0.4.2 onward the release build
+explicitly signs the whole bundle (`signingIdentity: "-"` in
+`tauri.conf.json`), which gives it the stable identifier `com.mkyada.app`
+every time, so a grant made once keeps working across updates.
+
+If you're on v0.4.2+ and still see DENIED after granting, reset once and
+re-grant, in Terminal:
 
 ```sh
 tccutil reset Accessibility com.mkyada.app
@@ -63,5 +72,3 @@ Then restart MKYADA and grant both permissions again when it asks. If
 3. restart MKYADA and grant again when it asks.
 
 The app detects this situation and shows the same steps with a red banner.
-This will keep happening after updates until the project ships Apple-notarized
-builds (requires a paid Apple Developer account).
