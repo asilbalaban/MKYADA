@@ -60,6 +60,17 @@ const CASES: [string, Assignment][] = [
   ["command", { kind: "command", command: "echo hi" }],
   ["sound", { kind: "sound", file: "/tmp/ding.mp3" }],
   ["sound with fade hold", { kind: "sound", file: "/tmp/ding.mp3", holdAction: "fade" }],
+  ["webhook GET", { kind: "webhook", url: "https://example.com/hook" }],
+  [
+    "webhook POST with headers and body",
+    {
+      kind: "webhook",
+      url: "https://discord.com/api/webhooks/123/abc",
+      method: "POST",
+      headers: [{ name: "Content-Type", value: "application/json" }],
+      body: '{"content":"key pressed"}',
+    },
+  ],
   ["keystroke with restart", { kind: "keystroke", key: "a", behavior: { on_repress: "restart" } }],
   ["combo with hold_repeat", { kind: "combo", mods: ["ALT"], key: "tab", behavior: { hold_repeat: true } }],
   ["launch with both behaviors", { kind: "launch", target: "/Applications/Notes.app", behavior: { on_repress: "restart", hold_repeat: true } }],
@@ -126,6 +137,7 @@ describe("compiled files are device-playable shapes", () => {
       { kind: "launch", target: "x" },
       { kind: "command", command: "x" },
       { kind: "sound", file: "x" },
+      { kind: "webhook", url: "https://example.com" },
     ] as Assignment[]) {
       expect(compileAssignment(a)!.events).toEqual([]);
     }

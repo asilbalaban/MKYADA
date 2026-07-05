@@ -2,7 +2,8 @@
 // file on the device ("everything is JSON").
 
 import { useEffect, useState } from "react";
-import { ArrowDown, ArrowUp, FolderOpen, Keyboard, Mic, Play, Plus, Trash2, Volume2 } from "lucide-react";
+import { invoke } from "@tauri-apps/api/core";
+import { ArrowDown, ArrowUp, FolderOpen, Keyboard, Mic, Play, Plus, Send, Trash2, Volume2 } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { SOUND_EXTENSIONS, playSound } from "../lib/sound";
 import { readTextFile } from "../lib/fs";
@@ -37,8 +38,11 @@ const KINDS: { value: Assignment["kind"]; label: string }[] = [
   { value: "command", label: "Run terminal command" },
   { value: "sound", label: "Play a sound" },
   { value: "mic", label: "Mute/unmute microphone" },
+  { value: "webhook", label: "Call a webhook (HTTP request)" },
   { value: "sequence", label: "Multi action (sequence)" },
 ];
+
+const HTTP_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"] as const;
 
 /**
  * "Press the key you want" capture control — replaces the 60-option dropdown.
@@ -161,6 +165,7 @@ export function AssignmentEditor({
               else if (kind === "command") onChange({ kind: "command", command: "" });
               else if (kind === "sound") onChange({ kind: "sound", file: "" });
               else if (kind === "mic") onChange({ kind: "mic", mode: "toggle" });
+              else if (kind === "webhook") onChange({ kind: "webhook", url: "" });
               else if (kind === "sequence")
                 onChange({ kind: "sequence", steps: [{ a: { kind: "keystroke", key: "" }, delayMs: 0 }] });
               else importMacro();
@@ -372,6 +377,8 @@ export function AssignmentEditor({
         </Field>
       )}
 
+      {value.kind === "webhook" && <WebhookFields value={value} onChange={onChange} />}
+
       {value.kind === "recorded" && (
         <div className="flex items-center gap-2 text-sm">
           <span className="text-fg inline-flex items-center gap-1"><Play size={13} aria-hidden /> {value.name}</span>
@@ -384,7 +391,7 @@ export function AssignmentEditor({
         <SequenceEditor value={value.steps} onChange={(steps) => onChange({ ...value, steps })} />
       )}
 
-      {!nested && value.kind !== "none" && value.kind !== "launch" && value.kind !== "command" && value.kind !== "sound" && value.kind !== "mic" && (
+      {!nested && value.kind !== "none" && !kindRequiresHost(value.kind) && (
         <div className="flex flex-wrap gap-3 border-t border-line pt-3">
           <Field label="Press again while playing">
             <Select
@@ -449,6 +456,138 @@ export function AssignmentEditor({
 
       {importError && <p className="text-danger text-xs">{importError}</p>}
     </div>
+  );
+}
+
+/** Webhook request editor: method + URL + free-form headers + body — the
+ * whole request is user-defined, curl-style (smart lights, Discord,
+ * Home Assistant…). The desktop app fires it when the key is pressed. */
+function WebhookFields({
+  value,
+  onChange,
+}: {
+  value: Extract<Assignment, { kind: "webhook" }>;
+  onChange: (a: Assignment) => void;
+}) {
+  const [test, setTest] = useState<{ ok: boolean; text: string } | null>(null);
+  const headers = value.headers ?? [];
+
+  function setHeader(i: number, name: string, hv: string) {
+    const next = headers.map((h, k) => (k === i ? { name, value: hv } : h));
+    onChange({ ...value, headers: next });
+  }
+
+  async function sendTest() {
+    setTest(null);
+    try {
+      const status = await invoke<number>("http_request", {
+        url: value.url,
+        method: value.method ?? null,
+        headers: value.headers ?? null,
+        body: value.body ?? null,
+      });
+      setTest({ ok: true, text: `Worked — the server answered HTTP ${status}.` });
+    } catch (e) {
+      setTest({ ok: false, text: String(e) });
+    }
+  }
+
+  return (
+    <>
+      <Field label="Request">
+        <div className="flex gap-2">
+          <Select
+            className="w-28"
+            value={value.method ?? "GET"}
+            onChange={(e) =>
+              onChange({
+                ...value,
+                ...(e.target.value === "GET" ? { method: undefined } : { method: e.target.value }),
+              })
+            }
+          >
+            {HTTP_METHODS.map((m) => (
+              <option key={m} value={m}>
+                {m}
+              </option>
+            ))}
+          </Select>
+          <Input
+            className="flex-1"
+            value={value.url}
+            placeholder="https://discord.com/api/webhooks/… or http://homeassistant.local:8123/api/…"
+            onChange={(e) => onChange({ ...value, url: e.target.value })}
+          />
+        </div>
+        <p className="text-fg-faint text-xs mt-1">
+          Pressing the key sends this request from the computer — turn on a light, post to
+          Discord/Telegram, anything with an HTTP API. Works while the MKYADA app is running
+          (also minimized).
+        </p>
+      </Field>
+
+      <Field label="Headers">
+        <div className="flex flex-col gap-2">
+          {headers.map((h, i) => (
+            <div key={i} className="flex gap-2">
+              <Input
+                className="w-44"
+                value={h.name}
+                placeholder="Content-Type"
+                onChange={(e) => setHeader(i, e.target.value, h.value)}
+              />
+              <Input
+                className="flex-1"
+                value={h.value}
+                placeholder="application/json"
+                onChange={(e) => setHeader(i, h.name, e.target.value)}
+              />
+              <Button
+                variant="danger"
+                title="Remove header"
+                onClick={() =>
+                  onChange({
+                    ...value,
+                    headers: headers.filter((_, k) => k !== i),
+                  })
+                }
+              >
+                <Trash2 size={13} aria-hidden />
+              </Button>
+            </div>
+          ))}
+          <Button
+            className="self-start"
+            onClick={() => onChange({ ...value, headers: [...headers, { name: "", value: "" }] })}
+          >
+            <Plus size={14} aria-hidden /> Add header
+          </Button>
+        </div>
+      </Field>
+
+      <Field label="Body (optional)">
+        <textarea
+          rows={3}
+          value={value.body ?? ""}
+          placeholder='{"content": "Key pressed!"}'
+          onChange={(e) => onChange({ ...value, body: e.target.value || undefined })}
+          className="w-full rounded-md border border-line bg-panel2 px-3 py-2 text-sm font-mono text-fg
+            placeholder:text-fg-faint focus:outline-none focus:border-accent"
+        />
+        <p className="text-fg-faint text-xs mt-1">
+          Sent as-is. For JSON, add a <span className="font-mono">Content-Type: application/json</span> header.
+        </p>
+      </Field>
+
+      <div className="flex items-center gap-2">
+        <Button disabled={!value.url} onClick={() => void sendTest()}>
+          <Send size={14} aria-hidden /> Send test request
+        </Button>
+        {test && (
+          <span className={`text-xs ${test.ok ? "text-success" : "text-danger"}`}>{test.text}</span>
+        )}
+      </div>
+    </>
   );
 }
 

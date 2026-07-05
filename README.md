@@ -26,7 +26,7 @@
 | **Build the keypad** (solder switches, print the case) | [hardware/wiring.md](hardware/wiring.md) · [hardware/case/](hardware/case/) |
 | **Flash the firmware** on a fresh board | [docs/firmware-install.md](docs/firmware-install.md) |
 | **Update the firmware** later | one click in the app (*Devices → Update firmware*) — it ships inside the app |
-| **Put an action on a key** (key, combo, text, media, launch app/file/URL, run a command, play a sound, or a multi-step sequence) | app → *Keys*: click the key, press the shortcut or pick an action, save |
+| **Put an action on a key** (key, combo, text, media, launch app/file/URL, run a command, play a sound, call a webhook, or a multi-step sequence) | app → *Keys*: click the key, press the shortcut or pick an action, save |
 | **Give one key three jobs** (tap / double-press / hold) | app → *Keys*: open the key's variants and assign each gesture |
 | **Record a full mouse + keyboard macro** | app → *Recorder*: F8 to record, assign to a key |
 | **Fine-tune a recording** | app → *Recorder*: edit every event, multi-select rows, draw the path 1:1 on your screen, pin the app above your game |
@@ -54,7 +54,7 @@ Unlike most DIY macro pads that just remap keys, MKYADA plays back **full record
 
 **In the desktop app (Windows / macOS, Linux planned):**
 - **Point-and-click key setup** — click a key, press the shortcut you want (single keys, combos, text snippets, media keys), save. Live key test shows every physical press.
-- **Beyond keystrokes** — put a key to launching an app, file or URL, running a terminal command, or playing a sound (tap to play; hold to stop, fade out, or restart it). Chain several of these into one multi-step sequence with delays in between.
+- **Beyond keystrokes** — put a key to launching an app, file or URL, running a terminal command, playing a sound (tap to play; hold to stop, fade out, or restart it), or calling a webhook — a fully custom HTTP request (method, headers, body) for smart lights, Discord/Telegram messages, Home Assistant and anything else with an HTTP API. Chain several of these into one multi-step sequence with delays in between.
 - **Macro recorder & editor** — record globally with F8, then edit every event: coordinates, delays, durations; straighten or simplify mouse paths; draw the path 1:1 on your real screen to verify click positions; multi-select rows with shift/cmd-click; full undo/redo.
 - **Per-app profiles** — with the app running, key 1 can be *Save As* in Photoshop and an inventory macro in your game. No matching profile? The keypad falls back to its own on-board config within 5 seconds.
 - **Runs in the background** — closing the window sends MKYADA to the system tray instead of quitting, so key actions and profiles keep working; an optional "start at login" setting launches it automatically.

@@ -74,6 +74,7 @@ export interface MacroFile {
     | "command"
     | "sound"
     | "mic"
+    | "webhook"
     | "sequence";
   combo?: { mods: string[]; key: string };
   text?: string;
@@ -88,6 +89,8 @@ export interface MacroFile {
   sound_hold?: SoundHoldAction;
   /** mic kind: what the key does to the system microphone (default "toggle") */
   mic_mode?: MicMode;
+  /** webhook kind: HTTP request performed by the desktop app */
+  webhook?: WebhookRequest;
   /** sequence kind: the editable steps. Pure-HID sequences also compile
    * their steps into `events` (standalone); mixed ones leave `events` empty
    * and the desktop app orchestrates the steps. */
@@ -121,6 +124,18 @@ export const DOUBLE_MS_DEFAULT = 250;
 /** What holding a sound key (~half a second) does. */
 export type SoundHoldAction = "stop" | "fade" | "restart";
 
+/** A webhook key action: one fully user-defined HTTP request, curl-style —
+ * smart lights, Discord/Telegram messages, Home Assistant, anything with an
+ * HTTP API. Performed by the desktop app (HID can't speak HTTP). */
+export interface WebhookRequest {
+  url: string;
+  /** HTTP method; default GET */
+  method?: string;
+  headers?: { name: string; value: string }[];
+  /** raw request body — add a Content-Type header for JSON etc. */
+  body?: string;
+}
+
 /**
  * What a "mic" key does to the system microphone:
  * - toggle: flip mute state on each press
@@ -148,6 +163,7 @@ export type Assignment = (
   | { kind: "command"; command: string }
   | { kind: "sound"; file: string; holdAction?: SoundHoldAction }
   | { kind: "mic"; mode?: MicMode }
+  | ({ kind: "webhook" } & WebhookRequest)
   // Stream Deck-style multi action: run several actions with one press
   | { kind: "sequence"; steps: SequenceStep[] }
 ) & { behavior?: AssignmentBehavior; variants?: AssignmentVariants };

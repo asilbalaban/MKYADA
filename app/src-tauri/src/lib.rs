@@ -340,6 +340,55 @@ fn mic_action(mode: String) -> Result<(), String> {
     vars::mic_action(&mode)
 }
 
+#[derive(serde::Deserialize)]
+struct WebhookHeader {
+    name: String,
+    value: String,
+}
+
+/// Fire a user-defined HTTP request (the "webhook" key action): method, URL,
+/// headers and body are free-form, curl-style — smart lights, Discord,
+/// Home Assistant… Returns the status code; a non-2xx answer is an error so
+/// the UI can tell the user why the light didn't turn on.
+#[tauri::command]
+async fn http_request(
+    url: String,
+    method: Option<String>,
+    headers: Option<Vec<WebhookHeader>>,
+    body: Option<String>,
+) -> Result<u16, String> {
+    let method = reqwest::Method::from_bytes(
+        method
+            .as_deref()
+            .unwrap_or("GET")
+            .trim()
+            .to_uppercase()
+            .as_bytes(),
+    )
+    .map_err(|_| "invalid HTTP method".to_string())?;
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(15))
+        .build()
+        .map_err(|e| e.to_string())?;
+    let mut req = client.request(method, &url);
+    for h in headers.unwrap_or_default() {
+        // an invalid header name/value is reported by send(), not a panic
+        req = req.header(h.name.trim(), h.value);
+    }
+    if let Some(b) = body {
+        if !b.is_empty() {
+            req = req.body(b);
+        }
+    }
+    let resp = req.send().await.map_err(|e| e.to_string())?;
+    let status = resp.status();
+    if status.is_success() {
+        Ok(status.as_u16())
+    } else {
+        Err(format!("the server answered HTTP {status}"))
+    }
+}
+
 #[tauri::command]
 async fn check_update() -> Result<updater::UpdateInfo, String> {
     updater::check(env!("CARGO_PKG_VERSION")).await
@@ -746,6 +795,7 @@ pub fn run() {
             run_command,
             open_target,
             mic_action,
+            http_request,
             read_local_bytes,
             check_update,
             read_local_file,

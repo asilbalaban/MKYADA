@@ -32,6 +32,7 @@ import type {
   Profile,
   SequenceStep,
   SoundHoldAction,
+  WebhookRequest,
 } from "./types";
 import { DOUBLE_MS_DEFAULT, HOLD_MS_DEFAULT, LAYER_NAMES } from "./types";
 import {
@@ -48,9 +49,10 @@ import {
 } from "./macro-model";
 
 /** Perform a computer-side key action (Stream Deck style): open an
- *  app/file/URL, run a shell command or play a sound. HID can't do these,
- *  so they only work while the desktop app is running. Accepts either an
- *  Assignment ({file}) or a MacroFile ({sound}) shape. */
+ *  app/file/URL, run a shell command, play a sound or call a webhook. HID
+ *  can't do these, so they only work while the desktop app is running.
+ *  Accepts either an Assignment ({file}, top-level webhook fields) or a
+ *  MacroFile ({sound}, nested {webhook}) shape. */
 function runHostAction(a: {
   kind?: string;
   target?: string;
@@ -59,6 +61,11 @@ function runHostAction(a: {
   file?: string;
   mic_mode?: string;
   mode?: string;
+  url?: string;
+  method?: string;
+  headers?: { name: string; value: string }[];
+  body?: string;
+  webhook?: WebhookRequest;
 }) {
   if (a.kind === "launch" && a.target) {
     // open_target handles URLs and paths alike (plugin-opener's openPath
@@ -74,6 +81,16 @@ function runHostAction(a: {
     // at the down/up dispatch sites instead — nothing to do on a single fire.
     const mode = a.mic_mode ?? a.mode ?? "toggle";
     if (mode !== "push_to_talk") void invoke("mic_action", { mode }).catch(() => {});
+  } else if (a.kind === "webhook") {
+    const w = a.webhook ?? (a.url ? { url: a.url, method: a.method, headers: a.headers, body: a.body } : null);
+    if (w?.url) {
+      void invoke("http_request", {
+        url: w.url,
+        method: w.method ?? null,
+        headers: w.headers ?? null,
+        body: w.body ?? null,
+      }).catch((e) => console.warn("webhook failed:", e));
+    }
   }
 }
 
@@ -263,7 +280,12 @@ export function ProfilesProvider({ children }: { children: ReactNode }) {
             if (!node) return;
             if (node.kind === "sound" && node.sound) {
               void playSound(node.sound).catch(() => {});
-            } else if (node.kind === "launch" || node.kind === "command" || node.kind === "mic") {
+            } else if (
+              node.kind === "launch" ||
+              node.kind === "command" ||
+              node.kind === "mic" ||
+              node.kind === "webhook"
+            ) {
               runHostAction(node);
             } else if (node.kind === "sequence" && !node.events?.length && node.seq?.length) {
               void runSequence(`${m.key}:${m.layer}`, node.seq, file);
@@ -360,7 +382,12 @@ export function ProfilesProvider({ children }: { children: ReactNode }) {
               if (!chosen || chosen.kind === "none") return;
               if (chosen.kind === "sound") {
                 void playSound(chosen.file).catch(() => {});
-              } else if (chosen.kind === "launch" || chosen.kind === "command" || chosen.kind === "mic") {
+              } else if (
+                chosen.kind === "launch" ||
+                chosen.kind === "command" ||
+                chosen.kind === "mic" ||
+                chosen.kind === "webhook"
+              ) {
                 runHostAction(chosen);
               } else if (chosen.kind === "sequence" && !sequenceIsPureHid(chosen.steps)) {
                 void runSequence(keyId, chosen.steps, mainFile);
@@ -372,7 +399,9 @@ export function ProfilesProvider({ children }: { children: ReactNode }) {
             });
           }
           if (a.kind === "sound") return armSound(keyId, a.file, a.holdAction);
-          if (a.kind === "launch" || a.kind === "command") return runHostAction(a);
+          if (a.kind === "launch" || a.kind === "command" || a.kind === "webhook") {
+            return runHostAction(a);
+          }
           if (a.kind === "mic") {
             if (a.mode === "push_to_talk") {
               micDownKeys.current.add(keyId);

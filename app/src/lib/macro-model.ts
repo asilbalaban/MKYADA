@@ -2,7 +2,15 @@
 // parsing them back for editing. "Everything is JSON": every assignment —
 // even a plain Ctrl+A — becomes a macro file on the device.
 
-import type { Assignment, DeviceConfig, MacroEvent, MacroFile, MicMode, SequenceStep } from "./types";
+import type {
+  Assignment,
+  DeviceConfig,
+  MacroEvent,
+  MacroFile,
+  MicMode,
+  SequenceStep,
+  WebhookRequest,
+} from "./types";
 import { LAYER_NAMES } from "./types";
 import { charToKeystroke, displayKey } from "./layout";
 
@@ -111,10 +119,16 @@ export function stepIsHid(step: SequenceStep): boolean {
 
 /** True for kinds that have no HID equivalent and are performed by the
  * desktop app itself (open app/file/URL, run a command, play a sound,
- * toggle the system mic) — these do nothing on a keypad plugged into a
- * computer without the MKYADA app installed and running. */
+ * toggle the system mic, call a webhook) — these do nothing on a keypad
+ * plugged into a computer without the MKYADA app installed and running. */
 export function kindRequiresHost(kind: Assignment["kind"]): boolean {
-  return kind === "launch" || kind === "command" || kind === "sound" || kind === "mic";
+  return (
+    kind === "launch" ||
+    kind === "command" ||
+    kind === "sound" ||
+    kind === "mic" ||
+    kind === "webhook"
+  );
 }
 
 export function sequenceIsPureHid(steps: SequenceStep[]): boolean {
@@ -240,6 +254,8 @@ export function assignmentComplete(a: Assignment): boolean {
       return a.file.length > 0;
     case "mic":
       return true;
+    case "webhook":
+      return a.url.length > 0;
     case "sequence":
       return (
         a.steps.length > 0 &&
@@ -307,6 +323,21 @@ export function compileAssignment(a: Assignment, name?: string): MacroFile | nul
           ...(a.mode && a.mode !== "toggle" ? { mic_mode: a.mode } : {}),
           events: [],
         };
+      case "webhook": {
+        const req: WebhookRequest = {
+          url: a.url,
+          ...(a.method && a.method !== "GET" ? { method: a.method } : {}),
+          ...(a.headers?.length ? { headers: a.headers } : {}),
+          ...(a.body ? { body: a.body } : {}),
+        };
+        return {
+          ...base,
+          name: name ?? `Webhook ${a.url.slice(0, 40)}`,
+          kind: "webhook",
+          webhook: req,
+          events: [],
+        };
+      }
       case "sequence": {
         const pure = sequenceIsPureHid(a.steps);
         const events: MacroEvent[] = [];
@@ -413,6 +444,15 @@ function parseAssignmentBase(m: MacroFile): Assignment {
       };
     case "mic":
       return { kind: "mic", ...(m.mic_mode ? { mode: m.mic_mode } : {}), ...behavior };
+    case "webhook":
+      return {
+        kind: "webhook",
+        url: m.webhook?.url ?? "",
+        ...(m.webhook?.method ? { method: m.webhook.method } : {}),
+        ...(m.webhook?.headers?.length ? { headers: m.webhook.headers } : {}),
+        ...(m.webhook?.body ? { body: m.webhook.body } : {}),
+        ...behavior,
+      };
     case "sequence":
       return { kind: "sequence", steps: m.seq ?? [], ...behavior };
     default:
@@ -454,6 +494,10 @@ export function describeAssignment(a: Assignment): string {
     }
     case "mic":
       return `🎤 ${MIC_MODE_LABELS[a.mode ?? "toggle"]}`;
+    case "webhook": {
+      const host = a.url.replace(/^[a-z]+:\/\//i, "").split(/[/?#]/)[0];
+      return `⇄ ${a.method ?? "GET"} ${host.length > 18 ? host.slice(0, 18) + "…" : host}`;
+    }
     case "sequence":
       return `⧉ ${a.steps.length} step${a.steps.length === 1 ? "" : "s"}`;
   }

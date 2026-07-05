@@ -31,6 +31,13 @@ export const CANONICAL: Record<string, Assignment> = {
   launch_url: { kind: "launch", target: "https://example.com" },
   command_echo: { kind: "command", command: "echo hi" },
   sound_ding: { kind: "sound", file: "sounds/ding.mp3" },
+  webhook_post: {
+    kind: "webhook",
+    url: "https://example.com/hook",
+    method: "POST",
+    headers: [{ name: "Content-Type", value: "application/json" }],
+    body: '{"on":true}',
+  },
   keystroke_restart_hold: {
     kind: "keystroke",
     key: "a",
