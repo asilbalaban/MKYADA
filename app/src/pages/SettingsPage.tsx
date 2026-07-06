@@ -3,6 +3,7 @@ import { getVersion } from "@tauri-apps/api/app";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { HardDrive, MicOff, Monitor, Moon, Pin, Power, Rocket, Sun } from "lucide-react";
 import { ipc } from "../lib/ipc";
+import { keysCache } from "../lib/keys-cache";
 import { useDevice } from "../lib/device";
 import type { UpdateInfo } from "../lib/types";
 import {
@@ -161,6 +162,8 @@ function KeypadCard() {
         "config.json",
         JSON.stringify({ ...cfg, usb_drive: !hide }, null, 2),
       );
+      // the drive identity flips (mount ↔ serial) — forget every snapshot
+      keysCache.invalidate();
       // Same restart dance as the Devices page: clean unmount, reset, drop
       // the dead connection so auto-connect reattaches after the reboot.
       await ipc.driveEject(drive.path).catch(() => {});

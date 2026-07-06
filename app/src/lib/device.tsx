@@ -11,6 +11,7 @@ import {
   useState,
 } from "react";
 import { ipc, onDeviceDisconnected, onDeviceMsg } from "./ipc";
+import { keysCache } from "./keys-cache";
 import { rememberDevice, syncNameWithDevice } from "./devnames";
 import type { BtnEvent, DeviceInfo, DriveInfo, Hello } from "./types";
 
@@ -188,6 +189,9 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
       for (const f of files) {
         await ipc.driveWrite(drive.path, f.path, f.content);
       }
+      // config rewrites can change key count / layers — drop the Keys
+      // page's cached snapshot so it re-reads (issue #14)
+      keysCache.invalidate(drive.path);
       // Best-effort: if the write hit a read-only drive, the backend already
       // restarted the keypad (which boots with the fresh files) and the
       // serial port is momentarily down — that's not a failure.

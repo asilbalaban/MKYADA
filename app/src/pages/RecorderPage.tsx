@@ -26,7 +26,8 @@ import { ipc } from "../lib/ipc";
 import { useDevice } from "../lib/device";
 import type { MacroEvent, MacroFile } from "../lib/types";
 import { captureScreen, serializeForDevice, thinForDevice } from "../lib/recorder-model";
-import { macroFileName, migrateMacro } from "../lib/macro-model";
+import { macroFileName, migrateMacro, parseAssignment } from "../lib/macro-model";
+import { keysCache, slotKey } from "../lib/keys-cache";
 import { useHistory } from "../lib/history";
 import { takeRecorderEdit } from "../lib/recorder-handoff";
 import { Badge, Input, Select } from "../components/ui";
@@ -234,6 +235,8 @@ export function RecorderPage({ active = true }: { active?: boolean }) {
       // Best-effort: a read-only drive makes the backend restart the keypad
       // (it reboots with the new file); the port is briefly down then.
       await send({ t: "reload" }).catch(() => {});
+      // the Keys page remembers assignments (issue #14) — keep it in sync
+      keysCache.setAssignment(drive.path, slotKey(assignKey, assignLayer), parseAssignment(macro));
       setStatus(`Assigned to ${file}`);
       toast.success(
         `Macro saved to key ${assignKey}`,

@@ -2,7 +2,7 @@
 // save. Every assignment is compiled to a macro JSON on the device drive.
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Play, SquarePen, Usb } from "lucide-react";
+import { Play, RefreshCw, SquarePen, Usb } from "lucide-react";
 import { useDevice } from "../lib/device";
 import { useHostMode } from "../lib/focus";
 import { useNav } from "../lib/nav";
@@ -21,6 +21,7 @@ import {
   parseDeviceMacro,
 } from "../lib/macro-model";
 import { serializeForDevice } from "../lib/recorder-model";
+import { keysCache, slotKey } from "../lib/keys-cache";
 import { stashRecorderEdit } from "../lib/recorder-handoff";
 import { undoRedoFromEvent, useHistory } from "../lib/history";
 import { Button, Card, EmptyState, Spinner } from "../components/ui";
@@ -61,8 +62,6 @@ export function KeysPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const slotKey = (keyNo: number, layerIdx: number) => `${keyNo}:${layerIdx}`;
-
   // A reconnect or drive change can start a fresh reload while an old one is
   // still streaming reads — the stale one must stop touching state.
   const reloadSeq = useRef(0);
@@ -71,9 +70,22 @@ export function KeysPage() {
   // tells us which slots exist (no blind reads on empty slots), then each
   // macro streams in on its own: the keypad renders immediately and keys
   // unlock one by one instead of the page blocking on every read (issue #12).
-  const reload = useCallback(async () => {
+  // Every macro reaches the keypad through this app, so a snapshot taken
+  // once stays valid across tab switches — entering the page again reuses it
+  // instead of re-streaming everything (issue #14).
+  const reload = useCallback(async (force = false) => {
     if (!drive) return;
     const seq = ++reloadSeq.current;
+    if (!force) {
+      const cached = keysCache.get(drive.path);
+      if (cached) {
+        setCfg(cached.config);
+        setAssignments(new Map(cached.assignments));
+        setPending(new Set());
+        setLoadTotal(0);
+        return;
+      }
+    }
     let config = defaultConfig();
     try {
       config = { ...config, ...JSON.parse(await ipc.driveRead(drive.path, "config.json")) };
@@ -96,6 +108,7 @@ export function KeysPage() {
     setAssignments(new Map());
     setPending(new Set(slots.map((s) => slotKey(s.k, s.l))));
     setLoadTotal(slots.length);
+    const snapshot = new Map<string, Assignment>();
     for (const s of slots) {
       let a: Assignment | undefined;
       try {
@@ -105,13 +118,17 @@ export function KeysPage() {
       }
       if (seq !== reloadSeq.current) return;
       const loaded = a;
-      if (loaded) setAssignments((prev) => new Map(prev).set(slotKey(s.k, s.l), loaded));
+      if (loaded) {
+        snapshot.set(slotKey(s.k, s.l), loaded);
+        setAssignments((prev) => new Map(prev).set(slotKey(s.k, s.l), loaded));
+      }
       setPending((prev) => {
         const next = new Set(prev);
         next.delete(slotKey(s.k, s.l));
         return next;
       });
     }
+    keysCache.set(drive.path, { config, assignments: snapshot });
   }, [drive]);
 
   useEffect(() => {
@@ -219,6 +236,11 @@ export function KeysPage() {
     if (macro && draft.kind !== "none") next.set(slotKey(selected, layer), draft);
     else next.delete(slotKey(selected, layer));
     setAssignments(next);
+    keysCache.setAssignment(
+      drive.path,
+      slotKey(selected, layer),
+      macro && draft.kind !== "none" ? draft : null,
+    );
     setDraft(null);
     if (macro) {
       toast.success(`Key ${selected} saved to the keypad`, "Press the key (or ▶ Test) to try it.");
@@ -244,9 +266,9 @@ export function KeysPage() {
       <Card
         title="Keypad"
         actions={
-          layers > 1 && (
-            <div className="flex gap-1">
-              {Array.from({ length: layers }, (_, i) => (
+          <div className="flex gap-1 items-center">
+            {layers > 1 &&
+              Array.from({ length: layers }, (_, i) => (
                 <Button
                   key={i}
                   variant={layer === i ? "primary" : "default"}
@@ -259,8 +281,16 @@ export function KeysPage() {
                   {layerLabel(i)}
                 </Button>
               ))}
-            </div>
-          )
+            <Button
+              title="Re-read every assignment from the keypad (normally not needed — the app remembers them)"
+              onClick={() => {
+                keysCache.invalidate(drive.path);
+                void reload(true);
+              }}
+            >
+              <RefreshCw size={14} aria-hidden />
+            </Button>
+          </div>
         }
       >
         <Keypad
