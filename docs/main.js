@@ -64,14 +64,75 @@
     [...c.children].forEach((ch, i) => ch.style.setProperty("--i", i));
   });
 
-  /* ---------- action marquee: duplicate the cards for a seamless loop ---------- */
-  document.querySelectorAll("[data-marquee] .act-track").forEach((track) => {
+  /* ---------- action marquee: endless loop, gentle auto-drift, user scroll & drag ---------- */
+  document.querySelectorAll("[data-marquee]").forEach((mq) => {
+    const track = mq.querySelector(".act-track");
+    if (!track) return;
+    /* duplicate the cards for a seamless loop */
     [...track.children].forEach((node) => {
       const clone = node.cloneNode(true);
       clone.setAttribute("aria-hidden", "true");
       clone.setAttribute("data-clone", "");
       track.appendChild(clone);
     });
+    if (REDUCED) return; // clones hidden by CSS; plain hand-scrolled row
+
+    let half = 0;
+    const measure = () => { half = track.scrollWidth / 2; };
+    addEventListener("resize", measure, { passive: true });
+    measure();
+
+    let visible = false, hover = false, dragging = false, auto = true, idle = 0;
+    const rest = () => { auto = false; clearTimeout(idle); idle = setTimeout(() => { auto = true; }, 3500); };
+
+    new IntersectionObserver((es) => {
+      es.forEach((e) => (visible = e.isIntersecting));
+    }, { threshold: 0 }).observe(mq);
+
+    if (FINE) {
+      mq.addEventListener("mouseenter", () => { hover = true; });
+      mq.addEventListener("mouseleave", () => { hover = false; });
+    }
+    mq.addEventListener("wheel", rest, { passive: true });
+    mq.addEventListener("touchstart", rest, { passive: true });
+
+    /* drag to scroll (mouse; touch already scrolls natively) */
+    let startX = 0, base = 0;
+    mq.addEventListener("pointerdown", (e) => {
+      if (e.pointerType !== "mouse" || e.button !== 0) return;
+      dragging = true; startX = e.clientX; base = mq.scrollLeft;
+      mq.classList.add("dragging");
+      rest();
+    });
+    addEventListener("pointermove", (e) => {
+      if (dragging) mq.scrollLeft = base - (e.clientX - startX);
+    });
+    const drop = () => {
+      if (!dragging) return;
+      dragging = false; mq.classList.remove("dragging");
+      rest();
+    };
+    addEventListener("pointerup", drop);
+    addEventListener("pointercancel", drop);
+
+    /* drift + seamless wrap-around */
+    let pos = 0, last = 0;
+    const step = (now) => {
+      const dt = Math.min(48, now - (last || now));
+      last = now;
+      if (visible && !dragging) {
+        if (auto && !hover) {
+          pos += dt * 0.055; // ~55px/s, the old marquee pace
+          if (half && pos >= half) pos -= half;
+          mq.scrollLeft = pos;
+        } else {
+          pos = mq.scrollLeft;
+          if (half && pos >= half) { pos -= half; mq.scrollLeft = pos; }
+        }
+      }
+      requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
   });
 
   /* ---------- screenshot slider: arrows, dots, autoplay while visible ---------- */
@@ -124,14 +185,14 @@
     }
   }
 
-  /* ---------- growing keypad: show the side rail only while in view ---------- */
-  const growRail = document.querySelector(".grow-rail");
-  const growSec = document.getElementById("grow");
-  if (growRail && growSec) {
+  /* ---------- side rails (growing keypad, layers show): visible only while their section is on screen ---------- */
+  document.querySelectorAll(".grow-rail, .show-rail").forEach((rail) => {
+    const sec = rail.closest("section");
+    if (!sec) return;
     new IntersectionObserver((es) => {
-      es.forEach((e) => growRail.classList.toggle("on", e.isIntersecting));
-    }, { threshold: 0 }).observe(growSec);
-  }
+      es.forEach((e) => rail.classList.toggle("on", e.isIntersecting));
+    }, { threshold: 0 }).observe(sec);
+  });
 
   /* ---------- scroll scrub engine: writes --p (0..1) on [data-scrub] ---------- */
   const scrubs = [];

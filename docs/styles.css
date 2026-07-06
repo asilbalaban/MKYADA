@@ -188,10 +188,14 @@ h2 { font-size: clamp(30px, 4.6vw, 48px); font-weight: 800; letter-spacing: -.02
 /* subtle scroll parallax on split art */
 .float-art .art .tilt { transform: translateY(calc((.5 - var(--p, .5)) * 56px)); will-change: transform; }
 
-/* ---------- word-by-word heading reveal ---------- */
-.w { display: inline-block; overflow: hidden; vertical-align: bottom; padding-bottom: .1em; margin-bottom: -.1em; }
+/* ---------- word-by-word heading reveal ----------
+   generous padding (cancelled out by negative margins) keeps ascenders,
+   descenders and overhanging glyphs clear of both the overflow mask
+   and the background-clip:text paint box — letters are never cropped */
+.w { display: inline-block; overflow: hidden; vertical-align: bottom; padding: .18em .12em .28em; margin: -.18em -.12em -.28em; }
 .wi {
-  display: inline-block; transform: translateY(120%);
+  display: inline-block; padding: .18em .12em .28em; margin: -.18em -.12em -.28em;
+  transform: translateY(150%);
   transition: transform .85s var(--ease);
   transition-delay: calc(var(--i, 0) * 55ms);
   will-change: transform;
@@ -416,11 +420,17 @@ html.js .in [data-stagger] > *, html.js [data-stagger].in > * { opacity: 1; tran
 .show-track[data-step="0"] { --lc: #0284c7; }
 .show-track[data-step="1"] { --lc: #7c3aed; }
 .show-track[data-step="2"] { --lc: #db2777; }
-.dots { display: flex; gap: 8px; margin-top: 28px; }
-.dots i { width: 24px; height: 4px; border-radius: 99px; background: rgba(0,0,0,.12); transition: background .4s, width .4s; }
-.show-track[data-step="0"] .dots i:nth-child(1),
-.show-track[data-step="1"] .dots i:nth-child(2),
-.show-track[data-step="2"] .dots i:nth-child(3) { background: var(--lc); width: 40px; }
+/* vertical nav dots stuck to the right, same treatment as the growing-keypad rail */
+.show-rail {
+  position: fixed; right: 18px; top: 50%; transform: translateY(-50%);
+  display: flex; flex-direction: column; gap: 8px; z-index: 45;
+  opacity: 0; pointer-events: none; transition: opacity .4s ease;
+}
+.show-rail.on { opacity: 1; }
+.show-rail i { width: 6px; height: 6px; border-radius: 50%; background: rgba(0,0,0,.22); transition: background .35s, transform .35s; }
+.show-track[data-step="0"] .show-rail i:nth-child(1),
+.show-track[data-step="1"] .show-rail i:nth-child(2),
+.show-track[data-step="2"] .show-rail i:nth-child(3) { background: var(--lc, var(--accent-deep)); transform: scale(1.5); }
 
 /* show 1: layers — flipping mini keypad */
 .show-art { position: relative; display: flex; justify-content: center; align-items: center; min-height: 460px; }
@@ -513,7 +523,7 @@ footer ul { list-style: none; } footer li { margin: 7px 0; } footer a { color: v
   .show-grid { grid-template-columns: 1fr; gap: 44px; }
   .show-steps { min-height: 0; margin-top: 4px; }
   .show-step { position: static; opacity: 1; transform: none; margin-top: 24px; pointer-events: auto; }
-  .dots { display: none; }
+  .show-rail { display: none; }
   .show-art { min-height: 0; }
   .show-bg { display: none; }
   .mini-pad { grid-template-columns: repeat(3, 68px); }
@@ -545,7 +555,7 @@ footer ul { list-style: none; } footer li { margin: 7px 0; } footer a { color: v
   .show-stage { position: static; height: auto; padding: 100px 0; overflow: visible; }
   .show-steps { min-height: 0; }
   .show-step { position: static; opacity: 1; transform: none; margin-top: 24px; }
-  .dots { display: none; }
+  .show-rail { display: none; }
   .show-art { min-height: 0; }
   .kl[data-l="0"] { opacity: 1; transform: none; }
   .build-track .step { opacity: 1; transform: none; }
@@ -557,23 +567,23 @@ footer ul { list-style: none; } footer li { margin: 7px 0; } footer a { color: v
    Feature catalog additions (actions, key logic, webhook, mic)
    ============================================================ */
 
-/* full action catalog: infinite auto-scrolling marquee */
+/* full action catalog: endless card row — drifts on its own, scroll or drag to browse */
 .act-marquee {
-  margin-top: 48px; padding: 30px 0; overflow: hidden;
+  margin-top: 48px; padding: 30px 0; overflow-x: auto; overflow-y: hidden;
+  cursor: grab; user-select: none; -webkit-user-select: none;
+  scrollbar-width: none;
   -webkit-mask-image: linear-gradient(90deg, transparent, #000 7%, #000 93%, transparent);
   mask-image: linear-gradient(90deg, transparent, #000 7%, #000 93%, transparent);
 }
-.act-track {
-  display: flex; width: max-content;
-  animation: act-scroll 60s linear infinite;
-}
-.act-marquee:hover .act-track { animation-play-state: paused; }
+.act-marquee::-webkit-scrollbar { display: none; }
+.act-marquee.dragging { cursor: grabbing; }
+.act-marquee.dragging .card { pointer-events: none; }
+.act-track { display: flex; width: max-content; }
 .act-track .card {
   flex: 0 0 340px; width: 340px; margin-right: 20px; margin-top: 0;
   white-space: normal;
 }
 .act-track .card h3 { display: flex; align-items: center; gap: 8px; }
-@keyframes act-scroll { to { transform: translateX(-50%); } }
 
 /* ---------- key logic: tap / double / hold chips ---------- */
 .gest {
@@ -769,9 +779,8 @@ footer ul { list-style: none; } footer li { margin: 7px 0; } footer a { color: v
   .act-track .card { flex-basis: 280px; width: 280px; }
 }
 
-/* marquee: no auto-scroll when motion is reduced — hand it to the user */
+/* marquee: no auto-drift when motion is reduced — plain hand-scrolled row */
 @media (prefers-reduced-motion: reduce) {
-  .act-marquee { overflow-x: auto; -webkit-mask-image: none; mask-image: none; }
-  .act-track { animation: none; }
+  .act-marquee { -webkit-mask-image: none; mask-image: none; }
   .act-track [data-clone] { display: none; }
 }
