@@ -6,15 +6,19 @@ import { useEffect, useRef, useState } from "react";
 import { useDevice } from "../lib/device";
 import type { Assignment, DeviceConfig } from "../lib/types";
 import { assignmentRequiresHost, describeAssignment } from "../lib/macro-model";
+import { Spinner } from "./ui";
 
 interface Props {
   config: DeviceConfig;
   selected: number | null;
   onSelect: (keyNo: number) => void;
   assignments?: Map<number, Assignment>;
+  /** Keys whose saved macro is still being read from the device — they show
+   * a spinner and stay unselectable until loaded. */
+  loading?: Set<number>;
 }
 
-export function Keypad({ config, selected, onSelect, assignments }: Props) {
+export function Keypad({ config, selected, onSelect, assignments, loading }: Props) {
   const { onBtn } = useDevice();
   const [pressed, setPressed] = useState<Set<number>>(new Set());
   const gridRef = useRef<HTMLDivElement>(null);
@@ -68,13 +72,16 @@ export function Keypad({ config, selected, onSelect, assignments }: Props) {
         const isLayer = config.layer_key === n;
         const isPressed = pressed.has(n);
         const isSelected = selected === n;
+        const isLoading = !isLayer && (loading?.has(n) ?? false);
         const a = assignments?.get(n);
         const needsHost = !isLayer && a && assignmentRequiresHost(a);
         const summary = isLayer
           ? "layer switch"
-          : a
-            ? describeAssignment(a) + (needsHost ? " — needs the MKYADA app running" : "")
-            : "not assigned";
+          : isLoading
+            ? "loading…"
+            : a
+              ? describeAssignment(a) + (needsHost ? " — needs the MKYADA app running" : "")
+              : "not assigned";
         return (
           <button
             key={n}
@@ -84,12 +91,21 @@ export function Keypad({ config, selected, onSelect, assignments }: Props) {
             onKeyDown={(e) => onKeyDown(e, n)}
             aria-label={`Key ${n} — ${summary}`}
             aria-pressed={isSelected}
+            aria-busy={isLoading}
             className={`relative aspect-square rounded-xl border-2 flex flex-col items-center justify-center gap-1 transition-all
               ${isPressed ? "border-accent bg-accent/20 scale-95" : isSelected ? "border-accent bg-panel2" : "border-line bg-panel2 hover:border-fg-faint"}`}
           >
             <span className="text-2xl font-bold text-fg">{n}</span>
             <span className="text-[10px] text-fg-muted px-1 text-center leading-tight">
-              {isLayer ? "LAYER" : a ? describeAssignment(a) : ""}
+              {isLayer ? (
+                "LAYER"
+              ) : isLoading ? (
+                <Spinner size={12} className="text-fg-faint" />
+              ) : a ? (
+                describeAssignment(a)
+              ) : (
+                ""
+              )}
             </span>
             {isLayer && (
               <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-layer" />

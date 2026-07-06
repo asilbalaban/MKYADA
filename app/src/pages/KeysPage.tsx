@@ -1,7 +1,7 @@
 // Main configurator: pick a key on the visual keypad, choose what it does,
 // save. Every assignment is compiled to a macro JSON on the device drive.
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Play, SquarePen, Usb } from "lucide-react";
 import { useDevice } from "../lib/device";
 import { useHostMode } from "../lib/focus";
@@ -42,6 +42,10 @@ export function KeysPage() {
   const setDraft = draftHistory.reset;
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState("");
+  // Slots whose macro is still streaming in from the keypad (issue #12) —
+  // their keys show a spinner and unlock one by one as reads complete.
+  const [pending, setPending] = useState<Set<string>>(new Set());
+  const [loadTotal, setLoadTotal] = useState(0);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -59,30 +63,55 @@ export function KeysPage() {
 
   const slotKey = (keyNo: number, layerIdx: number) => `${keyNo}:${layerIdx}`;
 
-  // Load config + existing assignments from the drive.
+  // A reconnect or drive change can start a fresh reload while an old one is
+  // still streaming reads — the stale one must stop touching state.
+  const reloadSeq = useRef(0);
+
+  // Load config + existing assignments from the drive. One directory listing
+  // tells us which slots exist (no blind reads on empty slots), then each
+  // macro streams in on its own: the keypad renders immediately and keys
+  // unlock one by one instead of the page blocking on every read (issue #12).
   const reload = useCallback(async () => {
     if (!drive) return;
+    const seq = ++reloadSeq.current;
     let config = defaultConfig();
     try {
       config = { ...config, ...JSON.parse(await ipc.driveRead(drive.path, "config.json")) };
     } catch {
       // no config yet — defaults are fine
     }
+    if (seq !== reloadSeq.current) return;
     setCfg(config);
-    const found = new Map<string, Assignment>();
     const layers = config.layer_key ? config.layer_count : 1;
-    for (let k = 1; k <= config.key_count; k++) {
-      if (config.layer_key === k) continue;
-      for (let l = 0; l < layers; l++) {
-        try {
-          const raw = await ipc.driveRead(drive.path, macroFileName(k, l));
-          found.set(slotKey(k, l), parseAssignment(parseDeviceMacro(raw)));
-        } catch {
-          // unassigned slot
-        }
+    const existing = new Set(await ipc.driveList(drive.path, "macros").catch(() => [] as string[]));
+    if (seq !== reloadSeq.current) return;
+    const slots: { k: number; l: number; file: string }[] = [];
+    for (let l = 0; l < layers; l++) {
+      for (let k = 1; k <= config.key_count; k++) {
+        if (config.layer_key === k) continue;
+        const file = macroFileName(k, l);
+        if (existing.has(file.split("/").pop()!)) slots.push({ k, l, file });
       }
     }
-    setAssignments(found);
+    setAssignments(new Map());
+    setPending(new Set(slots.map((s) => slotKey(s.k, s.l))));
+    setLoadTotal(slots.length);
+    for (const s of slots) {
+      let a: Assignment | undefined;
+      try {
+        a = parseAssignment(parseDeviceMacro(await ipc.driveRead(drive.path, s.file)));
+      } catch {
+        // unreadable slot — treat as unassigned
+      }
+      if (seq !== reloadSeq.current) return;
+      const loaded = a;
+      if (loaded) setAssignments((prev) => new Map(prev).set(slotKey(s.k, s.l), loaded));
+      setPending((prev) => {
+        const next = new Set(prev);
+        next.delete(slotKey(s.k, s.l));
+        return next;
+      });
+    }
   }, [drive]);
 
   useEffect(() => {
@@ -203,9 +232,11 @@ export function KeysPage() {
   }
 
   const visibleAssignments = new Map<number, Assignment>();
+  const pendingKeys = new Set<number>();
   for (let k = 1; k <= cfg.key_count; k++) {
     const a = assignments.get(slotKey(k, layer));
     if (a) visibleAssignments.set(k, a);
+    if (pending.has(slotKey(k, layer))) pendingKeys.add(k);
   }
 
   return (
@@ -237,11 +268,19 @@ export function KeysPage() {
           selected={selected}
           onSelect={(n) => {
             if (cfg.layer_key === n) return;
+            if (pendingKeys.has(n)) return; // still streaming in — not editable yet
             setSelected(n);
             setDraft(null);
           }}
           assignments={visibleAssignments}
+          loading={pendingKeys}
         />
+        {pending.size > 0 && (
+          <p className="text-xs text-fg-muted mt-3 flex items-center gap-1.5">
+            <Spinner size={12} />
+            Loading saved macros from the keypad… {loadTotal - pending.size}/{loadTotal}
+          </p>
+        )}
         <p className="text-xs text-fg-faint mt-3">
           Press physical keys to test wiring — they light up live.
           {cfg.layer_key && ` Key ${cfg.layer_key} is the layer switch.`}
