@@ -702,27 +702,28 @@ footer ul { list-style: none; } footer li { margin: 7px 0; } footer a { color: v
 .cmp-note h3 { font-size: 23px; letter-spacing: -.02em; margin-bottom: 12px; }
 .cmp-note p { font-size: 16px; color: var(--muted); max-width: 620px; margin: 0 auto; }
 
-/* ---------- growing keypad (scroll-driven 4 -> 20 keys, full-bleed) ---------- */
-.grow-track { height: 300vh; position: relative; }
-.grow-stage { position: sticky; top: 0; height: 100svh; overflow: hidden; }
-.grow-head { position: absolute; top: 6svh; left: 0; right: 0; z-index: 3; text-align: center; padding: 0 24px; }
-.grow-media { position: absolute; inset: 0; }
+/* ---------- growing keypad (scroll-driven 4 -> 10 keys; image on top, text below) ---------- */
+.grow-track { height: 260vh; position: relative; }
+.grow-stage {
+  position: sticky; top: 0; height: 100svh; overflow: hidden; background: #f4f4f5;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  padding: 40px 0 44px;
+}
+.grow-media { position: relative; width: 100%; height: 50svh; flex: 0 0 auto; }
 .grow-img {
-  position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain;
-  opacity: 0; transform: scale(.98); transition: opacity .4s var(--ease), transform .45s var(--ease);
+  position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;
+  opacity: 0; transform: scale(1.01); transition: opacity .4s var(--ease), transform .45s var(--ease);
 }
 .grow-track[data-step="0"] .grow-img[data-i="0"],
 .grow-track[data-step="1"] .grow-img[data-i="1"],
-.grow-track[data-step="2"] .grow-img[data-i="2"],
-.grow-track[data-step="3"] .grow-img[data-i="3"],
-.grow-track[data-step="4"] .grow-img[data-i="4"] { opacity: 1; transform: none; }
+.grow-track[data-step="2"] .grow-img[data-i="2"] { opacity: 1; transform: none; }
 /* key count sits over the keypad, inverting against it */
 .grow-num {
   position: absolute; inset: 0; z-index: 2; pointer-events: none;
   display: flex; align-items: center; justify-content: center;
   mix-blend-mode: exclusion;
 }
-.grow-nums { position: relative; width: 1.7em; height: 1em; font-size: clamp(110px, 24vh, 320px); }
+.grow-nums { position: relative; width: 1.7em; height: 1em; font-size: clamp(100px, 22vh, 280px); }
 .grow-nums b {
   position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
   font-size: 1em; line-height: 1; font-weight: 800; letter-spacing: -.05em; color: #fff;
@@ -730,32 +731,30 @@ footer ul { list-style: none; } footer li { margin: 7px 0; } footer a { color: v
 }
 .grow-track[data-step="0"] .grow-nums b[data-i="0"],
 .grow-track[data-step="1"] .grow-nums b[data-i="1"],
-.grow-track[data-step="2"] .grow-nums b[data-i="2"],
-.grow-track[data-step="3"] .grow-nums b[data-i="3"],
-.grow-track[data-step="4"] .grow-nums b[data-i="4"] { opacity: 1; transform: none; }
-.grow-desc { position: absolute; bottom: 6svh; left: 50%; transform: translateX(-50%); z-index: 3; width: min(720px, 90vw); margin: 0; text-align: center; }
+.grow-track[data-step="2"] .grow-nums b[data-i="2"] { opacity: 1; transform: none; }
+/* all copy sits below the image */
+.grow-text { text-align: center; padding: 24px 24px 0; max-width: 820px; flex: 0 0 auto; }
+.grow-text .grow-title { margin-top: 6px; }
+.grow-desc { margin: 12px auto 0; }
 /* vertical nav dots stuck to the right, centered in the viewport */
 .grow-rail {
-  position: fixed; right: 20px; top: 50%; transform: translateY(-50%);
-  display: flex; flex-direction: column; gap: 13px; z-index: 45;
+  position: fixed; right: 18px; top: 50%; transform: translateY(-50%);
+  display: flex; flex-direction: column; gap: 8px; z-index: 45;
   opacity: 0; pointer-events: none; transition: opacity .4s ease;
 }
 .grow-rail.on { opacity: 1; }
-.grow-rail i { width: 11px; height: 11px; border-radius: 50%; background: rgba(0,0,0,.18); transition: background .35s, transform .35s; }
+.grow-rail i { width: 6px; height: 6px; border-radius: 50%; background: rgba(0,0,0,.22); transition: background .35s, transform .35s; }
 .grow-track[data-step="0"] .grow-rail i:nth-child(1),
 .grow-track[data-step="1"] .grow-rail i:nth-child(2),
-.grow-track[data-step="2"] .grow-rail i:nth-child(3),
-.grow-track[data-step="3"] .grow-rail i:nth-child(4),
-.grow-track[data-step="4"] .grow-rail i:nth-child(5) { background: var(--accent-deep); transform: scale(1.45); }
+.grow-track[data-step="2"] .grow-rail i:nth-child(3) { background: var(--accent-deep); transform: scale(1.5); }
 /* static fallback (mobile + reduced motion): all keypads stacked, growing */
 @media (max-width: 820px), (prefers-reduced-motion: reduce) {
   .grow-track { height: auto; }
-  .grow-stage { position: static; height: auto; overflow: visible; padding: 40px 0; }
-  .grow-head { position: static; }
-  .grow-media { position: static; margin-top: 20px; }
+  .grow-stage { position: static; height: auto; overflow: visible; padding: 40px 0; display: block; }
+  .grow-media { position: static; height: auto; }
   .grow-img { position: static; opacity: 1; transform: none; width: 100%; height: auto; margin: 0 auto 14px; }
   .grow-num, .grow-rail { display: none; }
-  .grow-desc { position: static; transform: none; width: auto; margin: 14px auto 0; }
+  .grow-text { margin: 8px auto 0; }
 }
 
 @media (max-width: 900px) {
