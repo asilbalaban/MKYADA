@@ -22,6 +22,7 @@ import { Badge, Button } from "./components/ui";
 import { ToastProvider } from "./components/toast";
 import { ConfirmProvider } from "./components/dialog";
 import { LedFeedback } from "./components/SystemStatus";
+import { WriteProgressCard } from "./components/WriteProgress";
 import { PermissionsBanner } from "./components/Permissions";
 import { DevicesPage } from "./pages/DevicesPage";
 import { SetupPage } from "./pages/SetupPage";
@@ -183,6 +184,7 @@ export default function App() {
         <ToastProvider>
           <ConfirmProvider>
             <LedFeedback />
+            <WriteProgressCard />
             <Shell />
           </ConfirmProvider>
         </ToastProvider>

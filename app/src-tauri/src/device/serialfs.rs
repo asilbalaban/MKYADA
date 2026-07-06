@@ -152,25 +152,43 @@ fn with_recovery<T>(
     Err(last)
 }
 
-pub fn write_file(mgr: &DeviceManager, path: &str, bytes: &[u8]) -> Result<(), String> {
+/// `progress(written, total)` fires after every acknowledged chunk so the UI
+/// can draw a real progress bar for multi-second transfers (a retry restarts
+/// it from 0 — the bar simply starts over).
+pub fn write_file(
+    mgr: &DeviceManager,
+    path: &str,
+    bytes: &[u8],
+    mut progress: impl FnMut(usize, usize),
+) -> Result<(), String> {
     let path = rel(path)?;
-    with_recovery(mgr, |mgr| write_once(mgr, path, bytes))
+    with_recovery(mgr, |mgr| write_once(mgr, path, bytes, &mut progress))
 }
 
-fn write_once(mgr: &DeviceManager, path: &str, bytes: &[u8]) -> Result<(), String> {
+fn write_once(
+    mgr: &DeviceManager,
+    path: &str,
+    bytes: &[u8],
+    progress: &mut impl FnMut(usize, usize),
+) -> Result<(), String> {
     let op = Op::begin(mgr)?;
+    let total = bytes.len();
     let chunks: Vec<&[u8]> = if bytes.is_empty() {
         vec![&[]]
     } else {
         bytes.chunks(CHUNK).collect()
     };
     let last = chunks.len() - 1;
+    progress(0, total);
+    let mut written = 0;
     for (seq, chunk) in chunks.into_iter().enumerate() {
         op.send(&json!({
             "t": "fs_write", "path": path, "seq": seq,
             "data": B64.encode(chunk), "eof": seq == last,
         }))?;
         op.expect_ok("fs_write")?;
+        written += chunk.len();
+        progress(written, total);
     }
     Ok(())
 }

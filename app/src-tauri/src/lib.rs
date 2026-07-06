@@ -16,7 +16,7 @@ use player::Preview;
 use serde_json::Value;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 /// Last time the editor proved it's alive while the overlay is up
 /// (via `overlay:ping` / `overlay:data` events). The overlay is a fullscreen
@@ -44,7 +44,6 @@ fn show_main(app: &AppHandle) {
 fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
     use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem};
     use tauri::tray::TrayIconBuilder;
-    use tauri::Emitter;
 
     let show = MenuItem::with_id(app, "show", "Open MKYADA", true, None::<&str>)?;
     let pause = CheckMenuItem::with_id(
@@ -152,10 +151,18 @@ async fn drive_write(
 }
 
 /// Route a file write to the mounted drive or the serial fs protocol.
+/// Serial writes stream `drive:progress` events per acknowledged chunk —
+/// large macros take seconds and the UI shows a progress bar (issue #10).
+/// Mounted-drive writes are a single fast fs call; no progress to report.
 fn write_to_device(app: &AppHandle, drive: &str, rel: &str, content: &str) -> Result<(), String> {
     if serialfs::is_serial(drive) {
         let mgr = app.state::<DeviceManager>();
-        serialfs::write_file(&mgr, rel, content.as_bytes())
+        serialfs::write_file(&mgr, rel, content.as_bytes(), |written, total| {
+            let _ = app.emit(
+                "drive:progress",
+                serde_json::json!({ "file": rel, "written": written, "total": total }),
+            );
+        })
     } else {
         drive_write_recovering(app, drive, rel, content)
     }

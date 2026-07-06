@@ -24,6 +24,17 @@ export function onDeviceMsg(cb: (msg: Record<string, unknown>) => void): Promise
   return listen("device:msg", (e) => cb(e.payload as Record<string, unknown>));
 }
 
+/** Chunk-by-chunk progress of a file writing to the keypad over serial. */
+export interface WriteProgress {
+  file: string;
+  written: number;
+  total: number;
+}
+
+export function onWriteProgress(cb: (p: WriteProgress) => void): Promise<UnlistenFn> {
+  return listen("drive:progress", (e) => cb(e.payload as WriteProgress));
+}
+
 export function onDeviceDisconnected(cb: (port: string) => void): Promise<UnlistenFn> {
   return listen("device:disconnected", (e) => cb(e.payload as string));
 }
