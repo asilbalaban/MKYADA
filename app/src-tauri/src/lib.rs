@@ -161,6 +161,11 @@ fn write_to_device(app: &AppHandle, drive: &str, rel: &str, content: &str) -> Re
     }
 }
 
+/// Quick retries for a busy-drive write (Windows semaphore timeout, os error
+/// 121) before falling back to the heavy reset. Once playback is stopped the
+/// board frees the USB link within a couple hundred ms.
+const DRIVE_BUSY_RETRIES: u32 = 6;
+
 fn drive_write_recovering(
     app: &AppHandle,
     drive: &str,
@@ -169,11 +174,37 @@ fn drive_write_recovering(
 ) -> Result<(), String> {
     let err = match drive::write_file(drive, rel, content) {
         Ok(()) => return Ok(()),
+        // The board was busy servicing playback so the USB write timed out
+        // (os error 121). Stop any macro and retry — the drive-path analog of
+        // the serial fs quiesce+retry. Only if it stays busy do we escalate to
+        // the reset recovery below.
+        Err(e) if e.starts_with(drive::BUSY_MARKER) => {
+            let mgr = app.state::<DeviceManager>();
+            let _ = serial::send(&mgr, &serde_json::json!({"t": "stop"}));
+            let mut last = e;
+            for _ in 0..DRIVE_BUSY_RETRIES {
+                std::thread::sleep(Duration::from_millis(300));
+                match drive::write_file(drive, rel, content) {
+                    Ok(()) => return Ok(()),
+                    // still busy, or the stalled write left the volume
+                    // read-only — keep trying, then fall through to the reset
+                    Err(e)
+                        if e.starts_with(drive::BUSY_MARKER)
+                            || e.starts_with(drive::READONLY_MARKER) =>
+                    {
+                        last = e
+                    }
+                    Err(e) => return Err(e),
+                }
+            }
+            last
+        }
         Err(e) if e.starts_with(drive::READONLY_MARKER) => e,
         Err(e) => return Err(e),
     };
     let human = err
         .trim_start_matches(drive::READONLY_MARKER)
+        .trim_start_matches(drive::BUSY_MARKER)
         .trim()
         .to_string();
     // Remember which board owns this mount so we can find the drive again
@@ -209,7 +240,9 @@ fn drive_write_recovering(
     }
     Err(format!(
         "{} The keypad was restarted but its drive didn't come back writable — unplug and replug it.",
-        last.trim_start_matches(drive::READONLY_MARKER).trim()
+        last.trim_start_matches(drive::READONLY_MARKER)
+            .trim_start_matches(drive::BUSY_MARKER)
+            .trim()
     ))
 }
 

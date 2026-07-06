@@ -99,6 +99,14 @@ fn safe_join(drive: &str, rel: &str) -> Result<PathBuf, String> {
 /// of the raw OS message because io::Error text is localized on Windows.
 pub const READONLY_MARKER: &str = "READONLY:";
 
+/// Error prefix that marks "the board was too busy to finish the write in
+/// time" (Windows ERROR_SEM_TIMEOUT / "os error 121"). The board couldn't
+/// service the USB mass-storage write while it was busy — playing a macro,
+/// running GC — so the request timed out. Transient: the caller (lib.rs
+/// drive_write) stops playback and retries. Kept out of the raw message
+/// because io::Error text is localized on Windows.
+pub const BUSY_MARKER: &str = "BUSY:";
+
 /// UID of the board that owns a mounted drive (from its boot_out.txt).
 pub fn uid_of(mount: &str) -> Option<String> {
     parse_boot_out(Path::new(mount))
@@ -122,6 +130,11 @@ pub fn write_file(drive: &str, rel: &str, content: &str) -> Result<(), String> {
             // can restart the keypad and retry.
             Err(format!("{READONLY_MARKER} the keypad's USB drive is read-only ({e})."))
         }
+        // The board was busy and didn't service the USB write in time. Flag it
+        // so the caller can stop playback and retry (and reset if it persists).
+        Err(e) if is_busy_timeout(&e) => {
+            Err(format!("{BUSY_MARKER} the keypad was too busy to save ({e})."))
+        }
         r => r.map_err(|e| e.to_string()),
     }
 }
@@ -143,6 +156,19 @@ fn is_read_only(e: &std::io::Error) -> bool {
     return e.raw_os_error() == Some(30);
     #[cfg(windows)]
     return e.raw_os_error() == Some(19);
+}
+
+fn is_busy_timeout(e: &std::io::Error) -> bool {
+    // ERROR_SEM_TIMEOUT(121): the board didn't service the USB storage write
+    // in time because it was busy (playing a macro, GC). Windows-only and
+    // transient — retrying once the board is idle succeeds.
+    #[cfg(windows)]
+    return e.raw_os_error() == Some(121);
+    #[cfg(not(windows))]
+    {
+        let _ = e;
+        false
+    }
 }
 
 /// Unmount + mount the volume so the OS re-checks the FAT filesystem and

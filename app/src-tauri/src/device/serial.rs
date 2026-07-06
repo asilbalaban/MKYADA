@@ -16,6 +16,14 @@ use tauri::{AppHandle, Emitter};
 
 const PRODUCT_MARKER: &str = "MKYADA";
 const PROBE_TIMEOUT: Duration = Duration::from_millis(900);
+/// I/O timeout on the live connection. Generous on purpose: the device's
+/// USB-CDC RX buffer is small (~256B), so a ~4KB fs_write chunk drains over
+/// many buffer-fill cycles. A brief device stall in that window — a
+/// CircuitPython GC pause, a flash commit — must not blow the write into
+/// Windows ERROR_SEM_TIMEOUT ("os error 121"). Writes run on background
+/// threads so this never blocks the UI, and incoming data still arrives
+/// instantly (the timeout only bounds *idle* waits).
+const LIVE_TIMEOUT: Duration = Duration::from_millis(1000);
 /// USB vendor IDs CircuitPython boards ship with (Adafruit, Raspberry Pi) —
 /// used to order the probe fallback, not to exclude anything.
 const KNOWN_VIDS: &[u16] = &[0x239A, 0x2E8A];
@@ -35,6 +43,10 @@ pub struct Connection {
     writer: Box<dyn SerialPort>,
     stop: Arc<AtomicBool>,
     fs_route: FsRoute,
+    /// A previous write failed partway, so bytes without a terminating newline
+    /// may be sitting on the wire. The next send prepends a newline to close
+    /// that dangling line before the device merges it with the new command.
+    resync: bool,
 }
 
 #[derive(Default)]
@@ -169,8 +181,14 @@ pub fn scan(skip: Option<&str>) -> Vec<DeviceInfo> {
 /// `device:msg` event. Emits `device:disconnected` when the port drops.
 pub fn connect(app: AppHandle, mgr: &DeviceManager, port: &str) -> Result<(), String> {
     disconnect(mgr);
-    let sp = open(port)?;
-    let writer = sp.try_clone().map_err(|e| e.to_string())?;
+    let mut sp = open(port)?;
+    let mut writer = sp.try_clone().map_err(|e| e.to_string())?;
+    // Lengthen both handles from open()'s short probe timeout: writes need the
+    // headroom (see LIVE_TIMEOUT), and reads only wake from idle on it — data
+    // still arrives instantly. Set both so it holds whether or not the cloned
+    // handle shares the underlying timeout.
+    let _ = sp.set_timeout(LIVE_TIMEOUT);
+    let _ = writer.set_timeout(LIVE_TIMEOUT);
     let stop = Arc::new(AtomicBool::new(false));
     let fs_route: FsRoute = Arc::new(Mutex::new(None));
     let conn = Connection {
@@ -178,6 +196,7 @@ pub fn connect(app: AppHandle, mgr: &DeviceManager, port: &str) -> Result<(), St
         writer,
         stop: stop.clone(),
         fs_route: fs_route.clone(),
+        resync: false,
     };
     *mgr.0.lock().unwrap() = Some(conn);
 
@@ -229,13 +248,13 @@ pub fn connect(app: AppHandle, mgr: &DeviceManager, port: &str) -> Result<(), St
                     }
                     // Windows has the same quirk with usbser.sys, but no
                     // /dev node to watch — ask the OS port list (~1×/s at
-                    // the 100 ms read timeout) whether the COM port is gone.
+                    // the 1 s read timeout) whether the COM port is gone.
                     // Without this the app stayed "connected" to a dead
                     // port forever and never rescanned (issue #3).
                     #[cfg(windows)]
                     {
                         timeouts += 1;
-                        if timeouts >= 10 {
+                        if timeouts >= 1 {
                             timeouts = 0;
                             let gone = serialport::available_ports()
                                 .map(|ps| ps.iter().all(|p| p.port_name != port_name))
@@ -270,9 +289,21 @@ pub fn connect(app: AppHandle, mgr: &DeviceManager, port: &str) -> Result<(), St
 pub fn send(mgr: &DeviceManager, msg: &Value) -> Result<(), String> {
     let mut guard = mgr.0.lock().unwrap();
     let conn = guard.as_mut().ok_or("not connected")?;
-    let mut data = serde_json::to_vec(msg).map_err(|e| e.to_string())?;
+    let mut data = Vec::new();
+    // Close any partial line a previous failed write left dangling, so this
+    // command lands on a fresh line (the device skips the resulting empty one).
+    if conn.resync {
+        data.push(b'\n');
+        conn.resync = false;
+    }
+    data.extend(serde_json::to_vec(msg).map_err(|e| e.to_string())?);
     data.push(b'\n');
-    conn.writer.write_all(&data).map_err(|e| e.to_string())?;
+    if let Err(e) = conn.writer.write_all(&data) {
+        // Bytes may have gone out without the terminating newline; mark the
+        // stream so the next send resyncs before the device merges lines.
+        conn.resync = true;
+        return Err(e.to_string());
+    }
     conn.writer.flush().ok();
     Ok(())
 }
