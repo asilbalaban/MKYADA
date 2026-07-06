@@ -4,6 +4,7 @@
 import { useEffect, useState } from "react";
 import { Pencil, Usb } from "lucide-react";
 import { useDevice } from "../lib/device";
+import { useHostMode } from "../lib/focus";
 import { useNav } from "../lib/nav";
 import { ipc } from "../lib/ipc";
 import { Button, Card, EmptyState, Field, Input, Select, Stepper } from "../components/ui";
@@ -433,15 +434,9 @@ function RemapPanel({
 }
 
 function TestPad({ cfg, send }: { cfg: DeviceConfig; send: (m: Record<string, unknown>) => Promise<void> }) {
-  // Host mode makes the firmware stream btn events instead of firing macros.
-  useEffect(() => {
-    void send({ t: "host_enter" });
-    const ping = setInterval(() => void send({ t: "ping" }), 2000);
-    return () => {
-      clearInterval(ping);
-      void send({ t: "host_leave" });
-    };
-  }, [send]);
+  // Host mode makes the firmware stream btn events instead of firing macros —
+  // held only while the window is focused (issue #8).
+  useHostMode(send);
 
   return <Keypad config={cfg} selected={null} onSelect={() => {}} />;
 }

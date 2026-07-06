@@ -4,6 +4,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Play, SquarePen, Usb } from "lucide-react";
 import { useDevice } from "../lib/device";
+import { useHostMode } from "../lib/focus";
 import { useNav } from "../lib/nav";
 import { ipc } from "../lib/ipc";
 import type { Assignment, DeviceConfig, MacroFile } from "../lib/types";
@@ -86,15 +87,10 @@ export function KeysPage() {
     void reload();
   }, [reload]);
 
-  // Keep the live-press highlight working while this page is open.
-  useEffect(() => {
-    void send({ t: "host_enter" });
-    const ping = setInterval(() => void send({ t: "ping" }), 2000);
-    return () => {
-      clearInterval(ping);
-      void send({ t: "host_leave" });
-    };
-  }, [send]);
+  // Keep the live-press highlight working while this page is open — but only
+  // while the window is focused, so a backgrounded/tray'd app never blocks
+  // standalone playback (issue #8).
+  useHostMode(send);
 
   // Surface playback / error feedback from the device.
   useEffect(
