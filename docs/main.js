@@ -164,14 +164,12 @@
     scrubs.forEach((s) => computeScrub(s, innerHeight)); // prime before first scroll
   }
 
-  /* ---------- frame loop: scrubs + nav hide/show + progress bar ---------- */
-  const nav = document.querySelector("nav");
+  /* ---------- frame loop: scrubs + progress bar ---------- */
   let lastY = -1;
   addEventListener("resize", () => { lastY = -1; }, { passive: true });
   function frame() {
     const y = scrollY, vh = innerHeight;
     if (y !== lastY) {
-      if (nav && !REDUCED) nav.classList.toggle("hide", y > 280 && y > lastY);
       const max = doc.scrollHeight - vh;
       doc.style.setProperty("--sp", max > 0 ? (y / max).toFixed(4) : "0");
       for (const s of scrubs) if (s.active) computeScrub(s, vh);

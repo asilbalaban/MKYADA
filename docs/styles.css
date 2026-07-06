@@ -54,16 +54,11 @@ html[lang="tr"] [lang="en"] { display: none !important; }
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23n)' opacity='0.6'/%3E%3C/svg%3E");
 }
 
-/* ---------- nav ---------- */
+/* ---------- nav (in-flow: scrolls away with the page, never comes back) ---------- */
 nav {
-  position: sticky; top: 0; z-index: 50;
-  backdrop-filter: blur(18px) saturate(1.6);
-  -webkit-backdrop-filter: blur(18px) saturate(1.6);
   background: rgba(251,251,253,.78);
   border-bottom: 1px solid var(--line);
-  transition: transform .35s ease;
 }
-nav.hide { transform: translateY(-100%); }
 nav .wrap { display: flex; align-items: center; gap: 20px; height: 64px; }
 nav .brand { display: flex; align-items: center; gap: 12px; font-weight: 700; font-size: 19px; color: var(--fg); letter-spacing: .02em; }
 nav .brand img { width: 34px; height: 34px; border-radius: 9px; }
@@ -76,7 +71,7 @@ nav .links a:hover { color: var(--fg); }
 }
 .lang-btn:hover { color: var(--fg); border-color: rgba(0,0,0,.35); }
 .progress {
-  position: absolute; left: 0; right: 0; bottom: -1px; height: 2px;
+  position: fixed; left: 0; right: 0; top: 0; height: 3px; z-index: 70;
   background: linear-gradient(90deg, var(--accent), var(--accent2), var(--accent3));
   transform: scaleX(var(--sp, 0)); transform-origin: left; pointer-events: none;
 }
@@ -177,7 +172,7 @@ html.js .hero-img-top { animation-delay: .12s; }
 .hero-still .tilt-inner img { -webkit-mask-image: none; mask-image: none; filter: none; }
 
 /* ---------- sections ---------- */
-section { padding: 110px 0; position: relative; scroll-margin-top: 64px; }
+section { padding: 110px 0; position: relative; }
 .kicker {
   font-size: 13px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase;
   background: linear-gradient(90deg, var(--accent-deep), var(--accent2));
@@ -239,7 +234,7 @@ html.js .in [data-stagger] > *, html.js [data-stagger].in > * { opacity: 1; tran
 .seq [data-stagger] { --sb: .4s; }
 
 /* ---------- feature cards ---------- */
-.grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; margin-top: 52px; }
+.grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; margin-top: 48px; }
 .card {
   position: relative; overflow: hidden;
   background: var(--panel);
@@ -327,7 +322,7 @@ html.js .in [data-stagger] > *, html.js [data-stagger].in > * { opacity: 1; tran
 .shots figcaption { font-size: 14px; color: var(--muted); margin-top: 12px; text-align: center; }
 
 /* ---------- app screenshot slider (crossfade, on plain white) ---------- */
-.slider { position: relative; margin-top: 52px; }
+.slider { position: relative; margin-top: 48px; }
 .slider-viewport { position: relative; }
 .slider-track { position: relative; display: block; }
 .slider figure {
@@ -340,9 +335,9 @@ html.js .in [data-stagger] > *, html.js [data-stagger].in > * { opacity: 1; tran
   border-radius: 16px; background: #fff;
   box-shadow: 0 1px 0 rgba(0,0,0,.04), 0 0 0 1px var(--line);
 }
-.slider figcaption { font-size: 15px; color: var(--muted); margin-top: 16px; text-align: center; }
+.slider figcaption { font-size: 15px; color: var(--muted); margin-top: 16px; text-align: center; min-height: 2.6em; }
 .slider-arrow {
-  position: absolute; top: 44%; transform: translateY(-50%);
+  position: absolute; top: 45%; transform: translateY(-50%);
   width: 50px; height: 50px; border-radius: 50%;
   background: rgba(255,255,255,.86); border: 1px solid var(--line);
   box-shadow: 0 10px 26px rgba(15,23,42,.16); cursor: pointer;
@@ -368,7 +363,7 @@ html.js .in [data-stagger] > *, html.js [data-stagger].in > * { opacity: 1; tran
 }
 
 /* ---------- build steps ---------- */
-.steps { counter-reset: step; display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; margin-top: 44px; position: relative; z-index: 1; }
+.steps { counter-reset: step; display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; margin-top: 48px; position: relative; z-index: 1; }
 .step {
   position: relative; border: 1px solid var(--line); border-radius: var(--radius);
   padding: 30px 26px 26px; background: var(--panel);
@@ -564,7 +559,7 @@ footer ul { list-style: none; } footer li { margin: 7px 0; } footer a { color: v
 
 /* full action catalog: infinite auto-scrolling marquee */
 .act-marquee {
-  margin-top: 40px; padding: 30px 0; overflow: hidden;
+  margin-top: 48px; padding: 30px 0; overflow: hidden;
   -webkit-mask-image: linear-gradient(90deg, transparent, #000 7%, #000 93%, transparent);
   mask-image: linear-gradient(90deg, transparent, #000 7%, #000 93%, transparent);
 }
@@ -705,14 +700,23 @@ footer ul { list-style: none; } footer li { margin: 7px 0; } footer a { color: v
 /* ---------- growing keypad (scroll-driven 4 -> 10 keys; image on top, text below) ---------- */
 .grow-track { height: 260vh; position: relative; }
 .grow-stage {
-  position: sticky; top: 0; height: 100svh; overflow: hidden; background: #f4f4f5;
+  position: sticky; top: 0; height: 100svh; overflow: hidden; background: #f6f6f7;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   padding: 40px 0 44px;
 }
-.grow-media { position: relative; width: 100%; height: 50svh; flex: 0 0 auto; }
+.grow-media { position: relative; width: 100%; flex: 1 1 auto; min-height: 0; }
 .grow-img {
-  position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;
+  position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain;
   opacity: 0; transform: scale(1.01); transition: opacity .4s var(--ease), transform .45s var(--ease);
+  /* feather the photo edges into the stage, same treatment as .bare product shots */
+  -webkit-mask-image:
+    linear-gradient(90deg, transparent, #000 20%, #000 80%, transparent),
+    linear-gradient(180deg, transparent, #000 10%, #000 90%, transparent);
+  -webkit-mask-composite: source-in;
+  mask-image:
+    linear-gradient(90deg, transparent, #000 20%, #000 80%, transparent),
+    linear-gradient(180deg, transparent, #000 10%, #000 90%, transparent);
+  mask-composite: intersect;
 }
 .grow-track[data-step="0"] .grow-img[data-i="0"],
 .grow-track[data-step="1"] .grow-img[data-i="1"],
@@ -723,7 +727,7 @@ footer ul { list-style: none; } footer li { margin: 7px 0; } footer a { color: v
   display: flex; align-items: center; justify-content: center;
   mix-blend-mode: exclusion;
 }
-.grow-nums { position: relative; width: 1.7em; height: 1em; font-size: clamp(100px, 22vh, 280px); }
+.grow-nums { position: relative; top: 100px; width: 1.7em; height: 1em; font-size: clamp(100px, 22vh, 280px); }
 .grow-nums b {
   position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
   font-size: 1em; line-height: 1; font-weight: 800; letter-spacing: -.05em; color: #fff;

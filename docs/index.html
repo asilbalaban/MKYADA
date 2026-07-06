@@ -25,6 +25,7 @@
 </head>
 <body>
 
+<div class="progress" aria-hidden="true"></div>
 <div class="grain" aria-hidden="true"></div>
 
 <svg style="display:none" aria-hidden="true">
@@ -88,7 +89,6 @@
       <button class="lang-btn" onclick="toggleLang()"><span lang="en">Türkçe</span><span lang="tr">English</span></button>
     </div>
   </div>
-  <div class="progress" aria-hidden="true"></div>
 </nav>
 
 <header id="top" data-scrub>
@@ -163,8 +163,8 @@
       <p class="kicker"><span lang="en">Standalone by design</span><span lang="tr">Tasarımı gereği bağımsız</span></p>
       <h2 data-split><span lang="en">Take it anywhere. It remembers everything.</span><span lang="tr">Nereye giderseniz götürün. Her şeyi hatırlar.</span></h2>
       <p class="lead">
-        <span lang="en">Your macros live on the keypad, not on the computer. Once a macro is on a key, you don't need the app anymore. Unplug the keypad, walk to another desk, another office, another operating system, plug it in and press. Everything is stored on the device as plain, readable JSON files you can even edit by hand.</span>
-        <span lang="tr">Makrolarınız bilgisayarda değil, klavyenin içinde yaşar. Bir makro tuşa yüklendikten sonra uygulamaya ihtiyacınız kalmaz. Klavyeyi söküp başka bir masaya, başka bir ofise, başka bir işletim sistemine götürün, takın ve basın. Her şey cihazın üzerinde, elle bile düzenleyebileceğiniz sade JSON dosyaları olarak durur.</span>
+        <span lang="en">Your macros live on the keypad, not on the computer. Once a macro is on a key, you don't need the app anymore. Unplug the keypad, walk to another desk, another office, another operating system, plug it in and press. The keypad itself works on any OS, Linux included; the app runs on macOS and Windows. Everything is stored on the device as plain, readable JSON files you can even edit by hand.</span>
+        <span lang="tr">Makrolarınız bilgisayarda değil, klavyenin içinde yaşar. Bir makro tuşa yüklendikten sonra uygulamaya ihtiyacınız kalmaz. Klavyeyi söküp başka bir masaya, başka bir ofise, başka bir işletim sistemine götürün, takın ve basın. Klavyenin kendisi Linux dahil her işletim sisteminde çalışır; uygulama macOS ve Windows'ta. Her şey cihazın üzerinde, elle bile düzenleyebileceğiniz sade JSON dosyaları olarak durur.</span>
       </p>
     </div>
     <div class="art seq-late">
@@ -198,7 +198,7 @@
       </div>
       <div class="card"><div class="icon"><svg class="ic"><use href="#i-type"/></svg></div>
         <h3><span lang="en">Text snippets</span><span lang="tr">Metin parçacıkları</span></h3>
-        <p><span lang="en">A signature, an email, a command, typed out for you on the right physical keys for your layout, ş, ğ, é and AltGr included.</span><span lang="tr">Bir imza, bir e-posta, bir komut, düzeninize göre doğru fiziksel tuşlarla sizin yerinize yazılır; ş, ğ, é ve AltGr dahil.</span></p>
+        <p><span lang="en">A signature, an email, a command, typed out for you on the right physical keys for your layout, AltGr included.</span><span lang="tr">Bir imza, bir e-posta, bir komut, düzeninize göre doğru fiziksel tuşlarla sizin yerinize yazılır, AltGr dahil.</span></p>
       </div>
       <div class="card"><div class="icon"><svg class="ic"><use href="#i-volume"/></svg></div>
         <h3><span lang="en">Media &amp; volume</span><span lang="tr">Medya ve ses</span></h3>
@@ -206,7 +206,7 @@
       </div>
       <div class="card"><div class="icon"><svg class="ic"><use href="#i-mouse"/></svg></div>
         <h3><span lang="en">Recorded macros</span><span lang="tr">Kaydedilmiş makrolar</span></h3>
-        <p><span lang="en">A whole sequence of mouse paths, clicks, scrolls and keystrokes with real timing, replayed as genuine hardware input.</span><span lang="tr">Fare hareketleri, tıklamalar, kaydırmalar ve tuşlardan oluşan tüm bir dizi, gerçek zamanlamayla, hepsi gerçek donanım girdisi olarak oynatılır.</span></p>
+        <p><span lang="en">A whole sequence of mouse paths, clicks, scrolls and keystrokes, replayed with its original timing.</span><span lang="tr">Fare hareketleri, tıklamalar, kaydırmalar ve tuşlardan oluşan tüm bir dizi, orijinal zamanlamasıyla oynatılır.</span></p>
       </div>
       <div class="card"><div class="icon"><svg class="ic"><use href="#i-launch"/></svg></div>
         <h3><span lang="en">Launch app, file or URL</span><span lang="tr">Uygulama, dosya ya da URL aç</span></h3>
@@ -222,11 +222,11 @@
       </div>
       <div class="card"><div class="icon"><svg class="ic"><use href="#i-mic"/></svg></div>
         <h3><span lang="en">Mic &amp; push-to-talk</span><span lang="tr">Mikrofon ve bas-konuş</span></h3>
-        <p><span lang="en">Control your system microphone: toggle mute, always-mute, always-unmute, or true push-to-talk, live only while you hold the key.</span><span lang="tr">Sistem mikrofonunuzu kontrol edin: sessize al/aç, hep kapalı, hep açık ya da gerçek bas-konuş, yalnızca tuşu basılı tuttuğunuz sürece açık.</span></p>
+        <p><span lang="en">Control your system microphone from a key, including true push-to-talk, live only while you hold it down.</span><span lang="tr">Sistem mikrofonunuzu bir tuştan yönetin, gerçek bas-konuş dahil, yalnızca basılı tuttuğunuz sürece açık.</span></p>
       </div>
       <div class="card"><div class="icon"><svg class="ic"><use href="#i-globe"/></svg></div>
         <h3><span lang="en">Webhook / HTTP request</span><span lang="tr">Webhook / HTTP isteği</span></h3>
-        <p><span lang="en">Fire a fully custom HTTP request, any method, headers and body. Smart lights, Discord, Telegram, Home Assistant, your own API.</span><span lang="tr">Tamamen özel bir HTTP isteği gönderin, her metot, header ve gövde. Akıllı ışıklar, Discord, Telegram, Home Assistant, kendi API'niz.</span></p>
+        <p><span lang="en">Fire a fully custom HTTP request from a key press, any method, any headers, any body. If it has an API, a key can talk to it.</span><span lang="tr">Tuşa basınca tamamen özel bir HTTP isteği gönderin, her metot, her header, her gövde. API'si olan her şeyle bir tuş konuşabilir.</span></p>
       </div>
       <div class="card"><div class="icon"><svg class="ic"><use href="#i-route"/></svg></div>
         <h3><span lang="en">Multi-action sequence</span><span lang="tr">Çok aksiyonlu dizi</span></h3>
@@ -238,23 +238,33 @@
 
 <div class="divider"></div>
 
-<!-- ============ GROWING KEYPAD ============ -->
-<section id="grow" class="grow-track" data-scrub="track" data-steps="3" data-step="0">
-  <div class="grow-stage">
-    <div class="grow-media">
-      <img class="grow-img" data-i="0" src="images/1-2x2.png" width="1376" height="768" loading="lazy" decoding="async" alt="4-key keypad">
-      <img class="grow-img" data-i="1" src="images/2-3x2.png" width="2560" height="1440" loading="lazy" decoding="async" alt="6-key keypad">
-      <img class="grow-img" data-i="2" src="images/3-5x2.png" width="1376" height="768" loading="lazy" decoding="async" alt="10-key keypad">
-      <div class="grow-num" aria-hidden="true">
-        <span class="grow-nums"><b data-i="0">4</b><b data-i="1">6</b><b data-i="2">10</b></span>
+<!-- ============ RECORDER ============ -->
+<section>
+  <div class="wrap statement reveal seq">
+    <p class="kicker"><span lang="en">The recorder</span><span lang="tr">Kaydedici</span></p>
+    <h2 data-split><span lang="en">Do it once. It's yours forever.</span><span lang="tr">Bir kez yapın. Artık hep sizin.</span></h2>
+    <p class="lead">
+      <span lang="en">Press record and just work: every mouse path, click, scroll, keystroke and pause is captured with millisecond timing. A countdown lets you get in position, and a global hotkey starts and stops recording even while you're inside a game.</span>
+      <span lang="tr">Kaydı başlatın ve işinizi yapın: her fare hareketi, tıklama, kaydırma, tuş ve bekleme milisaniye hassasiyetinde yakalanır. Geri sayım sizi pozisyon almanız için bekler; global kısayol tuşu oyun içindeyken bile kaydı başlatıp durdurur.</span>
+    </p>
+    <div class="grid" data-stagger>
+      <div class="card"><div class="icon"><svg class="ic"><use href="#i-route"/></svg></div>
+        <h3><span lang="en">Pixel-true mouse paths</span><span lang="tr">Piksel hassasiyetinde fare yolları</span></h3>
+        <p><span lang="en">See your recorded path drawn 1:1 on your real screen with a transparent overlay, every click numbered, exactly where it will land.</span><span lang="tr">Kaydedilen yol, şeffaf bir katmanla gerçek ekranınızın üzerine 1:1 çizilir, her tıklama numaralı, tam ineceği yerde.</span></p>
+      </div>
+      <div class="card"><div class="icon"><svg class="ic"><use href="#i-sliders"/></svg></div>
+        <h3><span lang="en">A real editor</span><span lang="tr">Gerçek bir düzenleyici</span></h3>
+        <p><span lang="en">Every coordinate, delay and key is editable. Select 60 rows with one shift-click and delete them. Straighten paths, rescale timing, optimize for the device.</span><span lang="tr">Her koordinat, gecikme ve tuş düzenlenebilir. Shift ile tek tıkta 60 satırı seçip silin. Yolları düzleştirin, süreyi ölçekleyin, cihaz için optimize edin.</span></p>
+      </div>
+      <div class="card"><div class="icon"><svg class="ic"><use href="#i-circle-play"/></svg></div>
+        <h3><span lang="en">Playback, your rules</span><span lang="tr">Oynatma, sizin kurallarınız</span></h3>
+        <p><span lang="en">Press again to stop or restart. Hold the key to repeat like a held letter. Loop until you press again. Speed it up 10×. You decide.</span><span lang="tr">Tekrar basınca dursun ya da baştan başlasın. Basılı tutunca harf gibi tekrarlasın. Siz basana kadar dönsün. 10 kat hızlansın. Karar sizin.</span></p>
       </div>
     </div>
-    <div class="grow-text reveal seq">
-      <p class="kicker"><span lang="en">Print your own</span><span lang="tr">Kendin bas</span></p>
-      <h2 class="grow-title" data-split><span lang="en">How many keys do you need?</span><span lang="tr">Kaç tuşa ihtiyacın var?</span></h2>
-      <p class="lead grow-desc"><span lang="en">From a single key to a full 20-key deck. Same firmware, same app, same JSON files. Print any faceplate you like, one row or two, whatever fits your desk, and solder exactly as many keys as you want.</span><span lang="tr">Tek bir tuştan 20 tuşluk tam bir deck'e kadar. Aynı bellenim, aynı uygulama, aynı JSON dosyaları. İstediğiniz kapağı basın, tek sıra ya da iki, masanıza ne uyuyorsa, ve tam istediğiniz kadar tuş lehimleyin.</span></p>
-    </div>
-    <div class="grow-rail" aria-hidden="true"><i></i><i></i><i></i></div>
+    <figure class="big-shot seq-late">
+      <div class="tilt"><div class="tilt-inner"><img src="images/app-recorder.png" width="1600" height="1105" loading="lazy" decoding="async" alt="MKYADA recorder, every captured event as an editable row"><span class="shine" aria-hidden="true"></span></div></div>
+      <figcaption><span lang="en">The recorder, 16 captured events, every row editable, playback rules per key</span><span lang="tr">Kaydedici, yakalanan 16 olay, her satır düzenlenebilir, tuş başına oynatma kuralları</span></figcaption>
+    </figure>
   </div>
 </section>
 
@@ -330,38 +340,6 @@
 
 <div class="divider"></div>
 
-<!-- ============ RECORDER ============ -->
-<section>
-  <div class="wrap statement reveal seq">
-    <p class="kicker"><span lang="en">The recorder</span><span lang="tr">Kaydedici</span></p>
-    <h2 data-split><span lang="en">Do it once. It's yours forever.</span><span lang="tr">Bir kez yapın. Artık hep sizin.</span></h2>
-    <p class="lead">
-      <span lang="en">Press record and just work: every mouse path, click, scroll, keystroke and pause is captured with millisecond timing. A countdown lets you get in position, and a global hotkey starts and stops recording even while you're inside a game.</span>
-      <span lang="tr">Kaydı başlatın ve işinizi yapın: her fare hareketi, tıklama, kaydırma, tuş ve bekleme milisaniye hassasiyetinde yakalanır. Geri sayım sizi pozisyon almanız için bekler; global kısayol tuşu oyun içindeyken bile kaydı başlatıp durdurur.</span>
-    </p>
-    <div class="grid" data-stagger>
-      <div class="card"><div class="icon"><svg class="ic"><use href="#i-route"/></svg></div>
-        <h3><span lang="en">Pixel-true mouse paths</span><span lang="tr">Piksel hassasiyetinde fare yolları</span></h3>
-        <p><span lang="en">See your recorded path drawn 1:1 on your real screen with a transparent overlay, every click numbered, exactly where it will land.</span><span lang="tr">Kaydedilen yol, şeffaf bir katmanla gerçek ekranınızın üzerine 1:1 çizilir, her tıklama numaralı, tam ineceği yerde.</span></p>
-      </div>
-      <div class="card"><div class="icon"><svg class="ic"><use href="#i-sliders"/></svg></div>
-        <h3><span lang="en">A real editor</span><span lang="tr">Gerçek bir düzenleyici</span></h3>
-        <p><span lang="en">Every coordinate, delay and key is editable. Select 60 rows with one shift-click and delete them. Straighten paths, rescale timing, optimize for the device.</span><span lang="tr">Her koordinat, gecikme ve tuş düzenlenebilir. Shift ile tek tıkta 60 satırı seçip silin. Yolları düzleştirin, süreyi ölçekleyin, cihaz için optimize edin.</span></p>
-      </div>
-      <div class="card"><div class="icon"><svg class="ic"><use href="#i-circle-play"/></svg></div>
-        <h3><span lang="en">Playback, your rules</span><span lang="tr">Oynatma, sizin kurallarınız</span></h3>
-        <p><span lang="en">Press again to stop or restart. Hold the key to repeat like a held letter. Loop until you press again. Speed it up 10×. You decide.</span><span lang="tr">Tekrar basınca dursun ya da baştan başlasın. Basılı tutunca harf gibi tekrarlasın. Siz basana kadar dönsün. 10 kat hızlansın. Karar sizin.</span></p>
-      </div>
-    </div>
-    <figure class="big-shot seq-late">
-      <div class="tilt"><div class="tilt-inner"><img src="images/app-recorder.png" width="1600" height="1105" loading="lazy" decoding="async" alt="MKYADA recorder, every captured event as an editable row"><span class="shine" aria-hidden="true"></span></div></div>
-      <figcaption><span lang="en">The recorder, 16 captured events, every row editable, playback rules per key</span><span lang="tr">Kaydedici, yakalanan 16 olay, her satır düzenlenebilir, tuş başına oynatma kuralları</span></figcaption>
-    </figure>
-  </div>
-</section>
-
-<div class="divider"></div>
-
 <!-- ============ MIC / PUSH-TO-TALK ============ -->
 <section>
   <div class="wrap statement reveal seq">
@@ -410,28 +388,14 @@
 
 <div class="divider"></div>
 
-<!-- ============ ANY LAYOUT ============ -->
-<section>
-  <div class="wrap statement reveal seq">
-    <p class="kicker"><span lang="en">Speaks your keyboard's language</span><span lang="tr">Klavyenizin dilini konuşur</span></p>
-    <h2 class="grad-anim" data-split><span lang="en">Turkish Q. German QWERTZ. French AZERTY.<br>It just works.</span><span lang="tr">Türkçe Q. Almanca QWERTZ. Fransızca AZERTY.<br>Hepsiyle çalışır.</span></h2>
-    <p class="lead">
-      <span lang="en">Most macro tools silently assume a US keyboard. MKYADA reads your real layout: what you press is what you see, and what plays back is exactly what you typed, ş, ğ, é, ü and all. Text snippets compile to the right physical keys for <em>your</em> layout, AltGr included.</span>
-      <span lang="tr">Çoğu makro aracı sessizce ABD klavyesi varsayar. MKYADA gerçek düzeninizi okur: ne basarsanız onu görürsünüz, oynatılan da tam yazdığınızdır, ş, ğ, é, ü dahil. Metin parçacıkları <em>sizin</em> düzeninize göre doğru fiziksel tuşlara derlenir, AltGr dahil.</span>
-    </p>
-  </div>
-</section>
-
-<div class="divider"></div>
-
 <!-- ============ THE APP ============ -->
 <section id="app">
-  <div class="wrap reveal seq">
+  <div class="wrap statement reveal seq">
     <p class="kicker"><span lang="en">The desktop app</span><span lang="tr">Masaüstü uygulaması</span></p>
     <h2 data-split><span lang="en">Powerful underneath.<br>Friendly on top.</span><span lang="tr">Altında güç.<br>Üstünde sadelik.</span></h2>
     <p class="lead">
-      <span lang="en">Assign a key by simply pressing the shortcut you want, no menus to dig through. Light and dark themes, live key testing, a setup wizard that summarizes your keypad at a glance, and firmware updates delivered inside the app. It even stays on top of your game while you fine-tune coordinates.</span>
-      <span lang="tr">Tuş atamak için istediğiniz kısayola basmanız yeter, menülerde kaybolmak yok. Açık ve koyu tema, canlı tuş testi, kurulumunuzu tek bakışta özetleyen sihirbaz ve uygulama içinden gelen bellenim güncellemeleri. Koordinatlarda ince ayar yaparken oyununuzun üstünde bile kalır.</span>
+      <span lang="en">Assign a key by simply pressing the shortcut you want, no menus to dig through. Light and dark themes, live key testing, a setup wizard that summarizes your keypad at a glance, and firmware updates delivered inside the app. It even stays on top of your game while you fine-tune coordinates. And closing the window doesn't close MKYADA, it lives on in the system tray.</span>
+      <span lang="tr">Tuş atamak için istediğiniz kısayola basmanız yeter, menülerde kaybolmak yok. Açık ve koyu tema, canlı tuş testi, kurulumunuzu tek bakışta özetleyen sihirbaz ve uygulama içinden gelen bellenim güncellemeleri. Koordinatlarda ince ayar yaparken oyununuzun üstünde bile kalır. Ve pencereyi kapatmak MKYADA'yı kapatmaz, sistem tepsisinde yaşamaya devam eder.</span>
     </p>
     <div class="slider" data-slider>
       <div class="slider-viewport">
@@ -462,34 +426,20 @@
       <button class="slider-arrow next" type="button" aria-label="Next"><svg class="ic"><use href="#i-chevron-r"/></svg></button>
       <div class="slider-dots" aria-hidden="true"></div>
     </div>
-  </div>
-</section>
-
-<div class="divider"></div>
-
-<!-- ============ RUNS IN THE BACKGROUND ============ -->
-<section>
-  <div class="wrap statement reveal seq">
-      <p class="kicker"><span lang="en">Always ready</span><span lang="tr">Her zaman hazır</span></p>
-      <h2 data-split><span lang="en">Closing the window doesn't close MKYADA.</span><span lang="tr">Pencereyi kapatmak MKYADA'yı kapatmaz.</span></h2>
-      <p class="lead">
-        <span lang="en">MKYADA lives in the system tray, so your launch/command/sound keys and per-app profiles keep working after you close the window. Turn on "start at login" once and forget about it. A settings strip shows live CPU, RAM and mic status, and can mirror mic-mute onto the keypad's own LED, so a glance at the desk tells you what a glance at the screen would.</span>
-        <span lang="tr">MKYADA sistem tepsisinde yaşar; pencereyi kapatsanız bile başlatma/komut/ses tuşlarınız ve uygulamaya özel profilleriniz çalışmaya devam eder. "Açılışta başlat" seçeneğini bir kez açın, gerisini unutun. Ayarlardaki bir şerit canlı CPU, RAM ve mikrofon durumunu gösterir; mikrofon kapalıyken klavyenin kendi LED'ini kırmızıya çevirebilir, masaya bakmak, ekrana bakmakla aynı şeyi söyler.</span>
-      </p>
-      <div class="grid" data-stagger style="margin-top:44px;text-align:left">
-        <div class="card"><div class="icon"><svg class="ic"><use href="#i-tray"/></svg></div>
-          <h3><span lang="en">Tray, not taskbar</span><span lang="tr">Görev çubuğu değil, tepsi</span></h3>
-          <p><span lang="en">Quit or pause key actions from the tray menu any time; reopening the app just refocuses the same window.</span><span lang="tr">Tepsi menüsünden istediğiniz an çıkın ya da tuş aksiyonlarını duraklatın; uygulamayı yeniden açmak aynı pencereye odaklanır.</span></p>
-        </div>
-        <div class="card"><div class="icon"><svg class="ic"><use href="#i-pulse"/></svg></div>
-          <h3><span lang="en">It reconnects itself</span><span lang="tr">Kendi kendine yeniden bağlanır</span></h3>
-          <p><span lang="en">Unplugged, reset, or a stubborn read-only drive, MKYADA detects it and recovers on its own, no unplug-replug dance required.</span><span lang="tr">Fişi çekilmiş, sıfırlanmış ya da inatçı bir salt-okunur sürücü, MKYADA bunu fark eder ve kendi kendine toparlanır, fişi çekip takmanıza gerek kalmaz.</span></p>
-        </div>
-        <div class="card"><div class="icon"><svg class="ic"><use href="#i-box"/></svg></div>
-          <h3><span lang="en">Finished-product mode</span><span lang="tr">Bitmiş ürün modu</span></h3>
-          <p><span lang="en">Handing the keypad to someone? Hide its USB drive with one toggle and it stops looking like a dev board, no stray files, no CIRCUITPY disk popping up. The app still manages everything over the wire.</span><span lang="tr">Klavyeyi birine mi vereceksiniz? Tek düğmeyle USB sürücüsünü gizleyin; artık bir geliştirme kartı gibi görünmez, ortada dosya yok, açılan CIRCUITPY diski yok. Uygulama her şeyi yine kablo üzerinden yönetir.</span></p>
-        </div>
+    <div class="grid" data-stagger>
+      <div class="card"><div class="icon"><svg class="ic"><use href="#i-tray"/></svg></div>
+        <h3><span lang="en">Tray, not taskbar</span><span lang="tr">Görev çubuğu değil, tepsi</span></h3>
+        <p><span lang="en">Your launch, command and sound keys keep working after you close the window. Turn on "start at login" once and forget about it.</span><span lang="tr">Başlatma, komut ve ses tuşlarınız pencereyi kapattıktan sonra da çalışır. "Açılışta başlat" seçeneğini bir kez açın, gerisini unutun.</span></p>
       </div>
+      <div class="card"><div class="icon"><svg class="ic"><use href="#i-pulse"/></svg></div>
+        <h3><span lang="en">It reconnects itself</span><span lang="tr">Kendi kendine yeniden bağlanır</span></h3>
+        <p><span lang="en">Unplugged, reset, or a stubborn read-only drive, MKYADA detects it and recovers on its own, no unplug-replug dance required.</span><span lang="tr">Fişi çekilmiş, sıfırlanmış ya da inatçı bir salt-okunur sürücü, MKYADA bunu fark eder ve kendi kendine toparlanır, fişi çekip takmanıza gerek kalmaz.</span></p>
+      </div>
+      <div class="card"><div class="icon"><svg class="ic"><use href="#i-box"/></svg></div>
+        <h3><span lang="en">Finished-product mode</span><span lang="tr">Bitmiş ürün modu</span></h3>
+        <p><span lang="en">Handing the keypad to someone? Hide its USB drive with one toggle and it stops looking like a dev board, no stray files, no CIRCUITPY disk popping up. The app still manages everything over the wire.</span><span lang="tr">Klavyeyi birine mi vereceksiniz? Tek düğmeyle USB sürücüsünü gizleyin; artık bir geliştirme kartı gibi görünmez, ortada dosya yok, açılan CIRCUITPY diski yok. Uygulama her şeyi yine kablo üzerinden yönetir.</span></p>
+      </div>
+    </div>
   </div>
 </section>
 
@@ -501,7 +451,7 @@
     <div class="cmp-head">
       <p class="kicker"><span lang="en">How it compares</span><span lang="tr">Nasıl kıyaslanır</span></p>
       <h2 data-split><span lang="en">Everything the others do.<br>Plus the parts they can't.</span><span lang="tr">Rakiplerin yaptığı her şey.<br>Bir de yapamadıkları.</span></h2>
-      <p class="lead"><span lang="en">The Stream Deck is polished but closed and pricey. The cheap clones are… cheap. MKYADA gives you hardware-level muscle neither of them has, for about the price of lunch.</span><span lang="tr">Stream Deck cilalı ama kapalı ve pahalı. Ucuz kopyalar ise… ucuz. MKYADA, ikisinde de olmayan donanım seviyesinde bir gücü size verir, hem de bir öğle yemeği parasına.</span></p>
+      <p class="lead"><span lang="en">The Stream Deck is polished but closed and pricey. The cheap clones are… cheap. MKYADA gives you hardware-level muscle neither of them has, for pocket change.</span><span lang="tr">Stream Deck cilalı ama kapalı ve pahalı. Ucuz kopyalar ise… ucuz. MKYADA, ikisinde de olmayan donanım seviyesinde bir gücü size verir, hem de cep harçlığına.</span></p>
     </div>
     <div class="cmp-scroll seq-late">
       <table class="cmp">
@@ -578,11 +528,28 @@
       </table>
     </div>
 
-    <div class="cmp-note seq-late">
-      <div class="cmp-note-icon"><svg class="ic"><use href="#i-git"/></svg></div>
-      <h3><span lang="en">And the part with no price tag: building it yourself.</span><span lang="tr">Ve fiyatı olmayan kısım: kendin yapmanın tadı.</span></h3>
-      <p><span lang="en">Fully open source, every line of the firmware and the app is yours to read, fork and flash. Solder it your way, add the action you always wanted, make it exactly the keypad you dream about. That satisfaction? Priceless.</span><span lang="tr">Tamamen açık kaynak, bellenimin ve uygulamanın her satırı okumanız, çatallamanız ve yüklemeniz için sizin. Kendi düzeninizde lehimleyin, hep istediğiniz aksiyonu ekleyin, tam hayalinizdeki klavye olsun. O tatmin duygusu? Paha biçilmez.</span></p>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- ============ GROWING KEYPAD ============ -->
+<section id="grow" class="grow-track" data-scrub="track" data-steps="3" data-step="0">
+  <div class="grow-stage">
+    <div class="grow-media">
+      <img class="grow-img" data-i="0" src="images/1-2x2-wide.png" width="1376" height="653" loading="lazy" decoding="async" alt="4-key keypad">
+      <img class="grow-img" data-i="1" src="images/2-3x2-wide.png" width="2560" height="1224" loading="lazy" decoding="async" alt="6-key keypad">
+      <img class="grow-img" data-i="2" src="images/3-5x2-wide.png" width="1376" height="653" loading="lazy" decoding="async" alt="10-key keypad">
+      <div class="grow-num" aria-hidden="true">
+        <span class="grow-nums"><b data-i="0">4</b><b data-i="1">6</b><b data-i="2">10</b></span>
+      </div>
     </div>
+    <div class="grow-text reveal seq">
+      <p class="kicker"><span lang="en">Print your own</span><span lang="tr">Kendin bas</span></p>
+      <h2 class="grow-title" data-split><span lang="en">How many keys do you need?</span><span lang="tr">Kaç tuşa ihtiyacın var?</span></h2>
+      <p class="lead grow-desc"><span lang="en">From a single key to a full 20-key deck. Same firmware, same app, same JSON files. Print any faceplate you like, one row or two, whatever fits your desk, and solder exactly as many keys as you want.</span><span lang="tr">Tek bir tuştan 20 tuşluk tam bir deck'e kadar. Aynı bellenim, aynı uygulama, aynı JSON dosyaları. İstediğiniz kapağı basın, tek sıra ya da iki, masanıza ne uyuyorsa, ve tam istediğiniz kadar tuş lehimleyin.</span></p>
+    </div>
+    <div class="grow-rail" aria-hidden="true"><i></i><i></i><i></i></div>
   </div>
 </section>
 
@@ -612,25 +579,14 @@
         </svg>
         <div class="steps">
           <div class="step" data-i="0"><h3><span lang="en">Print</span><span lang="tr">Bas</span></h3>
-            <p><span lang="en">Two STL files in the repo: the RP2040-Zero body and a 3×2 faceplate. Any desktop FDM printer will do.</span><span lang="tr">Depoda iki STL var: RP2040-Zero gövdesi ve 3×2 kapak. Sıradan bir masaüstü FDM yazıcı yeterli.</span></p></div>
+            <p><span lang="en"><a href="https://github.com/asilbalaban/MKYADA/tree/main/hardware/case">Two STL files</a> in the repo: the RP2040-Zero body and a 3×2 faceplate. Any desktop FDM printer will do, no printer? Any online print service prints them for a few dollars.</span><span lang="tr">Depoda <a href="https://github.com/asilbalaban/MKYADA/tree/main/hardware/case">iki STL</a> var: RP2040-Zero gövdesi ve 3×2 kapak. Sıradan bir masaüstü FDM yazıcı yeterli, yazıcınız yok mu? Herhangi bir çevrimiçi baskı servisi birkaç dolara basar.</span></p></div>
           <div class="step" data-i="1"><h3><span lang="en">Solder</span><span lang="tr">Lehimle</span></h3>
-            <p><span lang="en">All switches share one ground; each signal pin gets a key, in order. 1 key or 20, the firmware adapts.</span><span lang="tr">Tüm anahtarlar tek GND'yi paylaşır; her sinyal pinine sırayla bir tuş. 1 tuş da olur 20 de, bellenim uyum sağlar.</span></p>
+            <p><span lang="en">All switches share one ground; each signal pin gets a key, in order. 1 key or 20, the firmware adapts. <a href="https://github.com/asilbalaban/MKYADA/blob/main/hardware/wiring.md">Wiring guide</a>.</span><span lang="tr">Tüm anahtarlar tek GND'yi paylaşır; her sinyal pinine sırayla bir tuş. 1 tuş da olur 20 de, bellenim uyum sağlar. <a href="https://github.com/asilbalaban/MKYADA/blob/main/hardware/wiring.md">Lehim rehberi</a>.</span></p>
             <div class="rp"><img src="images/raspberry-2040-zero.jpg" width="724" height="1000" loading="lazy" decoding="async" alt="RP2040-Zero board"></div></div>
           <div class="step" data-i="2"><h3><span lang="en">Flash &amp; play</span><span lang="tr">Yükle ve oyna</span></h3>
             <p><span lang="en">Drop the firmware onto the board's USB drive. From then on, updates arrive inside the app.</span><span lang="tr">Bellenimi kartın USB sürücüsüne sürükleyin. Sonrası için güncellemeler uygulamanın içinden gelir.</span></p></div>
         </div>
       </div>
-    </div>
-  </div>
-</section>
-
-<section class="specs-sec">
-  <div class="wrap">
-    <div class="specs reveal" data-stagger>
-      <div class="spec"><b>RP2040-Zero</b><span lang="en">the whole brain, ~$5</span><span lang="tr">tüm beyin, ~150₺</span></div>
-      <div class="spec"><b><span data-count="20" data-prefix="1–">1–20</span></b><span lang="en">keys, your choice</span><span lang="tr">tuş, seçim sizin</span></div>
-      <div class="spec"><b><span data-count="8" data-prefix="2–">2–8</span></b><span lang="en">layers per keypad</span><span lang="tr">katman her klavyede</span></div>
-      <div class="spec"><b>JSON</b><span lang="en">everything, hand-editable</span><span lang="tr">her şey, elle düzenlenebilir</span></div>
     </div>
   </div>
 </section>
