@@ -27,12 +27,16 @@ jobs:
           mkdir -p firmware/lib
           curl -sfL "https://raw.githubusercontent.com/adafruit/Adafruit_CircuitPython_NeoPixel/${NEOPIXEL_REF}/neopixel.py" \
             -o firmware/lib/neopixel.py
-      - name: Prepare default config
-        run: cp firmware/config.example.json firmware/config.json
-      - name: Zip firmware
+      # Ship runtime only. A firmware zip is flashed by copying it over the
+      # CIRCUITPY drive, which overwrites whatever it contains — so it must
+      # NOT carry user data (macros/, config.json) or a reflash would clobber
+      # the user's own key macros and setup. A blank board falls back to the
+      # built-in DEFAULT_CONFIG and the app writes config.json on onboarding.
+      - name: Zip firmware (runtime only)
         run: |
           cd firmware
-          zip -r "../mkyada-firmware-v${FW_VERSION}.zip" . -x "*.pyc"
+          zip -r "../mkyada-firmware-v${FW_VERSION}.zip" . \
+            -x "*.pyc" "macros/*" "config.json"
       - name: Attach to release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
