@@ -29,7 +29,7 @@ import { captureScreen, serializeForDevice, thinForDevice } from "../lib/recorde
 import { macroFileName, migrateMacro } from "../lib/macro-model";
 import { useHistory } from "../lib/history";
 import { takeRecorderEdit } from "../lib/recorder-handoff";
-import { Badge, Input, Select } from "../components/ui";
+import { Badge, Select } from "../components/ui";
 import { ToolButton, ToolField, ToolGroup, ToolUnitInput } from "../components/toolbar";
 import { useToast } from "../components/toast";
 import { useConfirm } from "../components/dialog";
@@ -53,9 +53,6 @@ export function RecorderPage({ active = true }: { active?: boolean }) {
   const setMacro = macroHistory.reset;
   const [status, setStatus] = useState("");
   const [startDelay, setStartDelay] = useState(3);
-  // How many times the Play / Preview buttons replay the macro (a testing
-  // convenience, independent of the per-key repeat behaviour in the sidebar).
-  const [playbackCount, setPlaybackCount] = useState(1);
   const [assignKey, setAssignKey] = useState(1);
   const [assignLayer, setAssignLayer] = useState(0);
   const raw = useRef<MacroEvent[]>([]);
@@ -180,11 +177,11 @@ export function RecorderPage({ active = true }: { active?: boolean }) {
 
   async function playOnDevice() {
     if (!macro || !drive) return;
-    // The test-play honors the toolbar's playback count rather than the
-    // per-key repeat setting, so you can try N runs without editing the macro.
-    const forDevice = { ...macro, settings: { ...macro.settings, repeat: playbackCount } };
-    await ipc.driveWrite(drive.path, "live.json", serializeForDevice(forDevice, hello?.proto ?? 0));
-    const times = playbackCount > 1 ? ` ×${playbackCount}` : "";
+    // Play exactly what the user configured — the sidebar Repeat (count, or 0
+    // for loop) is the macro's own setting and the device honors it.
+    await ipc.driveWrite(drive.path, "live.json", serializeForDevice(macro, hello?.proto ?? 0));
+    const repeat = macro.settings?.repeat ?? 1;
+    const times = repeat === 0 ? " (loop)" : repeat > 1 ? ` ×${repeat}` : "";
     setStatus(startDelay > 0 ? `Playing on device${times} in ${startDelay}s…` : `Playing on device${times}…`);
     setTimeout(() => {
       void send({ t: "play", file: "live.json" });
@@ -193,13 +190,13 @@ export function RecorderPage({ active = true }: { active?: boolean }) {
 
   async function previewLocally() {
     if (!macro) return;
-    // Repeat the event stream in place so a single preview call plays the
-    // macro `playbackCount` times back to back.
+    // Honor the macro's Repeat setting. A local preview can't loop forever, so
+    // repeat 0 (loop) previews once; a count replays the stream back to back.
+    const repeat = macro.settings?.repeat ?? 1;
+    const runs = repeat > 1 ? repeat : 1;
     const events =
-      playbackCount > 1
-        ? Array.from({ length: playbackCount }, () => macro.events).flat()
-        : macro.events;
-    const times = playbackCount > 1 ? ` ×${playbackCount}` : "";
+      runs > 1 ? Array.from({ length: runs }, () => macro.events).flat() : macro.events;
+    const times = repeat === 0 ? " (loop → once)" : runs > 1 ? ` ×${runs}` : "";
     setStatus(startDelay > 0 ? `Local preview${times} in ${startDelay}s…` : `Previewing${times}…`);
     setTimeout(() => {
       void invoke("preview_play", {
@@ -350,14 +347,6 @@ export function RecorderPage({ active = true }: { active?: boolean }) {
       }
       toolbarPlayback={
         <ToolGroup label="Playback">
-          <ToolField label="Times" align="start">
-            <Input
-              type="number" min="1" className="w-14"
-              value={playbackCount}
-              onChange={(e) => setPlaybackCount(Math.max(1, parseInt(e.target.value) || 1))}
-              title="How many times Play / Preview repeats the macro"
-            />
-          </ToolField>
           <ToolButton
             label="Play" tone="primary" icon={<Play size={18} aria-hidden />}
             onClick={() => void playOnDevice()} disabled={!drive}

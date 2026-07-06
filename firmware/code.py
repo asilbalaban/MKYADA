@@ -38,7 +38,9 @@ PROTO_VERSION = 4  # v4: streamed JSONL macro files (full-rate playback);
                    # v3: fs_* file management over serial (hidden-drive mode)
 MACRO_FORMATS = ("mkyada-macro", "asil-macro")
 LAYER_NAMES = "abcdefgh"
-FS_CHUNK = 2048  # raw bytes per fs_chunk line (base64 on the wire)
+FS_CHUNK = 8192  # raw bytes per fs_chunk line (base64 ~11KB, under MAX_LINE);
+                 # bigger chunks mean far fewer ack round-trips, so reading a
+                 # large recorded macro over serial isn't painfully slow.
 FS_ACK_TIMEOUT_S = 3.0
 
 DEFAULT_CONFIG = {
@@ -538,10 +540,15 @@ class App:
                         continue
                     self.pending_play = (self.macro_path(key_no), i)
                     return True
+            # Process the whole batch even once a stop is seen: a file
+            # request polled alongside the stop must still get its "busy"
+            # reply, or the app's write waits out its full timeout instead
+            # of retrying the moment playback ends.
+            stop = False
             for m in self.proto.poll():
                 if self.handle_msg(m, in_playback=True):
-                    return True
-            return False
+                    stop = True
+            return stop
 
         try:
             runs = 0

@@ -42,6 +42,14 @@ static OP: Mutex<()> = Mutex::new(());
 const CHUNK: usize = 3072;
 const TIMEOUT: Duration = Duration::from_secs(8);
 
+/// A macro playing on the single-threaded firmware starves the serial link,
+/// so a file write landing then either stalls at the OS layer (Windows
+/// "os error 121") or waits out our reply timeout, and the firmware answers
+/// "busy" outright. All three clear the moment playback stops — so mutating
+/// ops stop playback first, then retry the whole transfer a few times.
+const FS_ATTEMPTS: u32 = 5;
+const RETRY_BACKOFF: Duration = Duration::from_millis(150);
+
 /// An in-flight fs operation: holds the op lock and receives the routed
 /// fs messages; the route is uninstalled again on drop.
 struct Op<'a> {
@@ -106,8 +114,50 @@ fn rel(path: &str) -> Result<&str, String> {
     Ok(path.trim_start_matches('/'))
 }
 
+/// Errors a lingering macro produces on the serial link — all transient,
+/// gone once playback has actually stopped, so worth retrying.
+fn is_transient(e: &str) -> bool {
+    e.contains("os error 121") // Windows serial write stalled (device busy)
+        || e.contains("did not answer in time") // our reply timeout
+        || e.contains("busy playing a macro") // firmware's explicit busy reply
+}
+
+/// Stop any macro playing so the filesystem is actually free. Sending `stop`
+/// is a no-op when nothing is playing (the firmware ignores it in the idle
+/// loop), so this is safe to run before every mutating op. We don't block
+/// waiting for it: the firmware stops within a poll tick and the retry below
+/// absorbs the brief window while playback unwinds.
+fn quiesce(mgr: &DeviceManager) {
+    let _ = serial::send(mgr, &json!({"t": "stop"}));
+}
+
+/// Run a mutating fs op, first stopping playback, and retry the whole thing
+/// on the transient errors a still-winding-down macro leaves behind.
+fn with_recovery<T>(
+    mgr: &DeviceManager,
+    mut op: impl FnMut(&DeviceManager) -> Result<T, String>,
+) -> Result<T, String> {
+    let mut last = String::new();
+    for attempt in 0..FS_ATTEMPTS {
+        quiesce(mgr);
+        if attempt > 0 {
+            std::thread::sleep(RETRY_BACKOFF);
+        }
+        match op(mgr) {
+            Ok(v) => return Ok(v),
+            Err(e) if is_transient(&e) => last = e,
+            Err(e) => return Err(e),
+        }
+    }
+    Err(last)
+}
+
 pub fn write_file(mgr: &DeviceManager, path: &str, bytes: &[u8]) -> Result<(), String> {
     let path = rel(path)?;
+    with_recovery(mgr, |mgr| write_once(mgr, path, bytes))
+}
+
+fn write_once(mgr: &DeviceManager, path: &str, bytes: &[u8]) -> Result<(), String> {
     let op = Op::begin(mgr)?;
     let chunks: Vec<&[u8]> = if bytes.is_empty() {
         vec![&[]]
@@ -153,9 +203,11 @@ pub fn read_file(mgr: &DeviceManager, path: &str) -> Result<Vec<u8>, String> {
 
 pub fn delete_file(mgr: &DeviceManager, path: &str) -> Result<(), String> {
     let path = rel(path)?;
-    let op = Op::begin(mgr)?;
-    op.send(&json!({"t": "fs_delete", "path": path}))?;
-    op.expect_ok("fs_delete").map(|_| ())
+    with_recovery(mgr, |mgr| {
+        let op = Op::begin(mgr)?;
+        op.send(&json!({"t": "fs_delete", "path": path}))?;
+        op.expect_ok("fs_delete").map(|_| ())
+    })
 }
 
 /// File names in a directory, matching drive::list_dir semantics
