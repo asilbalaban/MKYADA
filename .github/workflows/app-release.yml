@@ -64,5 +64,5 @@ jobs:
 
             **Firmware**: download `mkyada-firmware-*.zip` and follow
             [docs/firmware-install.md](https://github.com/asilbalaban/MKYADA/blob/main/docs/firmware-install.md).
-          releaseDraft: true
+          releaseDraft: false
           prerelease: false
