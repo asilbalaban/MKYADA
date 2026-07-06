@@ -11,7 +11,7 @@ import { readTextFile } from "../lib/fs";
 import { ipc } from "../lib/ipc";
 import { useDevice } from "../lib/device";
 import type { MacroEvent, MacroFile } from "../lib/types";
-import { captureScreen, thinForDevice } from "../lib/recorder-model";
+import { captureScreen, serializeForDevice, thinForDevice } from "../lib/recorder-model";
 import { macroFileName, migrateMacro } from "../lib/macro-model";
 import { useHistory } from "../lib/history";
 import { takeRecorderEdit } from "../lib/recorder-handoff";
@@ -162,8 +162,7 @@ export function RecorderPage({ active = true }: { active?: boolean }) {
 
   async function playOnDevice() {
     if (!macro || !drive) return;
-    const out = { ...macro, events: thinForDevice(macro.events) };
-    await ipc.driveWrite(drive.path, "live.json", JSON.stringify(out));
+    await ipc.driveWrite(drive.path, "live.json", serializeForDevice(macro, hello?.proto ?? 0));
     setStatus(startDelay > 0 ? `Playing on device in ${startDelay}s…` : "Playing on device…");
     setTimeout(() => {
       void send({ t: "play", file: "live.json" });
@@ -196,17 +195,16 @@ export function RecorderPage({ active = true }: { active?: boolean }) {
 
   async function assignToKey() {
     if (!macro || !drive) return;
-    const out = { ...macro, events: thinForDevice(macro.events) };
     const file = macroFileName(assignKey, assignLayer);
     try {
-      await ipc.driveWrite(drive.path, file, JSON.stringify(out));
+      await ipc.driveWrite(drive.path, file, serializeForDevice(macro, hello?.proto ?? 0));
       // Best-effort: a read-only drive makes the backend restart the keypad
       // (it reboots with the new file); the port is briefly down then.
       await send({ t: "reload" }).catch(() => {});
       setStatus(`Assigned to ${file}`);
       toast.success(
         `Macro saved to key ${assignKey}`,
-        `${out.events.length} events written to the keypad. Press the key to try it.`,
+        `${macro.events.length} events written to the keypad. Press the key to try it.`,
       );
     } catch (e) {
       toast.error("Could not write to the keypad", String(e));

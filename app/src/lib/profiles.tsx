@@ -28,7 +28,6 @@ import type {
   Assignment,
   DriveInfo,
   ForegroundInfo,
-  MacroFile,
   Profile,
   SequenceStep,
   SoundHoldAction,
@@ -41,12 +40,14 @@ import {
   compileSequenceParts,
   compileVariantParts,
   macroFileName,
+  parseDeviceMacro,
   profileMacroFileName,
   sequenceIsPureHid,
   sequencePartFileName,
   stepIsHid,
   variantPartFileName,
 } from "./macro-model";
+import { serializeForDevice } from "./recorder-model";
 
 /** Perform a computer-side key action (Stream Deck style): open an
  *  app/file/URL, run a shell command, play a sound or call a webhook. HID
@@ -116,7 +117,7 @@ function matches(p: Profile, fg: ForegroundInfo): boolean {
 }
 
 export function ProfilesProvider({ children }: { children: ReactNode }) {
-  const { port, drive, send, onBtn, onMsg } = useDevice();
+  const { port, drive, hello, send, onBtn, onMsg } = useDevice();
   const driveRef = useRef<DriveInfo | null>(null);
   driveRef.current = drive;
   const [profiles, setProfiles] = useState<Profile[]>([]);
@@ -273,7 +274,7 @@ export function ProfilesProvider({ children }: { children: ReactNode }) {
         void ipc
           .driveRead(d.path, file)
           .then((raw) => {
-            const mf = JSON.parse(raw) as MacroFile;
+            const mf = parseDeviceMacro(raw);
             const variant = String(m.variant ?? "tap");
             const node =
               variant === "tap" ? mf : mf.variants?.[variant as "double" | "hold"];
@@ -424,7 +425,7 @@ export function ProfilesProvider({ children }: { children: ReactNode }) {
         void ipc
           .driveRead(d.path, macroFileName(e.key, layerIndex))
           .then((raw) => {
-            const m = JSON.parse(raw) as MacroFile;
+            const m = parseDeviceMacro(raw);
             // key logic: the firmware resolves tap/double/hold itself and
             // announces the choice as "key_action" — handled elsewhere
             if (m.variants && (m.variants.double || m.variants.hold)) return;
@@ -464,7 +465,7 @@ export function ProfilesProvider({ children }: { children: ReactNode }) {
           const macro = compileAssignment(a as Assignment);
           const file = profileMacroFileName(p.id, Number(keyNo));
           if (macro) {
-            await ipc.driveWrite(drive.path, file, JSON.stringify(macro));
+            await ipc.driveWrite(drive.path, file, serializeForDevice(macro, hello?.proto ?? 0));
           } else {
             await ipc.driveDelete(drive.path, file).catch(() => {});
           }
@@ -475,7 +476,7 @@ export function ProfilesProvider({ children }: { children: ReactNode }) {
             ...compileVariantParts(a as Assignment, file),
           ];
           for (const part of parts) {
-            await ipc.driveWrite(drive.path, part.path, JSON.stringify(part.file));
+            await ipc.driveWrite(drive.path, part.path, serializeForDevice(part.file, hello?.proto ?? 0));
           }
           const stem = file.split("/").pop()!.replace(/\.json$/, ".");
           const keep = new Set(parts.map((part) => part.path.split("/").pop()));
@@ -488,7 +489,7 @@ export function ProfilesProvider({ children }: { children: ReactNode }) {
         }
       }
     },
-    [drive],
+    [drive, hello],
   );
 
   return (

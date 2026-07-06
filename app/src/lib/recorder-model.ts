@@ -375,6 +375,41 @@ export function thinForDevice(events: MacroEvent[], tolerancePx = 3, maxPerSecon
   return flattenItems(items);
 }
 
+/** Lossless shrink: merge consecutive moves to the same pixel, summing delays. */
+function mergeStationaryMoves(events: MacroEvent[]): MacroEvent[] {
+  const out: MacroEvent[] = [];
+  for (const ev of events) {
+    const prev = out[out.length - 1];
+    if (
+      ev.type === "move" && prev?.type === "move" &&
+      prev.x === ev.x && prev.y === ev.y && !ev.label
+    ) {
+      prev.delay += ev.delay;
+      continue;
+    }
+    out.push({ ...ev });
+  }
+  return out;
+}
+
+/**
+ * Serialize a macro for the device. Firmware with proto >= 4 streams macro
+ * files line by line (header + one event per line, O(1) RAM), so the full
+ * recording ships as-is — no resampling, no path simplification. Older
+ * firmware loads the whole file into RAM and keeps getting the thinned
+ * legacy JSON. Files carrying variants also stay legacy: the stream reader
+ * plays them as plain taps.
+ */
+export function serializeForDevice(macro: MacroFile, proto: number): string {
+  if (proto >= 4 && !macro.variants) {
+    const { events, ...header } = macro;
+    const lines = [JSON.stringify({ ...header, version: 4, stream: true })];
+    for (const ev of mergeStationaryMoves(events)) lines.push(JSON.stringify(ev));
+    return lines.join("\n") + "\n";
+  }
+  return JSON.stringify({ ...macro, events: thinForDevice(macro.events) });
+}
+
 /** Every row reads the same way: `Category Action · detail · detail`. */
 export function describeItem(item: EditorItem): string {
   const cap = (s: string) => (s ? s[0].toUpperCase() + s.slice(1) : s);

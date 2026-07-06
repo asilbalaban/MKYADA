@@ -17,8 +17,10 @@ use tauri::{AppHandle, Emitter};
 
 static CAPTURING: AtomicBool = AtomicBool::new(false);
 static LISTENER: Once = Once::new();
-/// Mouse-move sample throttle, matching the tkinter recorder's 15 ms.
-const MOVE_SAMPLE_MS: u128 = 15;
+/// Mouse-move sample throttle. 8 ms ≈ 125 Hz — the USB HID full-speed
+/// polling ceiling, so playback can reproduce every recorded sample. (The
+/// v4 stream macro format has no size ceiling, so dense recordings are fine.)
+const MOVE_SAMPLE_MS: u128 = 8;
 
 /// Windows reports keys as virtual-key codes, which layouts REASSIGN per
 /// physical key (German swaps Y/Z, French AZERTY moves the whole letter

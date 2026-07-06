@@ -34,7 +34,8 @@ PIN_ORDER = (
 )
 DEBOUNCE_S = 0.02
 PING_TIMEOUT_S = 5.0
-PROTO_VERSION = 3  # v3: fs_* file management over serial (hidden-drive mode)
+PROTO_VERSION = 4  # v4: streamed JSONL macro files (full-rate playback);
+                   # v3: fs_* file management over serial (hidden-drive mode)
 MACRO_FORMATS = ("mkyada-macro", "asil-macro")
 LAYER_NAMES = "abcdefgh"
 FS_CHUNK = 2048  # raw bytes per fs_chunk line (base64 on the wire)
@@ -414,33 +415,79 @@ class App:
         return "tap"
 
     # --- playback ---
+    def load_macro(self, f):
+        """First line decides the flavor: v4 stream header ({"stream":true}
+        + one event per following line), single-line whole-file JSON (what
+        the app writes for proto<=3), or pretty-printed JSON (hand-made).
+        Returns (data, stream_pos): stream_pos is the file offset of the
+        first event line for stream files, None for whole-file macros."""
+        line = f.readline()
+        try:
+            data = json.loads(line)
+        except ValueError:
+            f.seek(0)
+            data = json.load(f)  # pretty-printed multi-line file
+            return data, None
+        if isinstance(data, dict) and data.get("stream"):
+            return data, f.tell()
+        return data, None
+
+    def stream_events(self, f):
+        """Yield events from a v4 stream file one JSON line at a time —
+        O(1) RAM per event, so macro length is bounded by flash, not RAM."""
+        while True:
+            line = f.readline()
+            if not line:
+                return
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                yield json.loads(line)
+            except ValueError:
+                pass  # skip a corrupt line rather than abort mid-macro
+
     def play_file(self, path, trigger=None, speed=None, repeat=None):
+        f = None
         try:
             gc.collect()
-            with open(path) as f:
-                data = json.load(f)
+            f = open(path, "rb")  # binary keeps tell/seek exact for replays
+            data, stream_pos = self.load_macro(f)
+            if stream_pos is None:
+                f.close()
+                f = None
         except OSError:
+            if f:
+                f.close()
             self.led.error()
             self.proto.send({"t": "err", "re": "play", "code": "not_found", "msg": path})
             return
         except ValueError:
+            if f:
+                f.close()
             self.led.error()
             self.proto.send({"t": "err", "re": "play", "code": "bad_json", "msg": path})
             return
         except MemoryError:
+            if f:
+                f.close()
             gc.collect()
             self.led.error()
             self.proto.send({"t": "err", "re": "play", "code": "oom", "msg": path})
             return
-        if data.get("format") not in MACRO_FORMATS:
+        if not isinstance(data, dict) or data.get("format") not in MACRO_FORMATS:
+            if f:
+                f.close()
             self.led.error()
             self.proto.send({"t": "err", "re": "play", "code": "bad_format", "msg": path})
             return
 
         # key logic: standalone presses pick tap/double/hold themselves; the
         # chosen variant is announced so the app can run host-side variants
-        # (launch/command/sound compile to empty events on the device)
-        variants = data.get("variants")
+        # (launch/command/sound compile to empty events on the device).
+        # Stream files carry no variants (the app never writes that combo);
+        # a stray "variants" in a stream header is ignored and plays as tap.
+        variants = data.get("variants") if stream_pos is None else None
         if trigger is not None and isinstance(variants, dict) and variants:
             choice = self.resolve_variant(trigger, variants,
                                           data.get("settings") or {})
@@ -499,7 +546,12 @@ class App:
         try:
             runs = 0
             while True:
-                self.engine.play(events, screen=screen, speed=speed,
+                if stream_pos is None:
+                    evs = events
+                else:
+                    f.seek(stream_pos)  # each pass re-reads the event lines
+                    evs = self.stream_events(f)
+                self.engine.play(evs, screen=screen, speed=speed,
                                  should_stop=should_stop, tick=self.led.tick)
                 runs += 1
                 if loop:
@@ -514,9 +566,20 @@ class App:
                 break
         except StopPlayback:
             stopped = True
+        except MemoryError:
+            stopped = True
+            gc.collect()
+            self.led.error()
+            self.proto.send({"t": "err", "re": "play", "code": "oom", "msg": path})
+        except OSError:
+            stopped = True
+            self.led.error()
+            self.proto.send({"t": "err", "re": "play", "code": "io", "msg": path})
         finally:
+            if f:
+                f.close()
             self.playing_key = None
-            del events, data
+            events = data = None
             gc.collect()
             self.set_mode(self.mode)  # restore idle/host LED
             self.proto.send({"t": "play_done", "file": path, "stopped": stopped})

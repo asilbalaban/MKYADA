@@ -1,4 +1,4 @@
-# mkyada-macro JSON format (v2 / v3)
+# mkyada-macro JSON format (v2 / v3 / v4 stream)
 
 A macro is a single JSON file. **Everything a key can do is a macro file** — a
 plain Ctrl+A binding, a typed text snippet, a media key, or a full recorded
@@ -98,6 +98,36 @@ Every event has `delay` — milliseconds to wait **before** executing it.
 - `consumer` usages: `play_pause`, `next_track`, `prev_track`, `stop`, `mute`, `volume_up`, `volume_down`, `brightness_up`, `brightness_down`.
 - `wait`: pure delay, no action.
 
+## Stream layout — v4 (firmware ≥ 0.5.0, proto ≥ 4)
+
+The same macro can be written in a **line-oriented stream layout** so the
+firmware plays it straight from flash without loading the whole file into
+RAM — this is what removes the old event-count ceiling and lets recordings
+play back at full fidelity (no thinning):
+
+```
+{"format":"mkyada-macro","version":4,"stream":true,"name":"…","screen":{…},"settings":{…}}
+{"delay":15,"type":"move","x":960,"y":540}
+{"delay":16,"type":"move","x":964,"y":541}
+{"delay":8,"type":"button","action":"down","button":"left"}
+```
+
+- **Line 1** is the header: every top-level field except `events`, plus
+  `"stream": true` and `version: 4`.
+- **Every following line** is one event object (same schema as below), in
+  order. Blank lines are skipped; a corrupt line is skipped, not fatal.
+- Detection: the firmware reads the first line — if it parses and has
+  `"stream": true`, the rest of the file is streamed. A single-line classic
+  JSON file, or a pretty-printed multi-line one, falls back to the whole-file
+  parser. Same `.json` filenames everywhere.
+- `repeat` / loop replays seek back to the first event line — no extra RAM.
+- **Limitation:** stream files don't carry `variants` (the app never writes
+  that combination). A stray `variants` in a stream header is ignored and the
+  file plays as a plain tap.
+- **Graceful degradation:** the desktop app only writes the stream layout to
+  keypads that announce `proto >= 4` in `hello`; older firmware keeps
+  receiving classic (thinned) whole-file JSON.
+
 ## File naming on the device
 
 ```
@@ -114,10 +144,13 @@ No app needed: drop a file with the right name onto the drive and press the key.
 
 ## Size guidance
 
-The RP2040 has 264 KB of RAM; keep macros under roughly **2,000 events / 120 KB**.
-The desktop app's "optimize for device" export thins dense mouse-move streams
-automatically. If a file is too big the firmware blinks red and reports
-`{"code": "oom"}` over serial instead of crashing.
+- **v4 stream files** (firmware ≥ 0.5.0): RAM use is constant per event —
+  macro length is bounded only by flash space. No thinning needed.
+- **Classic whole-file JSON** (older firmware): the RP2040 has 264 KB of RAM;
+  keep macros under roughly **2,000 events / 120 KB**. The desktop app thins
+  dense mouse-move streams automatically for these devices. If a file is too
+  big the firmware blinks red and reports `{"code": "oom"}` over serial
+  instead of crashing.
 
 ## v1 (`asil-macro`) compatibility
 

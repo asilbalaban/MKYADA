@@ -27,6 +27,7 @@ import {
   UnfoldVertical,
 } from "lucide-react";
 import type { MacroEvent, MacroFile } from "../lib/types";
+import { useDevice } from "../lib/device";
 import {
   ClickGroup,
   DragGroup,
@@ -73,6 +74,10 @@ interface Props {
 }
 
 export function MacroEditor({ macro, onChange, history }: Props) {
+  // proto >= 4 firmware streams macro files line by line, so the old
+  // 2000-event RAM ceiling (and its warning) only applies to older keypads
+  const { hello } = useDevice();
+  const streaming = (hello?.proto ?? 0) >= 4;
   const items = useMemo(() => groupEvents(macro.events), [macro.events]);
   // Multi-select: click = single, shift+click = range from anchor,
   // cmd/ctrl+click = toggle. Sorted list of row indices.
@@ -432,17 +437,21 @@ export function MacroEditor({ macro, onChange, history }: Props) {
             Shift+click selects a range, {IS_MAC ? "⌘" : "Ctrl"}+click adds/removes single rows.
           </p>
           <div className="flex items-center justify-between gap-3 mt-2 border-t border-line pt-2">
-            <div className={`text-xs ${stats.tooBig ? "text-warning" : "text-fg-faint"}`}>
+            <div className={`text-xs ${stats.tooBig && !streaming ? "text-warning" : "text-fg-faint"}`}>
               {stats.events} events · {(stats.bytes / 1024).toFixed(1)} KB
-              {stats.tooBig
+              {stats.tooBig && !streaming
                 ? " — too large for the keypad's memory. Optimize to shrink it."
                 : " — fits on the keypad."}
             </div>
             <Button
-              title="Thins dense mouse paths (max 30 points/second) while keeping their shape, so the macro fits the keypad's memory"
+              title={
+                streaming
+                  ? "Simplifies dense mouse paths (max 30 points/second) while keeping their shape. Your keypad plays full recordings as-is — this is only an editing convenience."
+                  : "Thins dense mouse paths (max 30 points/second) while keeping their shape, so the macro fits the keypad's memory"
+              }
               onClick={optimizeForDevice}
             >
-              <Scissors size={14} aria-hidden /> Optimize for device
+              <Scissors size={14} aria-hidden /> {streaming ? "Simplify paths" : "Optimize for device"}
             </Button>
           </div>
         </Card>

@@ -89,7 +89,6 @@ check("unknown -> None", resolve_key({"key": "☃"}) is None)
 from mkyada.engine import Engine, StopPlayback  # noqa: E402
 
 eng = Engine()
-eng.SLICE = 0.001
 with open(os.path.join(FFW, "macros", "key1.json")) as f:
     demo = json.load(f)
 for ev in demo["events"]:
@@ -131,6 +130,16 @@ try:
     check("StopPlayback raised", False)
 except StopPlayback:
     check("StopPlayback raised", True)
+
+# drift-free scheduling: 100 x 10ms events with a 2ms-slow tick must finish in
+# ~1.0s wall time. The old per-event relative sleeps accumulated the tick cost
+# (>=1.2s); absolute deadlines absorb it.
+import time as _time  # noqa: E402
+
+t0 = _time.monotonic()
+eng.play([{"delay": 10, "type": "wait"}] * 100, tick=lambda: _time.sleep(0.002))
+drift_t = _time.monotonic() - t0
+check("playback timing drift-free", 0.93 <= drift_t <= 1.15, "%.3fs (want ~1.0s)" % drift_t)
 
 # 3. serial protocol line parsing (the CircuitPython bytearray regression)
 from mkyada.proto import Proto  # noqa: E402
@@ -316,6 +325,64 @@ check("hold_repeat replays while held", runs["n"] == 3, str(runs))
 app.buttons.scan = _orig_scan
 app.engine.play = _orig_play
 
+# --- v4 stream macro files (proto v4): header line + one event per line ---
+def stream_macro_file(events, settings=None):
+    f = tempfile.NamedTemporaryFile("w", suffix=".json", delete=False)
+    hdr = {"format": "mkyada-macro", "version": 4, "stream": True,
+           "screen": {"width": 1920, "height": 1080}}
+    if settings:
+        hdr["settings"] = settings
+    f.write(json.dumps(hdr) + "\n")
+    for ev in events:
+        f.write(json.dumps(ev) + "\n")
+    f.close()
+    return f.name
+
+
+tap_events = [{"delay": 0, "type": "key", "action": "down", "key": "a"},
+              {"delay": 0, "type": "key", "action": "up", "key": "a"}]
+
+outbox.clear()
+sent_reports.clear()
+path_stream = stream_macro_file(
+    tap_events + [{"delay": 0, "type": "move", "x": 960, "y": 540}])
+app.play_file(path_stream)
+check("stream file plays", any(m.get("t") == "play_done" and not m.get("stopped")
+                               for m in outbox), str(outbox))
+check("stream kbd 'a' pressed", any(r[1] == 0x06 and r[2][2] == 0x04 for r in sent_reports))
+check("stream move emitted", any(r[1] == 0x02 for r in sent_reports))
+check("stream no error", not any(m.get("t") == "err" for m in outbox), str(outbox))
+
+# repeat replays by seeking back to the first event line — no extra RAM
+outbox.clear()
+sent_reports.clear()
+path_stream3 = stream_macro_file(tap_events, settings={"repeat": 3})
+app.play_file(path_stream3)
+presses3 = sum(1 for r in sent_reports if r[1] == 0x06 and r[2][2] == 0x04)
+check("stream repeat=3 replays 3x", presses3 == 3, str(presses3))
+
+# a corrupt event line is skipped, not fatal
+path_corrupt = stream_macro_file(tap_events)
+with open(path_corrupt, "a") as fh:
+    fh.write("{not json}\n")
+    fh.write(json.dumps({"delay": 0, "type": "move", "x": 10, "y": 10}) + "\n")
+outbox.clear()
+app.play_file(path_corrupt)
+check("stream corrupt line skipped",
+      any(m.get("t") == "play_done" for m in outbox)
+      and not any(m.get("t") == "err" for m in outbox), str(outbox))
+
+# pretty-printed whole-file JSON still plays (hand-made files on the drive)
+fpp = tempfile.NamedTemporaryFile("w", suffix=".json", delete=False)
+json.dump({"format": "mkyada-macro", "version": 2, "events": tap_events}, fpp, indent=2)
+fpp.close()
+outbox.clear()
+sent_reports.clear()
+app.play_file(fpp.name)
+check("pretty JSON still plays",
+      any(m.get("t") == "play_done" for m in outbox)
+      and not any(m.get("t") == "err" for m in outbox), str(outbox))
+
 # --- key logic: tap / double press / long press (macro format v3) ---------
 def variant_file():
     f = tempfile.NamedTemporaryFile("w", suffix=".json", delete=False)
@@ -392,7 +459,7 @@ app.proto.send = _orig_send
 app.proto.ser = None
 
 # --- serial "led" op (proto v2): app feedback override --------------------
-check("hello reports proto v3", app.hello()["proto"] == 3, str(app.hello()["proto"]))
+check("hello reports proto v4", app.hello()["proto"] == 4, str(app.hello()["proto"]))
 check("hello reports usb_drive", app.hello()["usb_drive"] is True, str(app.hello()))
 app.proto.ser = FakeSerial([])
 app.handle_msg({"t": "led", "mode": "solid", "rgb": [255, 0, 0]})
@@ -406,76 +473,87 @@ check("led garbage rgb tolerated", app.led.override is None, str(app.led.overrid
 app.proto.ser = None
 
 # --- serial file management (proto v3): fs_* commands ---------------------
+# The firmware roots every path at "/" (the CIRCUITPY drive). That maps
+# directly onto a POSIX temp dir but not onto Windows drive letters, so this
+# section runs on POSIX only (CI covers it).
 import binascii  # noqa: E402
-
-fs_dir = tempfile.mkdtemp()  # absolute path; fs_path() keeps it absolute
-fs_rel = fs_dir.lstrip("/")
-outbox.clear()
-app.proto.send = lambda obj: outbox.append(obj)
-
-# chunked write: two chunks + eof, lands atomically via .part + rename
-payload = b'{"format":"mkyada-macro","version":2,"events":[]}' * 50
-half = len(payload) // 2
-b64 = lambda b: binascii.b2a_base64(b).decode().strip()  # noqa: E731
-app.handle_msg({"t": "fs_write", "path": fs_rel + "/macros/key1.json",
-                "seq": 0, "data": b64(payload[:half]), "eof": False})
-check("fs_write chunk acked", outbox[-1] == {"t": "ok", "re": "fs_write", "seq": 0}, str(outbox[-1:]))
-app.handle_msg({"t": "fs_write", "path": fs_rel + "/macros/key1.json",
-                "seq": 1, "data": b64(payload[half:]), "eof": True})
-check("fs_write eof acked", outbox[-1].get("eof") is True, str(outbox[-1:]))
-with open(fs_dir + "/macros/key1.json", "rb") as f:
-    check("fs_write content intact", f.read() == payload)
-check("fs_write .part cleaned", not os.path.exists(fs_dir + "/macros/key1.json.part"))
-
-# out-of-order chunk -> bad_seq error, upload discarded
-app.handle_msg({"t": "fs_write", "path": fs_rel + "/x.bin", "seq": 0,
-                "data": b64(b"aa"), "eof": False})
-app.handle_msg({"t": "fs_write", "path": fs_rel + "/x.bin", "seq": 5,
-                "data": b64(b"bb"), "eof": True})
-check("fs_write bad seq rejected", outbox[-1].get("code") == "bad_seq", str(outbox[-1:]))
-check("fs_write bad seq leaves no file", not os.path.exists(fs_dir + "/x.bin"))
-
-# read it back (multi-chunk: the app acks each chunk; stub that here)
-outbox.clear()
-app.wait_fs_ack = lambda: True
-app.handle_msg({"t": "fs_read", "path": fs_rel + "/macros/key1.json"})
-del app.wait_fs_ack
-chunks = [m for m in outbox if m.get("t") == "fs_chunk"]
-got = b"".join(binascii.a2b_base64(m["data"]) for m in chunks if m["data"])
-check("fs_read roundtrip", got == payload and chunks[-1]["eof"] is True,
-      "%d chunks, %d bytes" % (len(chunks), len(got)))
-
-outbox.clear()
-app.handle_msg({"t": "fs_read", "path": fs_rel + "/nope.json"})
-check("fs_read missing -> not_found", outbox[-1].get("code") == "not_found", str(outbox[-1:]))
-
-# list + delete
-outbox.clear()
-app.handle_msg({"t": "fs_list", "path": fs_rel + "/macros"})
-listed = outbox[-1]
-check("fs_list sees the file",
-      listed.get("t") == "fs_list"
-      and any(e["name"] == "key1.json" and e["size"] == len(payload) and not e["dir"]
-              for e in listed.get("entries", [])),
-      str(listed))
-app.handle_msg({"t": "fs_delete", "path": fs_rel + "/macros/key1.json"})
-check("fs_delete ok", outbox[-1].get("re") == "fs_delete" and outbox[-1].get("t") == "ok", str(outbox[-1:]))
-check("fs_delete removed", not os.path.exists(fs_dir + "/macros/key1.json"))
-
-# path traversal is refused
-outbox.clear()
-app.handle_msg({"t": "fs_read", "path": "../etc/passwd"})
-check("fs path traversal refused", outbox[-1].get("code") == "bad_path", str(outbox[-1:]))
-
-# mid-playback: fs ops answer busy instead of silently stalling the app
-outbox.clear()
-app.handle_msg({"t": "fs_write", "path": fs_rel + "/y.bin", "seq": 0,
-                "data": "", "eof": True}, in_playback=True)
-check("fs busy during playback", outbox[-1].get("code") == "busy", str(outbox[-1:]))
-
-app.proto.send = _orig_send
 import shutil  # noqa: E402
-shutil.rmtree(fs_dir, ignore_errors=True)
+
+
+def fs_section():
+    fs_dir = tempfile.mkdtemp()  # absolute path; fs_path() keeps it absolute
+    fs_rel = fs_dir.lstrip("/")
+    outbox.clear()
+    app.proto.send = lambda obj: outbox.append(obj)
+
+    # chunked write: two chunks + eof, lands atomically via .part + rename
+    payload = b'{"format":"mkyada-macro","version":2,"events":[]}' * 50
+    half = len(payload) // 2
+    b64 = lambda b: binascii.b2a_base64(b).decode().strip()  # noqa: E731
+    app.handle_msg({"t": "fs_write", "path": fs_rel + "/macros/key1.json",
+                    "seq": 0, "data": b64(payload[:half]), "eof": False})
+    check("fs_write chunk acked", outbox[-1] == {"t": "ok", "re": "fs_write", "seq": 0}, str(outbox[-1:]))
+    app.handle_msg({"t": "fs_write", "path": fs_rel + "/macros/key1.json",
+                    "seq": 1, "data": b64(payload[half:]), "eof": True})
+    check("fs_write eof acked", outbox[-1].get("eof") is True, str(outbox[-1:]))
+    with open(fs_dir + "/macros/key1.json", "rb") as f:
+        check("fs_write content intact", f.read() == payload)
+    check("fs_write .part cleaned", not os.path.exists(fs_dir + "/macros/key1.json.part"))
+
+    # out-of-order chunk -> bad_seq error, upload discarded
+    app.handle_msg({"t": "fs_write", "path": fs_rel + "/x.bin", "seq": 0,
+                    "data": b64(b"aa"), "eof": False})
+    app.handle_msg({"t": "fs_write", "path": fs_rel + "/x.bin", "seq": 5,
+                    "data": b64(b"bb"), "eof": True})
+    check("fs_write bad seq rejected", outbox[-1].get("code") == "bad_seq", str(outbox[-1:]))
+    check("fs_write bad seq leaves no file", not os.path.exists(fs_dir + "/x.bin"))
+
+    # read it back (multi-chunk: the app acks each chunk; stub that here)
+    outbox.clear()
+    app.wait_fs_ack = lambda: True
+    app.handle_msg({"t": "fs_read", "path": fs_rel + "/macros/key1.json"})
+    del app.wait_fs_ack
+    chunks = [m for m in outbox if m.get("t") == "fs_chunk"]
+    got = b"".join(binascii.a2b_base64(m["data"]) for m in chunks if m["data"])
+    check("fs_read roundtrip", got == payload and chunks[-1]["eof"] is True,
+          "%d chunks, %d bytes" % (len(chunks), len(got)))
+
+    outbox.clear()
+    app.handle_msg({"t": "fs_read", "path": fs_rel + "/nope.json"})
+    check("fs_read missing -> not_found", outbox[-1].get("code") == "not_found", str(outbox[-1:]))
+
+    # list + delete
+    outbox.clear()
+    app.handle_msg({"t": "fs_list", "path": fs_rel + "/macros"})
+    listed = outbox[-1]
+    check("fs_list sees the file",
+          listed.get("t") == "fs_list"
+          and any(e["name"] == "key1.json" and e["size"] == len(payload) and not e["dir"]
+                  for e in listed.get("entries", [])),
+          str(listed))
+    app.handle_msg({"t": "fs_delete", "path": fs_rel + "/macros/key1.json"})
+    check("fs_delete ok", outbox[-1].get("re") == "fs_delete" and outbox[-1].get("t") == "ok", str(outbox[-1:]))
+    check("fs_delete removed", not os.path.exists(fs_dir + "/macros/key1.json"))
+
+    # path traversal is refused
+    outbox.clear()
+    app.handle_msg({"t": "fs_read", "path": "../etc/passwd"})
+    check("fs path traversal refused", outbox[-1].get("code") == "bad_path", str(outbox[-1:]))
+
+    # mid-playback: fs ops answer busy instead of silently stalling the app
+    outbox.clear()
+    app.handle_msg({"t": "fs_write", "path": fs_rel + "/y.bin", "seq": 0,
+                    "data": "", "eof": True}, in_playback=True)
+    check("fs busy during playback", outbox[-1].get("code") == "busy", str(outbox[-1:]))
+
+    app.proto.send = _orig_send
+    shutil.rmtree(fs_dir, ignore_errors=True)
+
+
+if os.name != "nt":
+    fs_section()
+else:
+    print("SKIP fs_* section (POSIX-rooted paths; covered on CI)")
 
 # usb_drive config: default on, explicit false survives load_config
 _b.open = _cfg_open({"usb_drive": False})

@@ -1,5 +1,11 @@
-# MKYADA serial protocol (v3)
+# MKYADA serial protocol (v4)
 
+v4 (firmware 0.5.0) is a **capability signal only** — no new messages. A
+device announcing `proto >= 4` in `hello` understands the v4 **stream macro
+layout** (JSONL, see macro-format.md): the app then writes full-fidelity
+recordings instead of thinned ones. Classic whole-file macros keep playing.
+
+v3 adds the `fs_*` file management commands (hidden-drive mode).
 v2 (firmware 0.3.0) adds: `btn` streaming in standalone mode, the `key_action`
 announcement for key-logic variants, and the `led` feedback override. v1 hosts
 keep working — all v1 messages are unchanged.

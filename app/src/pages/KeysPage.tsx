@@ -7,7 +7,7 @@ import { useDevice } from "../lib/device";
 import { useHostMode } from "../lib/focus";
 import { useNav } from "../lib/nav";
 import { ipc } from "../lib/ipc";
-import type { Assignment, DeviceConfig, MacroFile } from "../lib/types";
+import type { Assignment, DeviceConfig } from "../lib/types";
 import { layerLabel } from "../lib/types";
 import {
   AUX_FILE_RE,
@@ -18,7 +18,9 @@ import {
   macroFileName,
   migrateMacro,
   parseAssignment,
+  parseDeviceMacro,
 } from "../lib/macro-model";
+import { serializeForDevice } from "../lib/recorder-model";
 import { stashRecorderEdit } from "../lib/recorder-handoff";
 import { undoRedoFromEvent, useHistory } from "../lib/history";
 import { Button, Card, EmptyState, Spinner } from "../components/ui";
@@ -74,7 +76,7 @@ export function KeysPage() {
       for (let l = 0; l < layers; l++) {
         try {
           const raw = await ipc.driveRead(drive.path, macroFileName(k, l));
-          found.set(slotKey(k, l), parseAssignment(JSON.parse(raw) as MacroFile));
+          found.set(slotKey(k, l), parseAssignment(parseDeviceMacro(raw)));
         } catch {
           // unassigned slot
         }
@@ -149,7 +151,7 @@ export function KeysPage() {
     try {
       if (macro) {
         macro.screen = cfg.screen;
-        await ipc.driveWrite(drive.path, file, JSON.stringify(macro));
+        await ipc.driveWrite(drive.path, file, serializeForDevice(macro, hello?.proto ?? 0));
         // verify the write landed before claiming success
         const back = await ipc.driveRead(drive.path, file);
         if (!back.includes("mkyada-macro")) throw new Error("verification read failed");
@@ -165,7 +167,7 @@ export function KeysPage() {
       // sweep any stale ones from a previous, longer sequence
       const parts = draft.kind === "sequence" ? compileSequenceParts(draft, file) : [];
       for (const p of parts) {
-        await ipc.driveWrite(drive.path, p.path, JSON.stringify(p.file));
+        await ipc.driveWrite(drive.path, p.path, serializeForDevice(p.file, hello?.proto ?? 0));
       }
       const stem = file.split("/").pop()!.replace(/\.json$/, ".");
       const keep = new Set(parts.map((p) => p.path.split("/").pop()));

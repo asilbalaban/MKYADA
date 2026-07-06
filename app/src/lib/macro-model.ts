@@ -460,6 +460,29 @@ function parseAssignmentBase(m: MacroFile): Assignment {
   }
 }
 
+/**
+ * Parse a macro file read back from the device drive: classic whole-file
+ * JSON, or the proto-v4 stream layout (header line with `"stream":true`
+ * followed by one event per line) reassembled into a normal MacroFile.
+ */
+export function parseDeviceMacro(raw: string): MacroFile {
+  let file: MacroFile & { stream?: boolean };
+  let rest: string[] = [];
+  try {
+    file = JSON.parse(raw) as MacroFile;
+  } catch {
+    const lines = raw.split("\n");
+    file = JSON.parse(lines[0]) as MacroFile;
+    rest = lines.slice(1);
+  }
+  if (file.stream) {
+    file.events = rest.filter((l) => l.trim()).map((l) => JSON.parse(l) as MacroEvent);
+    delete file.stream;
+  }
+  file.events ??= [];
+  return file;
+}
+
 /** Accept legacy asil-macro v1 files and rewrite them as v2. */
 export function migrateMacro(m: MacroFile): MacroFile {
   if (m.format === "asil-macro") {

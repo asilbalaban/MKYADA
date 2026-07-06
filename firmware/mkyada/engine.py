@@ -9,6 +9,22 @@ import usb_hid
 
 from mkyada.hidmap import CONSUMER_USAGE, resolve_key
 
+try:
+    from supervisor import ticks_ms
+except ImportError:  # desktop simulation
+    def ticks_ms():
+        return int(time.monotonic() * 1000)
+
+# supervisor.ticks_ms() wraps at 2**29; monotonic-float clocks lose ms
+# precision after ~1h uptime, ticks don't.
+_TICKS_PERIOD = 1 << 29
+_TICKS_HALF = _TICKS_PERIOD // 2
+
+
+def _ticks_diff(a, b):
+    """a - b in ms, correct across the ticks_ms wrap."""
+    return ((a - b + _TICKS_HALF) & (_TICKS_PERIOD - 1)) - _TICKS_HALF
+
 
 def _find_device(usage_page, usage):
     for dev in usb_hid.devices:
@@ -24,7 +40,7 @@ class StopPlayback(Exception):
 class Engine:
     """Owns the three HID interfaces and plays event streams through them."""
 
-    SLICE = 0.02  # sleep granularity so should_stop() stays responsive
+    POLL_MS = 20  # how often should_stop()/tick() run during playback
 
     def __init__(self):
         self.kbd = _find_device(0x01, 0x06)
@@ -37,6 +53,7 @@ class Engine:
         self.my = 16384
         self.sw = 1919       # screen size - 1 for scaling
         self.sh = 1079
+        self._last_poll = ticks_ms()
 
     def set_screen(self, width, height):
         self.sw = max(1, int(width) - 1)
@@ -126,17 +143,27 @@ class Engine:
         self._kbd_report()
 
     # --- playback ---
-    def _sleep(self, seconds, should_stop, tick):
-        deadline = time.monotonic() + seconds
+    def _poll(self, should_stop, tick):
+        self._last_poll = ticks_ms()
+        if should_stop and should_stop():
+            raise StopPlayback()
+        if tick:
+            tick()
+
+    def _wait_until(self, start, due_ms, should_stop, tick):
+        """Wait until `due_ms` after `start` (absolute deadline, so per-event
+        overhead is absorbed instead of accumulating across the macro)."""
         while True:
-            if should_stop and should_stop():
-                raise StopPlayback()
-            if tick:
-                tick()
-            remaining = deadline - time.monotonic()
+            now = ticks_ms()
+            if _ticks_diff(now, self._last_poll) >= self.POLL_MS:
+                self._poll(should_stop, tick)
+                now = ticks_ms()
+            remaining = due_ms - _ticks_diff(now, start)
             if remaining <= 0:
                 return
-            time.sleep(self.SLICE if remaining > self.SLICE else remaining)
+            # short slices keep the deadline sharp; host HID polling
+            # quantizes to >=1ms anyway, so no busy-spin needed
+            time.sleep(0.004 if remaining > 4 else remaining / 1000.0)
 
     def play(self, events, screen=None, speed=1.0, should_stop=None, tick=None):
         """Play one pass over an iterable of events. Raises StopPlayback on abort."""
@@ -144,13 +171,15 @@ class Engine:
             self.set_screen(screen.get("width", 1920), screen.get("height", 1080))
         speed = max(0.01, speed)
         self.release_all()
+        start = ticks_ms()
+        due = 0.0  # ms since start; float so speed scaling stays exact
         try:
+            # poll once per pass so even an all-zero-delay macro (where no
+            # wait ever goes stale) still honors stop/restart/switch presses
+            self._poll(should_stop, tick)
             for ev in events:
-                d = ev.get("delay", 0) / 1000.0 / speed
-                if d > 0:
-                    self._sleep(d, should_stop, tick)
-                elif should_stop and should_stop():
-                    raise StopPlayback()
+                due += ev.get("delay", 0) / speed
+                self._wait_until(start, due, should_stop, tick)
                 t = ev.get("type")
                 if t == "key":
                     (self.key_down if ev.get("action") == "down" else self.key_up)(ev)
