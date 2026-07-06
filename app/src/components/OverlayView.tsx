@@ -85,7 +85,10 @@ export function OverlayView() {
   const sy = window.innerHeight / sh;
 
   const items = groupEvents(macro.events);
-  const paths: { d: string; hot: boolean }[] = [];
+  // Each path also carries its start point + editor row number so the overlay
+  // can label where a movement begins and show its travel direction. `drag`
+  // distinguishes a button-held drag from a plain cursor move (different hue).
+  const paths: { d: string; hot: boolean; drag: boolean; x0: number; y0: number; n: number }[] = [];
   const clicks: {
     x: number;
     y: number;
@@ -99,14 +102,15 @@ export function OverlayView() {
     const hot = selectedSet.has(idx);
     if (onlySelected && !hot) return;
     if (isMoveGroup(item)) {
+      const first = item.points[0];
       const d = item.points.map((p, i) => `${i === 0 ? "M" : "L"}${p.x * sx},${p.y * sy}`).join(" ");
-      paths.push({ d, hot });
+      paths.push({ d, hot, drag: false, x0: first.x * sx, y0: first.y * sy, n: idx + 1 });
     } else if (isClickGroup(item) || isDragGroup(item)) {
       // one editor row = press (+ path) + release; draw all of it
       if (isDragGroup(item)) {
         const pts = [{ x: item.down.x ?? 0, y: item.down.y ?? 0 }, ...item.moves];
         const d = pts.map((p, i) => `${i === 0 ? "M" : "L"}${p.x * sx},${p.y * sy}`).join(" ");
-        paths.push({ d, hot });
+        paths.push({ d, hot, drag: true, x0: pts[0].x * sx, y0: pts[0].y * sy, n: idx + 1 });
       }
       clickNo += 1;
       clicks.push({
@@ -141,55 +145,109 @@ export function OverlayView() {
     }
   });
 
+  // Left = emerald, right = rose, middle = violet; the selected row is amber.
+  const btnColor = (button: string, hot: boolean) =>
+    hot ? "#fbbf24" : button === "right" ? "#fb7185" : button === "middle" ? "#c084fc" : "#34d399";
+  // Plain cursor moves are blue; button-held drags are orange.
+  const MOVE = "#38bdf8";
+  const DRAG = "#fb923c";
+  const pathColor = (p: { hot: boolean; drag: boolean }) =>
+    p.hot ? "#fbbf24" : p.drag ? DRAG : MOVE;
+
   return (
     <svg
       width="100%"
       height="100%"
       style={{ position: "fixed", inset: 0, pointerEvents: "none" }}
     >
+      <defs>
+        {/* auto-oriented arrowhead; `context-stroke` makes it inherit each
+            path's own colour so hot (amber) and normal (blue) both work. */}
+        <marker
+          id="mk-arrow" viewBox="0 0 10 10" refX="8" refY="5"
+          markerUnits="userSpaceOnUse" markerWidth="14" markerHeight="14" orient="auto"
+        >
+          <path d="M0,1 L9,5 L0,9 z" fill="context-stroke" />
+        </marker>
+      </defs>
       {paths.map((p, i) => (
-        <path
-          key={i}
-          d={p.d}
-          fill="none"
-          stroke={p.hot ? "#fbbf24" : "#38bdf8"}
-          strokeWidth={p.hot ? 4 : 2.5}
-          opacity={p.hot ? 1 : 0.85}
-        />
-      ))}
-      {clicks.map((c, i) => (
         <g key={i}>
-          <circle
-            cx={c.x}
-            cy={c.y}
-            r={c.hot ? (c.up ? 11 : 14) : c.up ? 8 : 11}
+          <path
+            d={p.d}
             fill="none"
-            stroke={
-              c.hot
-                ? "#fbbf24"
-                : c.up
-                  ? "#facc15"
-                  : c.button === "right"
-                    ? "#f87171"
-                    : "#4ade80"
-            }
-            strokeWidth={c.up ? 2.5 : 3}
+            stroke={pathColor(p)}
+            strokeWidth={p.hot ? 4 : 2.5}
+            opacity={p.hot ? 1 : 0.9}
+            markerEnd="url(#mk-arrow)"
           />
-          <circle cx={c.x} cy={c.y} r={2.5} fill={c.hot ? "#fbbf24" : "#ffffff"} />
-          {!c.up && (
-            <text
-              x={c.x + 16}
-              y={c.y - 10}
-              fill={c.hot ? "#fbbf24" : "#e2e8f0"}
-              fontSize={14}
-              fontWeight={700}
-              style={{ paintOrder: "stroke", stroke: "rgba(0,0,0,0.8)", strokeWidth: 3 }}
-            >
-              {c.n} · {c.button}
-            </text>
-          )}
+          {/* row number where the movement starts */}
+          <text
+            x={p.x0 + 7}
+            y={p.y0 - 7}
+            fill={pathColor(p)}
+            fontSize={12}
+            fontWeight={700}
+            style={{ paintOrder: "stroke", stroke: "rgba(0,0,0,0.85)", strokeWidth: 3.5 }}
+          >
+            #{p.n}
+          </text>
         </g>
       ))}
+      {clicks.map((c, i) => {
+        const col = btnColor(c.button, c.hot);
+        return (
+          <g key={i}>
+            <circle
+              cx={c.x}
+              cy={c.y}
+              r={c.up ? (c.hot ? 10 : 8) : c.hot ? 15 : 12}
+              fill={col}
+              fillOpacity={c.up ? 0 : 0.18}
+              stroke={col}
+              strokeWidth={c.up ? 2.5 : 3}
+              strokeDasharray={c.up ? "3 4" : undefined}
+            />
+            <circle cx={c.x} cy={c.y} r={2.5} fill={col} />
+            {!c.up && (
+              <text
+                x={c.x + 16}
+                y={c.y - 10}
+                fill={col}
+                fontSize={13}
+                fontWeight={700}
+                style={{ paintOrder: "stroke", stroke: "rgba(0,0,0,0.85)", strokeWidth: 3 }}
+              >
+                {c.n} · {c.button}
+              </text>
+            )}
+          </g>
+        );
+      })}
+      {/* Legend so a glance explains every colour. */}
+      <g transform="translate(16,16)">
+        <rect x={0} y={0} width={168} height={128} rx={10} fill="rgba(10,14,20,0.72)" />
+        {[
+          { c: MOVE, kind: "line", label: "Move" },
+          { c: DRAG, kind: "line", label: "Drag" },
+          { c: "#34d399", kind: "dot", label: "Left click" },
+          { c: "#fb7185", kind: "dot", label: "Right click" },
+          { c: "#c084fc", kind: "dot", label: "Middle click" },
+        ].map((e, i) => {
+          const y = 22 + i * 21;
+          return (
+            <g key={e.label}>
+              {e.kind === "line" ? (
+                <line x1={12} y1={y} x2={36} y2={y} stroke={e.c} strokeWidth={3} markerEnd="url(#mk-arrow)" />
+              ) : (
+                <circle cx={24} cy={y} r={7} fill={e.c} fillOpacity={0.25} stroke={e.c} strokeWidth={2.5} />
+              )}
+              <text x={48} y={y + 4} fill="#e2e8f0" fontSize={13} fontWeight={600}>
+                {e.label}
+              </text>
+            </g>
+          );
+        })}
+      </g>
       <text
         x={window.innerWidth / 2}
         y={28}
@@ -198,7 +256,7 @@ export function OverlayView() {
         fontSize={14}
         style={{ paintOrder: "stroke", stroke: "rgba(0,0,0,0.85)", strokeWidth: 4 }}
       >
-        MKYADA path overlay — close it from the editor (“Hide screen overlay”)
+        MKYADA path overlay — close it from the editor (“Hide overlay”)
       </text>
     </svg>
   );

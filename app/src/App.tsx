@@ -145,7 +145,13 @@ function Shell() {
               </div>
             </div>
           )}
-          <main className="flex-1 overflow-auto p-5">
+          {/* The Recorder is a full-bleed Photoshop-style workspace (its own
+              toolbar + scroll), so it drops the shared padding/scroll. */}
+          <main
+            className={`flex-1 min-h-0 ${
+              page === "recorder" ? "overflow-hidden" : "overflow-auto p-5"
+            }`}
+          >
             {page === "devices" && <DevicesPage onConnected={() => setPage("keys")} />}
             {page === "setup" && <SetupPage onDone={() => setPage("keys")} />}
             {page === "keys" && <KeysPage />}
@@ -153,7 +159,7 @@ function Shell() {
                 a recording in progress captures via global hooks and must keep
                 collecting events — and the recorded macro + its undo history
                 must survive a trip to Keys/Setup and back. */}
-            <div className={page === "recorder" ? undefined : "hidden"}>
+            <div className={page === "recorder" ? "h-full" : "hidden"}>
               <RecorderPage active={page === "recorder"} />
             </div>
             {page === "profiles" && <ProfilesPage />}

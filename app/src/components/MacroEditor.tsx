@@ -10,11 +10,13 @@ import { emit, listen } from "@tauri-apps/api/event";
 import {
   ArrowDown,
   ArrowUp,
+  Check,
   Copy,
+  Eye,
+  EyeOff,
+  Filter,
   Grab,
   Keyboard,
-  Monitor,
-  MonitorOff,
   MousePointerClick,
   MoveRight,
   Music,
@@ -61,7 +63,8 @@ import {
 import { IS_MAC } from "../lib/macro-model";
 import { displayKey } from "../lib/layout";
 import { undoRedoFromEvent, type History } from "../lib/history";
-import { Button, Card, Field, Input, Select } from "./ui";
+import { Button, Field, Input, Select } from "./ui";
+import { ToolButton, ToolField, ToolGroup, ToolMini, ToolUnitInput } from "./toolbar";
 import { KeyCapture } from "./AssignmentEditor";
 import { useToast } from "./toast";
 
@@ -71,9 +74,24 @@ interface Props {
   /** When the owner keeps the macro in a useHistory stack, the editor shows
    * undo/redo buttons and answers ⌘Z/⇧⌘Z (Ctrl+Z/Ctrl+Y). */
   history?: Pick<History<unknown>, "canUndo" | "canRedo" | "undo" | "redo">;
+  /** Photoshop-style toolbar/sidebar slots filled by the owning page with the
+   * device- and file-level actions. Group order across the bar is:
+   * Capture → Playback → [Macro · Edit · Bulk · On key press] → File. */
+  toolbarStart?: ReactNode; // Capture: delay + record + import
+  toolbarPlayback?: ReactNode; // Playback: times + play / preview / stop
+  toolbarEnd?: ReactNode; // File: export / optimize / close
+  sidebarPanels?: ReactNode; // sidebar bottom: assign to key
 }
 
-export function MacroEditor({ macro, onChange, history }: Props) {
+export function MacroEditor({
+  macro,
+  onChange,
+  history,
+  toolbarStart,
+  toolbarPlayback,
+  toolbarEnd,
+  sidebarPanels,
+}: Props) {
   // proto >= 4 firmware streams macro files line by line, so the old
   // 2000-event RAM ceiling (and its warning) only applies to older keypads
   const { hello } = useDevice();
@@ -93,17 +111,37 @@ export function MacroEditor({ macro, onChange, history }: Props) {
   const toast = useToast();
   const historyRef = useRef(history);
   historyRef.current = history;
+  // Delete/Backspace removes the selected rows ("layers"); a ref keeps the
+  // mount-only key handler pointed at the latest selection + remover.
+  const deleteRef = useRef<() => void>(() => {});
 
-  // ⌘Z / ⇧⌘Z while the editor is on screen (text fields keep their own undo)
+  // Keyboard: ⌘Z / ⇧⌘Z undo-redo, and Delete/Backspace to remove selected rows.
+  // Text fields keep their own editing keys — we bail when a form control has
+  // focus so typing a value never nukes a row.
   useEffect(() => {
+    const typingInField = () => {
+      const el = document.activeElement as HTMLElement | null;
+      if (!el) return false;
+      const tag = el.tagName;
+      return (
+        tag === "INPUT" ||
+        tag === "SELECT" ||
+        tag === "TEXTAREA" ||
+        el.isContentEditable
+      );
+    };
     const onKey = (e: KeyboardEvent) => {
-      const h = historyRef.current;
-      if (!h) return;
       const op = undoRedoFromEvent(e);
-      if (!op) return;
-      e.preventDefault();
-      if (op === "undo") h.undo();
-      else h.redo();
+      if (op && historyRef.current) {
+        e.preventDefault();
+        if (op === "undo") historyRef.current.undo();
+        else historyRef.current.redo();
+        return;
+      }
+      if ((e.key === "Delete" || e.key === "Backspace") && !typingInField()) {
+        e.preventDefault();
+        deleteRef.current();
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -137,12 +175,14 @@ export function MacroEditor({ macro, onChange, history }: Props) {
   }
 
   function removeSelected() {
+    if (selected.length === 0) return;
     const dead = new Set(selected);
     commit(items.filter((_, i) => !dead.has(i)));
     setSelected([]);
     anchor.current = null;
     if (dead.size > 1) toast.info(`${dead.size} rows deleted`);
   }
+  deleteRef.current = removeSelected;
 
   function duplicateItem(idx: number) {
     const next = [...items];
@@ -239,144 +279,152 @@ export function MacroEditor({ macro, onChange, history }: Props) {
   const single = selected.length === 1 ? selected[0] : null;
   const current = single !== null ? items[single] : null;
 
+  const rowEditorTitle =
+    selected.length > 1
+      ? `${selected.length} rows selected`
+      : current
+        ? `Edit row #${(single ?? 0) + 1}`
+        : "Properties";
+
   return (
-    <div className="flex flex-col gap-3">
-      <div className="flex flex-wrap gap-3 items-end">
-        {history && (
-          <div className="flex gap-1 pb-0.5">
-            <Button onClick={history.undo} disabled={!history.canUndo} title={IS_MAC ? "Undo (⌘Z)" : "Undo (Ctrl+Z)"}>
-              <Undo2 size={14} aria-hidden /> Undo
-            </Button>
-            <Button onClick={history.redo} disabled={!history.canRedo} title={IS_MAC ? "Redo (⇧⌘Z)" : "Redo (Ctrl+Y)"}>
-              <Redo2 size={14} aria-hidden /> Redo
-            </Button>
-          </div>
-        )}
-        <Field label="Name">
-          <Input value={macro.name ?? ""} onChange={(e) => onChange({ ...macro, name: e.target.value })} />
-        </Field>
-        <Field label="Speed ×">
-          <Input
-            type="number" step="0.1" min="0.1" className="w-20"
-            value={macro.settings?.speed ?? 1}
-            onChange={(e) =>
-              onChange({ ...macro, settings: { ...macro.settings, speed: parseFloat(e.target.value) || 1 } })
-            }
-          />
-        </Field>
-        <Field label="All delays ×">
-          <div className="flex gap-1">
-            <Input value={bulkFactor} onChange={(e) => setBulkFactor(e.target.value)} className="w-16" />
-            <Button onClick={applyBulk}>Apply</Button>
-          </div>
-        </Field>
-        <Field label="All waits (ms)">
-          <div className="flex gap-1">
+    <div className="h-full flex flex-col">
+      {/* TOOLBAR — Illustrator-style: captioned controls in stroked groups.
+          The [&_…] rules keep every input/select the same compact height. */}
+      <div className="tb flex items-start gap-2 px-3 py-1.5 border-b border-line bg-panel shrink-0 overflow-x-auto [&_input]:h-7 [&_input]:py-0 [&_input]:text-xs [&_select]:h-7 [&_select]:py-0 [&_select]:text-xs">
+        {toolbarStart}
+        {toolbarPlayback}
+
+        <ToolGroup label="Macro">
+          <ToolField label="Name" align="start">
             <Input
-              type="number" min="0" className="w-20"
+              className="w-36"
+              value={macro.name ?? ""}
+              placeholder="Macro name"
+              onChange={(e) => onChange({ ...macro, name: e.target.value })}
+            />
+          </ToolField>
+          <ToolField label="Speed" align="start">
+            <ToolUnitInput
+              suffix="×"
+              type="number" step="0.1" min="0.1" className="w-14 text-center"
+              value={macro.settings?.speed ?? 1}
+              onChange={(e) =>
+                onChange({ ...macro, settings: { ...macro.settings, speed: parseFloat(e.target.value) || 1 } })
+              }
+            />
+          </ToolField>
+        </ToolGroup>
+
+        {history && (
+          <ToolGroup label="Edit">
+            <ToolButton
+              label="Undo" icon={<Undo2 size={18} aria-hidden />}
+              onClick={history.undo} disabled={!history.canUndo}
+              title={IS_MAC ? "Undo (⌘Z)" : "Undo (Ctrl+Z)"}
+            />
+            <ToolButton
+              label="Redo" icon={<Redo2 size={18} aria-hidden />}
+              onClick={history.redo} disabled={!history.canRedo}
+              title={IS_MAC ? "Redo (⇧⌘Z)" : "Redo (Ctrl+Y)"}
+            />
+          </ToolGroup>
+        )}
+
+        <ToolGroup label="Bulk edit">
+          <ToolField label="Delays ×" align="start">
+            <Input className="w-14" value={bulkFactor} onChange={(e) => setBulkFactor(e.target.value)} />
+            <ToolMini onClick={applyBulk} title="Multiply every delay in the macro by this factor">
+              <Check size={15} aria-hidden />
+            </ToolMini>
+          </ToolField>
+          <ToolField label="Waits ms" align="start">
+            <Input
+              type="number" min="0" className="w-16"
               value={bulkWaitMs}
               onChange={(e) => setBulkWaitMs(e.target.value)}
             />
-            <Button onClick={applyBulkWaits} title="Set every Wait row to this duration">
-              Set
-            </Button>
-          </div>
-        </Field>
+            <ToolMini onClick={applyBulkWaits} title="Set every Wait row to this duration">
+              <Check size={15} aria-hidden />
+            </ToolMini>
+          </ToolField>
+        </ToolGroup>
+
+        <ToolGroup label="On key press">
+          <ToolField label="Repeat" align="start">
+            <Select
+              title="How many times the macro plays per key press"
+              value={(macro.settings?.repeat ?? 1) === 0 ? "loop" : "count"}
+              onChange={(e) =>
+                onChange({
+                  ...macro,
+                  settings: { ...macro.settings, repeat: e.target.value === "loop" ? 0 : 1 },
+                })
+              }
+            >
+              <option value="count">N times</option>
+              <option value="loop">Loop</option>
+            </Select>
+            {(macro.settings?.repeat ?? 1) !== 0 && (
+              <Input
+                type="number" min="1" className="w-14"
+                value={macro.settings?.repeat ?? 1}
+                title="Times to play per press"
+                onChange={(e) =>
+                  onChange({
+                    ...macro,
+                    settings: { ...macro.settings, repeat: Math.max(1, parseInt(e.target.value) || 1) },
+                  })
+                }
+              />
+            )}
+          </ToolField>
+          <ToolField label="Re-press" align="start">
+            <Select
+              title="Pressing the key again mid-playback"
+              value={macro.settings?.on_repress ?? "stop"}
+              onChange={(e) =>
+                onChange({
+                  ...macro,
+                  settings: { ...macro.settings, on_repress: e.target.value as "stop" | "restart" },
+                })
+              }
+            >
+              <option value="stop">Stop</option>
+              <option value="restart">Restart</option>
+            </Select>
+          </ToolField>
+          <ToolField label="Hold" align="start">
+            <Select
+              title="Holding the key down"
+              value={macro.settings?.hold_repeat ? "repeat" : "once"}
+              onChange={(e) =>
+                onChange({
+                  ...macro,
+                  settings: { ...macro.settings, hold_repeat: e.target.value === "repeat" },
+                })
+              }
+            >
+              <option value="once">Once</option>
+              <option value="repeat">While held</option>
+            </Select>
+          </ToolField>
+        </ToolGroup>
+
+        {toolbarEnd}
       </div>
 
-      <Card title="When the key is pressed">
-        <div className="grid sm:grid-cols-3 gap-4 items-start">
-          <div className="flex flex-col gap-1">
-            <Field label="Play the macro">
-              <Select
-                value={(macro.settings?.repeat ?? 1) === 0 ? "loop" : "count"}
-                onChange={(e) =>
-                  onChange({
-                    ...macro,
-                    settings: {
-                      ...macro.settings,
-                      repeat: e.target.value === "loop" ? 0 : 1,
-                    },
-                  })
-                }
-              >
-                <option value="count">A number of times</option>
-                <option value="loop">In a loop, until stopped</option>
-              </Select>
-            </Field>
-            {(macro.settings?.repeat ?? 1) !== 0 ? (
-              <div className="flex items-center gap-2 mt-1">
-                <Input
-                  type="number" min="1" className="w-20"
-                  value={macro.settings?.repeat ?? 1}
-                  onChange={(e) =>
-                    onChange({
-                      ...macro,
-                      settings: {
-                        ...macro.settings,
-                        repeat: Math.max(1, parseInt(e.target.value) || 1),
-                      },
-                    })
-                  }
-                />
-                <span className="text-xs text-fg-faint">time(s) per press</span>
-              </div>
-            ) : (
-              <p className="text-xs text-fg-faint">
-                Loops forever — press the key again to stop it.
-              </p>
-            )}
-          </div>
-
-          <div className="flex flex-col gap-1">
-            <Field label="Pressing the key again, while playing">
-              <Select
-                className="w-full"
-                value={macro.settings?.on_repress ?? "stop"}
-                onChange={(e) =>
-                  onChange({
-                    ...macro,
-                    settings: { ...macro.settings, on_repress: e.target.value as "stop" | "restart" },
-                  })
-                }
-              >
-                <option value="stop">Stops the macro</option>
-                <option value="restart">Restarts it from the top</option>
-              </Select>
-            </Field>
-            <p className="text-xs text-fg-faint">
-              What a second press of the same key does mid-playback.
-            </p>
-          </div>
-
-          <div className="flex flex-col gap-1">
-            <Field label="Holding the key down">
-              <Select
-                className="w-full"
-                value={macro.settings?.hold_repeat ? "repeat" : "once"}
-                onChange={(e) =>
-                  onChange({
-                    ...macro,
-                    settings: { ...macro.settings, hold_repeat: e.target.value === "repeat" },
-                  })
-                }
-              >
-                <option value="once">Plays it once</option>
-                <option value="repeat">Replays it while held</option>
-              </Select>
-            </Field>
-            <p className="text-xs text-fg-faint">
-              "Replays" works like holding a letter key on a keyboard.
-            </p>
-          </div>
-        </div>
-      </Card>
-
-      <div className="grid grid-cols-[1.2fr_1fr] gap-3 items-start">
-        <Card
-          title={`Events (${items.length} rows / ${stats.events} events)`}
-          actions={
-            <div className="flex gap-1.5">
+      {/* BODY — events fill the center; properties live in the right sidebar */}
+      <div className="flex-1 flex min-h-0">
+        {/* CENTER: the events list, taking almost the whole screen */}
+        <div className="flex-1 flex flex-col min-w-0">
+          <div className="flex items-center justify-between gap-3 px-3 py-2 border-b border-line shrink-0">
+            <h2 className="text-sm font-semibold text-fg-muted">
+              Events{" "}
+              <span className="text-fg-faint font-normal">
+                · {items.length} rows / {stats.events} events
+              </span>
+            </h2>
+            <div className="flex items-center gap-1.5">
               <Button
                 variant={overlayOn ? "primary" : "default"}
                 title="Draw the mouse path 1:1 on your real monitor (click-through)"
@@ -384,11 +432,11 @@ export function MacroEditor({ macro, onChange, history }: Props) {
               >
                 {overlayOn ? (
                   <>
-                    <MonitorOff size={14} aria-hidden /> Hide overlay
+                    <EyeOff size={14} aria-hidden /> Hide overlay
                   </>
                 ) : (
                   <>
-                    <Monitor size={14} aria-hidden /> Show on screen
+                    <Eye size={14} aria-hidden /> Show on screen
                   </>
                 )}
               </Button>
@@ -398,16 +446,16 @@ export function MacroEditor({ macro, onChange, history }: Props) {
                   title="Draw only the selected rows instead of the whole macro"
                   onClick={() => setOverlayOnlySelected(!overlayOnlySelected)}
                 >
-                  Selected rows only
+                  <Filter size={14} aria-hidden /> Selected only
                 </Button>
               )}
               <Button onClick={() => commit([...items, { type: "wait", delay: 500 } as MacroEvent])}>
                 + Add wait
               </Button>
             </div>
-          }
-        >
-          <div className="max-h-96 overflow-y-auto flex flex-col gap-1 pr-1 select-none">
+          </div>
+
+          <div className="flex-1 min-h-0 overflow-y-auto flex flex-col gap-1 p-3 select-none">
             {items.map((item, i) => (
               <button
                 key={i}
@@ -431,41 +479,41 @@ export function MacroEditor({ macro, onChange, history }: Props) {
                 <span className="text-fg-faint">{itemDelay(item)} ms</span>
               </button>
             ))}
-            {items.length === 0 && <p className="text-fg-faint text-sm">No events.</p>}
+            {items.length === 0 && (
+              <p className="text-fg-faint text-sm p-2">
+                No events yet. Record or import a macro to fill this in.
+              </p>
+            )}
           </div>
-          <p className="text-[11px] text-fg-faint mt-1.5">
-            Shift+click selects a range, {IS_MAC ? "⌘" : "Ctrl"}+click adds/removes single rows.
-          </p>
-          <div className="flex items-center justify-between gap-3 mt-2 border-t border-line pt-2">
+
+          <div className="flex items-center justify-between gap-3 px-3 py-2 border-t border-line shrink-0">
             <div className={`text-xs ${stats.tooBig && !streaming ? "text-warning" : "text-fg-faint"}`}>
               {stats.events} events · {(stats.bytes / 1024).toFixed(1)} KB
               {stats.tooBig && !streaming
                 ? " — too large for the keypad's memory. Optimize to shrink it."
                 : " — fits on the keypad."}
             </div>
-            <Button
-              title={
-                streaming
-                  ? "Simplifies dense mouse paths (max 30 points/second) while keeping their shape. Your keypad plays full recordings as-is — this is only an editing convenience."
-                  : "Thins dense mouse paths (max 30 points/second) while keeping their shape, so the macro fits the keypad's memory"
-              }
-              onClick={optimizeForDevice}
-            >
-              <Scissors size={14} aria-hidden /> {streaming ? "Simplify paths" : "Optimize for device"}
-            </Button>
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] text-fg-faint hidden xl:inline">
+                Shift+click range · {IS_MAC ? "⌘" : "Ctrl"}+click toggle · Del removes
+              </span>
+              <Button
+                title={
+                  streaming
+                    ? "Simplifies dense mouse paths (max 30 points/second) while keeping their shape. Your keypad plays full recordings as-is — this is only an editing convenience."
+                    : "Thins dense mouse paths (max 30 points/second) while keeping their shape, so the macro fits the keypad's memory"
+                }
+                onClick={optimizeForDevice}
+              >
+                <Scissors size={14} aria-hidden /> {streaming ? "Simplify paths" : "Optimize for device"}
+              </Button>
+            </div>
           </div>
-        </Card>
+        </div>
 
-        <div className="flex flex-col gap-3">
-          <Card
-            title={
-              selected.length > 1
-                ? `${selected.length} rows selected`
-                : current
-                  ? `Edit row #${(single ?? 0) + 1}`
-                  : "Row editor"
-            }
-          >
+        {/* RIGHT: properties sidebar */}
+        <aside className="w-[340px] shrink-0 border-l border-line bg-panel overflow-y-auto flex flex-col">
+          <Section title={rowEditorTitle}>
             {selected.length > 1 ? (
               <div className="flex flex-col gap-3">
                 <p className="text-fg-muted text-sm">
@@ -479,30 +527,62 @@ export function MacroEditor({ macro, onChange, history }: Props) {
                 </div>
               </div>
             ) : !current ? (
-              <p className="text-fg-faint text-sm">Click a row on the left to edit every value.</p>
+              <p className="text-fg-faint text-sm">
+                Click a row to edit every value. Press Delete to remove the selected row.
+              </p>
             ) : (
               <div className="flex flex-col gap-3">
                 <RowFields item={current} onChange={(it) => updateItem(single!, it)} />
-                <div className="flex flex-wrap gap-2 border-t border-line pt-3">
-                  <Button onClick={() => moveItem(single!, -1)}>
-                    <ArrowUp size={14} aria-hidden /> Move up
+                <div className="flex gap-1.5 border-t border-line pt-3">
+                  <Button className="w-10 justify-center px-0" title="Move up" onClick={() => moveItem(single!, -1)}>
+                    <ArrowUp size={16} aria-hidden />
                   </Button>
-                  <Button onClick={() => moveItem(single!, 1)}>
-                    <ArrowDown size={14} aria-hidden /> Move down
+                  <Button className="w-10 justify-center px-0" title="Move down" onClick={() => moveItem(single!, 1)}>
+                    <ArrowDown size={16} aria-hidden />
                   </Button>
-                  <Button onClick={() => duplicateItem(single!)}>
-                    <Copy size={14} aria-hidden /> Duplicate
+                  <Button className="w-10 justify-center px-0" title="Duplicate" onClick={() => duplicateItem(single!)}>
+                    <Copy size={16} aria-hidden />
                   </Button>
-                  <Button variant="danger" onClick={removeSelected}>
-                    <Trash2 size={14} aria-hidden /> Delete row
+                  <Button variant="danger" className="w-10 justify-center px-0" title="Delete row" onClick={removeSelected}>
+                    <Trash2 size={16} aria-hidden />
                   </Button>
                 </div>
               </div>
             )}
-          </Card>
+          </Section>
 
-        </div>
+          {sidebarPanels}
+        </aside>
       </div>
+    </div>
+  );
+}
+
+/** A titled block in the properties sidebar. */
+function Section({ title, children }: { title: ReactNode; children: ReactNode }) {
+  return (
+    <div className="border-b border-line p-3 flex flex-col gap-3">
+      <h3 className="text-xs font-semibold tracking-wide text-fg-muted">{title}</h3>
+      {children}
+    </div>
+  );
+}
+
+/** A stroked sub-group of related properties (Figma-style): a small caption
+ *  over one column, or two columns (e.g. X · Y side by side). */
+function PropGroup({
+  label,
+  cols = 1,
+  children,
+}: {
+  label: string;
+  cols?: 1 | 2;
+  children: ReactNode;
+}) {
+  return (
+    <div className="flex flex-col gap-2 rounded-lg border border-line p-2.5">
+      <span className="text-[10px] uppercase tracking-wider text-fg-faint leading-none">{label}</span>
+      <div className={cols === 2 ? "grid grid-cols-2 gap-2" : "flex flex-col gap-2"}>{children}</div>
     </div>
   );
 }
@@ -542,10 +622,10 @@ function Num({
   );
 }
 
-/** Type-specific numeric/field editing — everything the old EditDialog had. */
+/** Type-specific field editing, laid out as Figma-style property groups. */
 function RowFields({ item, onChange }: { item: EditorItem; onChange: (i: EditorItem) => void }) {
   const delayField = (
-    <Num label="Delay before (ms)" value={itemDelay(item)} onChange={(n) => onChange(setItemDelay(item, n))} />
+    <Num label="Delay before (ms)" width="w-full" value={itemDelay(item)} onChange={(n) => onChange(setItemDelay(item, n))} />
   );
   // A custom title makes long macros navigable ("Select first slot"…)
   const titleField = (
@@ -557,40 +637,48 @@ function RowFields({ item, onChange }: { item: EditorItem; onChange: (i: EditorI
       />
     </Field>
   );
+  const buttonSelect = (value: string, set: (v: string) => void) => (
+    <Field label="Button">
+      <Select value={value} onChange={(e) => set(e.target.value)}>
+        <option value="left">left</option>
+        <option value="right">right</option>
+        <option value="middle">middle</option>
+      </Select>
+    </Field>
+  );
+  const actionSelect = (value: "down" | "up", set: (v: "down" | "up") => void) => (
+    <Field label="Action">
+      <Select value={value} onChange={(e) => set(e.target.value as "down" | "up")}>
+        <option value="down">press (down)</option>
+        <option value="up">release (up)</option>
+      </Select>
+    </Field>
+  );
 
   if (isClickGroup(item)) {
     const g = item as ClickGroup;
     const setPos = (x: number, y: number) =>
       onChange({ ...g, down: { ...g.down, x, y }, up: { ...g.up, x, y } });
     return (
-      <div className="flex flex-col gap-3">
+      <div className="flex flex-col gap-2.5">
         {titleField}
-        <div className="flex flex-wrap gap-3">
+        <PropGroup label="Timing" cols={2}>
           {delayField}
-          <Field label="Button">
-            <Select
-              value={g.down.button}
-              onChange={(e) =>
-                onChange({
-                  ...g,
-                  down: { ...g.down, button: e.target.value },
-                  up: { ...g.up, button: e.target.value },
-                })
-              }
-            >
-              <option value="left">left</option>
-              <option value="right">right</option>
-              <option value="middle">middle</option>
-            </Select>
-          </Field>
-          <Num label="X" value={g.down.x ?? 0} onChange={(n) => setPos(n, g.down.y ?? 0)} />
-          <Num label="Y" value={g.down.y ?? 0} onChange={(n) => setPos(g.down.x ?? 0, n)} />
           <Num
-            label="Held for (ms)"
+            label="Held for (ms)" width="w-full"
             value={g.up.delay}
             onChange={(n) => onChange({ ...g, up: { ...g.up, delay: Math.max(0, n) } })}
           />
-        </div>
+        </PropGroup>
+        <PropGroup label="Button">
+          {buttonSelect(g.down.button, (button) =>
+            onChange({ ...g, down: { ...g.down, button }, up: { ...g.up, button } }),
+          )}
+        </PropGroup>
+        <PropGroup label="Position" cols={2}>
+          <Num label="X" width="w-full" value={g.down.x ?? 0} onChange={(n) => setPos(n, g.down.y ?? 0)} />
+          <Num label="Y" width="w-full" value={g.down.y ?? 0} onChange={(n) => setPos(g.down.x ?? 0, n)} />
+        </PropGroup>
         <p className="text-xs text-fg-faint">
           One press + release at this position. "Held for" is the time between them.
         </p>
@@ -604,48 +692,33 @@ function RowFields({ item, onChange }: { item: EditorItem; onChange: (i: EditorI
     const last = g.moves[g.moves.length - 1];
     const end = { x: g.up.x ?? last.x, y: g.up.y ?? last.y };
     return (
-      <div className="flex flex-col gap-3">
+      <div className="flex flex-col gap-2.5">
         {titleField}
-        <div className="flex flex-wrap gap-3">
+        <PropGroup label="Timing" cols={2}>
           {delayField}
-          <Field label="Button">
-            <Select
-              value={g.down.button}
-              onChange={(e) =>
-                onChange({
-                  ...g,
-                  down: { ...g.down, button: e.target.value },
-                  up: { ...g.up, button: e.target.value },
-                })
-              }
-            >
-              <option value="left">left</option>
-              <option value="right">right</option>
-              <option value="middle">middle</option>
-            </Select>
-          </Field>
-          <Num label="Duration (ms)" value={dragDuration(g)} onChange={(n) => onChange(setDragDuration(g, Math.max(1, n)))} />
-          <Field label="Points">
-            <span className="text-sm text-fg py-1.5">{g.moves.length + 1}</span>
-          </Field>
-        </div>
-        <p className="text-xs text-fg-faint -mb-1">
-          Press → path → release. Start / end coordinates (path scales to fit):
-        </p>
-        <div className="flex flex-wrap gap-3">
-          <Num label="Start X" value={start.x} onChange={(n) => onChange(remapDrag(g, { x: n, y: start.y }, end))} />
-          <Num label="Start Y" value={start.y} onChange={(n) => onChange(remapDrag(g, { x: start.x, y: n }, end))} />
-          <Num label="End X" value={end.x} onChange={(n) => onChange(remapDrag(g, start, { x: n, y: end.y }))} />
-          <Num label="End Y" value={end.y} onChange={(n) => onChange(remapDrag(g, start, { x: end.x, y: n }))} />
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Button onClick={() => onChange(straightenDrag(g))}>
-            <MoveRight size={14} aria-hidden /> Straighten (keep endpoints)
-          </Button>
-          <Button onClick={() => onChange(simplifyDrag(g))}>
-            <Scissors size={14} aria-hidden /> Simplify path
-          </Button>
-        </div>
+          <Num label="Duration (ms)" width="w-full" value={dragDuration(g)} onChange={(n) => onChange(setDragDuration(g, Math.max(1, n)))} />
+        </PropGroup>
+        <PropGroup label="Button">
+          {buttonSelect(g.down.button, (button) =>
+            onChange({ ...g, down: { ...g.down, button }, up: { ...g.up, button } }),
+          )}
+        </PropGroup>
+        <PropGroup label={`Path · ${g.moves.length + 1} points`}>
+          <div className="grid grid-cols-2 gap-2">
+            <Num label="Start X" width="w-full" value={start.x} onChange={(n) => onChange(remapDrag(g, { x: n, y: start.y }, end))} />
+            <Num label="Start Y" width="w-full" value={start.y} onChange={(n) => onChange(remapDrag(g, { x: start.x, y: n }, end))} />
+            <Num label="End X" width="w-full" value={end.x} onChange={(n) => onChange(remapDrag(g, start, { x: n, y: end.y }))} />
+            <Num label="End Y" width="w-full" value={end.y} onChange={(n) => onChange(remapDrag(g, start, { x: end.x, y: n }))} />
+          </div>
+          <div className="flex gap-2">
+            <Button className="flex-1 justify-center" onClick={() => onChange(straightenDrag(g))} title="Straighten (keep endpoints)">
+              <MoveRight size={14} aria-hidden /> Straighten
+            </Button>
+            <Button className="flex-1 justify-center" onClick={() => onChange(simplifyDrag(g))} title="Simplify path">
+              <Spline size={14} aria-hidden /> Simplify
+            </Button>
+          </div>
+        </PropGroup>
       </div>
     );
   }
@@ -655,111 +728,107 @@ function RowFields({ item, onChange }: { item: EditorItem; onChange: (i: EditorI
     const first = g.points[0];
     const last = g.points[g.points.length - 1];
     return (
-      <div className="flex flex-col gap-3">
+      <div className="flex flex-col gap-2.5">
         {titleField}
-        <div className="flex flex-wrap gap-3">
+        <PropGroup label="Timing" cols={2}>
           {delayField}
-          <Num label="Duration (ms)" value={groupDuration(g)} onChange={(n) => onChange(setGroupDuration(g, Math.max(1, n)))} />
-          <Field label="Points">
-            <span className="text-sm text-fg py-1.5">{g.points.length}</span>
-          </Field>
-        </div>
-        <p className="text-xs text-fg-faint -mb-1">Start / end coordinates (path scales to fit):</p>
-        <div className="flex flex-wrap gap-3">
-          <Num label="Start X" value={first.x} onChange={(n) => onChange(remapGroup(g, { x: n, y: first.y }, last))} />
-          <Num label="Start Y" value={first.y} onChange={(n) => onChange(remapGroup(g, { x: first.x, y: n }, last))} />
-          <Num label="End X" value={last.x} onChange={(n) => onChange(remapGroup(g, first, { x: n, y: last.y }))} />
-          <Num label="End Y" value={last.y} onChange={(n) => onChange(remapGroup(g, first, { x: last.x, y: n }))} />
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Button onClick={() => onChange(straighten(g))}>
-            <MoveRight size={14} aria-hidden /> Straighten (keep endpoints)
-          </Button>
-          <Button onClick={() => onChange(rdpSimplify(g, 3))}>
-            <Scissors size={14} aria-hidden /> Simplify path
-          </Button>
-        </div>
+          <Num label="Duration (ms)" width="w-full" value={groupDuration(g)} onChange={(n) => onChange(setGroupDuration(g, Math.max(1, n)))} />
+        </PropGroup>
+        <PropGroup label={`Path · ${g.points.length} points`}>
+          <div className="grid grid-cols-2 gap-2">
+            <Num label="Start X" width="w-full" value={first.x} onChange={(n) => onChange(remapGroup(g, { x: n, y: first.y }, last))} />
+            <Num label="Start Y" width="w-full" value={first.y} onChange={(n) => onChange(remapGroup(g, { x: first.x, y: n }, last))} />
+            <Num label="End X" width="w-full" value={last.x} onChange={(n) => onChange(remapGroup(g, first, { x: n, y: last.y }))} />
+            <Num label="End Y" width="w-full" value={last.y} onChange={(n) => onChange(remapGroup(g, first, { x: last.x, y: n }))} />
+          </div>
+          <div className="flex gap-2">
+            <Button className="flex-1 justify-center" onClick={() => onChange(straighten(g))} title="Straighten (keep endpoints)">
+              <MoveRight size={14} aria-hidden /> Straighten
+            </Button>
+            <Button className="flex-1 justify-center" onClick={() => onChange(rdpSimplify(g, 3))} title="Simplify path">
+              <Spline size={14} aria-hidden /> Simplify
+            </Button>
+          </div>
+        </PropGroup>
       </div>
     );
   }
 
   const ev = item as MacroEvent;
-  const fields = (() => {
+  const groups = (() => {
     switch (ev.type) {
       case "key":
         return (
           <>
-            {delayField}
-            <Field label="Key">
-              <KeyCapture
-                value={displayKey(ev.key)}
-                captureModifiers
-                onCapture={(key) => onChange({ ...ev, key })}
-              />
-            </Field>
-            <Field label="Action">
-              <Select value={ev.action} onChange={(e) => onChange({ ...ev, action: e.target.value as "down" | "up" })}>
-                <option value="down">press (down)</option>
-                <option value="up">release (up)</option>
-              </Select>
-            </Field>
+            <PropGroup label="Timing">{delayField}</PropGroup>
+            <PropGroup label="Key">
+              <Field label="Key">
+                <KeyCapture
+                  value={displayKey(ev.key)}
+                  captureModifiers
+                  onCapture={(key) => onChange({ ...ev, key })}
+                />
+              </Field>
+              {actionSelect(ev.action, (action) => onChange({ ...ev, action }))}
+            </PropGroup>
           </>
         );
       case "button":
         return (
           <>
-            {delayField}
-            <Field label="Button">
-              <Select value={ev.button} onChange={(e) => onChange({ ...ev, button: e.target.value })}>
-                <option value="left">left</option>
-                <option value="right">right</option>
-                <option value="middle">middle</option>
-              </Select>
-            </Field>
-            <Field label="Action">
-              <Select value={ev.action} onChange={(e) => onChange({ ...ev, action: e.target.value as "down" | "up" })}>
-                <option value="down">press (down)</option>
-                <option value="up">release (up)</option>
-              </Select>
-            </Field>
-            <Num label="X" value={ev.x ?? 0} onChange={(n) => onChange({ ...ev, x: n })} />
-            <Num label="Y" value={ev.y ?? 0} onChange={(n) => onChange({ ...ev, y: n })} />
+            <PropGroup label="Timing">{delayField}</PropGroup>
+            <PropGroup label="Button" cols={2}>
+              {buttonSelect(ev.button, (button) => onChange({ ...ev, button }))}
+              {actionSelect(ev.action, (action) => onChange({ ...ev, action }))}
+            </PropGroup>
+            <PropGroup label="Position" cols={2}>
+              <Num label="X" width="w-full" value={ev.x ?? 0} onChange={(n) => onChange({ ...ev, x: n })} />
+              <Num label="Y" width="w-full" value={ev.y ?? 0} onChange={(n) => onChange({ ...ev, y: n })} />
+            </PropGroup>
           </>
         );
       case "move":
         return (
           <>
-            {delayField}
-            <Num label="X" value={ev.x} onChange={(n) => onChange({ ...ev, x: n })} />
-            <Num label="Y" value={ev.y} onChange={(n) => onChange({ ...ev, y: n })} />
+            <PropGroup label="Timing">{delayField}</PropGroup>
+            <PropGroup label="Position" cols={2}>
+              <Num label="X" width="w-full" value={ev.x} onChange={(n) => onChange({ ...ev, x: n })} />
+              <Num label="Y" width="w-full" value={ev.y} onChange={(n) => onChange({ ...ev, y: n })} />
+            </PropGroup>
           </>
         );
       case "scroll":
         return (
           <>
-            {delayField}
-            <Num label="Scroll dy (+up/−down)" value={ev.dy} onChange={(n) => onChange({ ...ev, dy: n })} />
-            <Num label="X" value={ev.x ?? 0} onChange={(n) => onChange({ ...ev, x: n })} />
-            <Num label="Y" value={ev.y ?? 0} onChange={(n) => onChange({ ...ev, y: n })} />
+            <PropGroup label="Timing">{delayField}</PropGroup>
+            <PropGroup label="Scroll">
+              <Num label="dy (+up / −down)" width="w-full" value={ev.dy} onChange={(n) => onChange({ ...ev, dy: n })} />
+            </PropGroup>
+            <PropGroup label="Position" cols={2}>
+              <Num label="X" width="w-full" value={ev.x ?? 0} onChange={(n) => onChange({ ...ev, x: n })} />
+              <Num label="Y" width="w-full" value={ev.y ?? 0} onChange={(n) => onChange({ ...ev, y: n })} />
+            </PropGroup>
           </>
         );
       case "consumer":
         return (
           <>
-            {delayField}
-            <Field label="Media action">
-              <Input value={ev.usage} onChange={(e) => onChange({ ...ev, usage: e.target.value })} />
-            </Field>
+            <PropGroup label="Timing">{delayField}</PropGroup>
+            <PropGroup label="Media">
+              <Field label="Media action">
+                <Input value={ev.usage} onChange={(e) => onChange({ ...ev, usage: e.target.value })} />
+              </Field>
+            </PropGroup>
           </>
         );
       default: // wait
-        return delayField;
+        return <PropGroup label="Timing">{delayField}</PropGroup>;
     }
   })();
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex flex-col gap-2.5">
       {titleField}
-      <div className="flex flex-wrap gap-3">{fields}</div>
+      {groups}
     </div>
   );
 }

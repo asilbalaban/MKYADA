@@ -1,12 +1,26 @@
 // Record keyboard + mouse globally (F8 or button), edit the result, then
 // play it through the device (hardware HID), preview locally, export JSON,
 // or assign it straight to a key.
+//
+// Photoshop-style layout: a thin top toolbar carries every action and global
+// setting, the events list fills the center, and a right sidebar holds the
+// properties (row editor, playback behaviour, assign-to-key, export).
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open, save } from "@tauri-apps/plugin-dialog";
-import { Circle, FileDown, FileUp, HardDriveDownload, Play, Square, X } from "lucide-react";
+import {
+  Circle,
+  Eye,
+  FileDown,
+  FileUp,
+  HardDriveDownload,
+  Package,
+  Play,
+  Square,
+  X,
+} from "lucide-react";
 import { readTextFile } from "../lib/fs";
 import { ipc } from "../lib/ipc";
 import { useDevice } from "../lib/device";
@@ -15,7 +29,8 @@ import { captureScreen, serializeForDevice, thinForDevice } from "../lib/recorde
 import { macroFileName, migrateMacro } from "../lib/macro-model";
 import { useHistory } from "../lib/history";
 import { takeRecorderEdit } from "../lib/recorder-handoff";
-import { Badge, Button, Card, Field, Input, Select } from "../components/ui";
+import { Badge, Input, Select } from "../components/ui";
+import { ToolButton, ToolField, ToolGroup, ToolUnitInput } from "../components/toolbar";
 import { useToast } from "../components/toast";
 import { useConfirm } from "../components/dialog";
 import { MacroEditor } from "../components/MacroEditor";
@@ -38,6 +53,9 @@ export function RecorderPage({ active = true }: { active?: boolean }) {
   const setMacro = macroHistory.reset;
   const [status, setStatus] = useState("");
   const [startDelay, setStartDelay] = useState(3);
+  // How many times the Play / Preview buttons replay the macro (a testing
+  // convenience, independent of the per-key repeat behaviour in the sidebar).
+  const [playbackCount, setPlaybackCount] = useState(1);
   const [assignKey, setAssignKey] = useState(1);
   const [assignLayer, setAssignLayer] = useState(0);
   const raw = useRef<MacroEvent[]>([]);
@@ -162,8 +180,12 @@ export function RecorderPage({ active = true }: { active?: boolean }) {
 
   async function playOnDevice() {
     if (!macro || !drive) return;
-    await ipc.driveWrite(drive.path, "live.json", serializeForDevice(macro, hello?.proto ?? 0));
-    setStatus(startDelay > 0 ? `Playing on device in ${startDelay}s…` : "Playing on device…");
+    // The test-play honors the toolbar's playback count rather than the
+    // per-key repeat setting, so you can try N runs without editing the macro.
+    const forDevice = { ...macro, settings: { ...macro.settings, repeat: playbackCount } };
+    await ipc.driveWrite(drive.path, "live.json", serializeForDevice(forDevice, hello?.proto ?? 0));
+    const times = playbackCount > 1 ? ` ×${playbackCount}` : "";
+    setStatus(startDelay > 0 ? `Playing on device${times} in ${startDelay}s…` : `Playing on device${times}…`);
     setTimeout(() => {
       void send({ t: "play", file: "live.json" });
     }, startDelay * 1000);
@@ -171,13 +193,24 @@ export function RecorderPage({ active = true }: { active?: boolean }) {
 
   async function previewLocally() {
     if (!macro) return;
-    setStatus(startDelay > 0 ? `Local preview in ${startDelay}s…` : "Previewing…");
+    // Repeat the event stream in place so a single preview call plays the
+    // macro `playbackCount` times back to back.
+    const events =
+      playbackCount > 1
+        ? Array.from({ length: playbackCount }, () => macro.events).flat()
+        : macro.events;
+    const times = playbackCount > 1 ? ` ×${playbackCount}` : "";
+    setStatus(startDelay > 0 ? `Local preview${times} in ${startDelay}s…` : `Previewing${times}…`);
     setTimeout(() => {
       void invoke("preview_play", {
-        events: macro.events,
+        events,
         speed: macro.settings?.speed ?? 1,
       });
     }, startDelay * 1000);
+  }
+
+  function stopPlayback() {
+    void invoke("preview_stop").then(() => send({ t: "stop" }));
   }
 
   /** Clear the editor without saving — a fresh start for the next macro. */
@@ -211,131 +244,186 @@ export function RecorderPage({ active = true }: { active?: boolean }) {
     }
   }
 
-  return (
-    <div className="flex flex-col gap-4">
-      <Card title="Recorder">
-        <div className="flex items-end gap-3 flex-wrap">
-          {recording ? (
-            <Button variant="danger" onClick={() => void stopRecording()}>
-              <Square size={14} aria-hidden /> Stop (F8)
-            </Button>
-          ) : countdown > 0 ? (
-            <Button variant="danger" onClick={cancelCountdown}>
-              <Square size={14} aria-hidden /> Starting in {countdown}… (cancel)
-            </Button>
-          ) : (
-            <Button variant="primary" onClick={armRecording} disabled={!canRecord}>
-              <Circle size={14} aria-hidden /> Record (F8)
-            </Button>
-          )}
-          <Button onClick={() => void importJson()}>
-            <FileUp size={14} aria-hidden /> Import JSON…
-          </Button>
-          <Field label="Start delay (s)">
-            <Input
-              type="number" min="0" max="30" className="w-16"
-              value={startDelay}
-              onChange={(e) => setStartDelay(Math.max(0, parseInt(e.target.value) || 0))}
-            />
-          </Field>
-          <div className="flex items-center gap-2 pb-1">
-            {!canRecord && (
+  // The record control has three faces: idle, counting down, recording.
+  const recordButton = recording ? (
+    <ToolButton
+      label="Stop" tone="danger" icon={<Square size={18} aria-hidden />}
+      onClick={() => void stopRecording()} title="Stop recording (F8)"
+    />
+  ) : countdown > 0 ? (
+    <ToolButton
+      label={`${countdown}…`} tone="danger" icon={<Square size={18} aria-hidden />}
+      onClick={cancelCountdown} title="Cancel the countdown"
+    />
+  ) : (
+    <ToolButton
+      label="Record" tone="primary" icon={<Circle size={18} aria-hidden />}
+      onClick={armRecording} disabled={!canRecord} title="Record keyboard + mouse (F8)"
+    />
+  );
+
+  const importButton = (
+    <ToolButton
+      label="Import" icon={<FileUp size={18} aria-hidden />}
+      onClick={() => void importJson()} title="Import a macro JSON file"
+    />
+  );
+
+  const startDelayControl = (
+    <ToolField label="Delay" align="start">
+      <ToolUnitInput
+        suffix="s"
+        type="number" min="0" max="30" className="w-14 text-center"
+        value={startDelay}
+        onChange={(e) => setStartDelay(Math.max(0, parseInt(e.target.value) || 0))}
+        title="Countdown (seconds) before recording or playing"
+      />
+    </ToolField>
+  );
+
+  const recStatus = recording ? (
+    <ToolField label="Rec">
+      <span className="text-danger text-sm font-semibold tabular-nums">● {count}</span>
+    </ToolField>
+  ) : null;
+
+  // Everything below only renders once a macro is loaded, so the shell is
+  // either the editor (with page actions slotted into its toolbar/sidebar) or
+  // an empty "record to begin" state.
+  if (!macro) {
+    return (
+      <div className="h-full flex flex-col">
+        <div className="tb flex items-start gap-2 px-3 py-1.5 border-b border-line bg-panel shrink-0 overflow-x-auto [&_input]:h-7 [&_input]:py-0 [&_input]:text-xs [&_select]:h-7 [&_select]:py-0 [&_select]:text-xs">
+          <ToolGroup label="Capture">
+            {importButton}
+            {recordButton}
+            {startDelayControl}
+            {recStatus}
+          </ToolGroup>
+          {!canRecord && (
+            <div className="ml-auto self-center">
               <Badge tone="amber">grant Input Monitoring in Settings to record</Badge>
-            )}
-            {recording && <Badge tone="red">REC · {count} events</Badge>}
-          </div>
+            </div>
+          )}
         </div>
-        <p className="text-xs text-fg-faint mt-3">
-          The Record button waits for the start delay so you can get in position; F8 starts and
-          stops instantly, even while another window is focused. Mouse moves, clicks, scrolls
-          and keys are captured globally.
-        </p>
-        {status && <p className="text-xs text-fg-muted mt-2">{status}</p>}
-        {captureError && (
-          <p className="text-xs text-danger mt-2">⚠ {captureError}</p>
-        )}
-      </Card>
+        <div className="flex-1 flex flex-col items-center justify-center text-center gap-3 p-8">
+          {recording ? (
+            <>
+              <div className="text-3xl font-semibold text-danger tabular-nums">● {count}</div>
+              <p className="text-fg-muted">Recording events — press F8 (or Stop) when you're done.</p>
+            </>
+          ) : countdown > 0 ? (
+            <>
+              <div className="text-5xl font-semibold text-fg tabular-nums">{countdown}</div>
+              <p className="text-fg-muted">Get in position…</p>
+            </>
+          ) : (
+            <>
+              <Circle size={40} className="text-fg-faint" aria-hidden />
+              <p className="text-fg font-medium">Record or import a macro to begin</p>
+              <p className="text-sm text-fg-muted max-w-md">
+                The Record button waits for the start delay so you can get in position; F8 starts
+                and stops instantly, even while another window is focused. Mouse moves, clicks,
+                scrolls and keys are captured globally.
+              </p>
+            </>
+          )}
+          {status && <p className="text-xs text-fg-muted mt-2">{status}</p>}
+          {captureError && <p className="text-xs text-danger mt-1">⚠ {captureError}</p>}
+        </div>
+      </div>
+    );
+  }
 
-      {macro && (
+  return (
+    <MacroEditor
+      macro={macro}
+      onChange={macroHistory.set}
+      history={macroHistory}
+      toolbarStart={
+        <ToolGroup label="Capture">
+          {importButton}
+          {recordButton}
+          {startDelayControl}
+          {recStatus}
+        </ToolGroup>
+      }
+      toolbarPlayback={
+        <ToolGroup label="Playback">
+          <ToolField label="Times" align="start">
+            <Input
+              type="number" min="1" className="w-14"
+              value={playbackCount}
+              onChange={(e) => setPlaybackCount(Math.max(1, parseInt(e.target.value) || 1))}
+              title="How many times Play / Preview repeats the macro"
+            />
+          </ToolField>
+          <ToolButton
+            label="Play" tone="primary" icon={<Play size={18} aria-hidden />}
+            onClick={() => void playOnDevice()} disabled={!drive}
+            title="Play through the keypad's real hardware input (works in games)"
+          />
+          <ToolButton
+            label="Preview" icon={<Eye size={18} aria-hidden />}
+            onClick={() => void previewLocally()} title="Preview on this computer"
+          />
+          <ToolButton
+            label="Stop" icon={<Square size={18} aria-hidden />}
+            onClick={stopPlayback} title="Stop device + local playback"
+          />
+        </ToolGroup>
+      }
+      toolbarEnd={
         <>
-          <MacroEditor macro={macro} onChange={macroHistory.set} history={macroHistory} />
-
-          <div className="grid md:grid-cols-3 gap-3">
-            <Card title="1 · Try it">
-              <div className="flex flex-col gap-2">
-                <Button variant="primary" onClick={() => void playOnDevice()} disabled={!drive}>
-                  <Play size={14} aria-hidden /> Play on device (hardware HID)
-                </Button>
-                <Button onClick={() => void previewLocally()}>
-                  Preview locally
-                </Button>
-                <Button onClick={() => void invoke("preview_stop").then(() => send({ t: "stop" }))}>
-                  <Square size={14} aria-hidden /> Stop playback
-                </Button>
-                <p className="text-xs text-fg-faint">
-                  Device playback is real hardware input — it works in games. Local preview may
-                  not. Both wait for the start delay ({startDelay}s).
-                </p>
-              </div>
-            </Card>
-
-            <Card title="2 · Put it on a key">
-              {hello && drive ? (
-                <div className="flex flex-col gap-2">
-                  <div className="flex gap-2">
-                    <Field label="Key">
-                      <Select value={assignKey} onChange={(e) => setAssignKey(Number(e.target.value))}>
-                        {Array.from({ length: hello.key_count }, (_, i) => i + 1)
-                          .filter((n) => n !== hello.layer_key)
-                          .map((n) => (
-                            <option key={n} value={n}>Key {n}</option>
-                          ))}
-                      </Select>
-                    </Field>
-                    {hello.layer_key && (
-                      <Field label="Layer">
-                        <Select value={assignLayer} onChange={(e) => setAssignLayer(Number(e.target.value))}>
-                          {Array.from({ length: hello.layer_count }, (_, i) => (
-                            <option key={i} value={i}>Layer {"ABCDEFGH"[i]}</option>
-                          ))}
-                        </Select>
-                      </Field>
-                    )}
-                  </div>
-                  <Button variant="primary" onClick={() => void assignToKey()}>
-                    <HardDriveDownload size={14} aria-hidden /> Save to key {assignKey}
-                  </Button>
-                  <p className="text-xs text-fg-faint">
-                    Writes the macro to the keypad — it then works standalone, no app needed.
-                  </p>
-                </div>
-              ) : (
-                <p className="text-sm text-fg-faint">
-                  Connect your keypad to save this macro onto a key.
-                </p>
-              )}
-            </Card>
-
-            <Card title="3 · Share it">
-              <div className="flex flex-col gap-2">
-                <Button onClick={() => void exportJson(false)}>
-                  <FileDown size={14} aria-hidden /> Export JSON…
-                </Button>
-                <Button onClick={() => void exportJson(true)}>
-                  <FileDown size={14} aria-hidden /> Export optimized…
-                </Button>
-                <Button variant="danger" onClick={() => void closeWithoutSaving()}>
-                  <X size={14} aria-hidden /> Close without saving
-                </Button>
-                <p className="text-xs text-fg-faint">
-                  A macro file works on any MKYADA — drop it onto another keypad's USB drive or
-                  share it with a friend.
-                </p>
-              </div>
-            </Card>
-          </div>
+          <ToolGroup label="Assign to key">
+            {hello && drive ? (
+              <>
+                <ToolField label="Key" align="start">
+                  <Select value={assignKey} onChange={(e) => setAssignKey(Number(e.target.value))}>
+                    {Array.from({ length: hello.key_count }, (_, i) => i + 1)
+                      .filter((n) => n !== hello.layer_key)
+                      .map((n) => (
+                        <option key={n} value={n}>Key {n}</option>
+                      ))}
+                  </Select>
+                </ToolField>
+                {hello.layer_key ? (
+                  <ToolField label="Layer" align="start">
+                    <Select value={assignLayer} onChange={(e) => setAssignLayer(Number(e.target.value))}>
+                      {Array.from({ length: hello.layer_count }, (_, i) => (
+                        <option key={i} value={i}>{"ABCDEFGH"[i]}</option>
+                      ))}
+                    </Select>
+                  </ToolField>
+                ) : null}
+                <ToolButton
+                  label="Save" tone="primary" icon={<HardDriveDownload size={18} aria-hidden />}
+                  onClick={() => void assignToKey()} title={`Save this macro onto key ${assignKey}`}
+                />
+              </>
+            ) : (
+              <ToolButton
+                label="Save" icon={<HardDriveDownload size={18} aria-hidden />}
+                disabled title="Connect a keypad to save this macro onto a key"
+              />
+            )}
+          </ToolGroup>
+          <ToolGroup label="File">
+            <ToolButton
+              label="Export" icon={<FileDown size={18} aria-hidden />}
+              onClick={() => void exportJson(false)} title="Export macro as JSON…"
+            />
+            <ToolButton
+              label="Optimize" icon={<Package size={18} aria-hidden />}
+              onClick={() => void exportJson(true)} title="Export optimized (smaller) JSON…"
+            />
+            <ToolButton
+              label="Close" tone="danger" icon={<X size={18} aria-hidden />}
+              onClick={() => void closeWithoutSaving()} title="Close without saving"
+            />
+          </ToolGroup>
         </>
-      )}
-    </div>
+      }
+    />
   );
 }

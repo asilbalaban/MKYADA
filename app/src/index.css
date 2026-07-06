@@ -98,6 +98,15 @@ body {
   }
 }
 
+/* Toolbar number inputs: drop the spin buttons so 3-4 digit values aren't
+ * clipped in the compact captioned fields. */
+.tb input[type="number"]::-webkit-inner-spin-button,
+.tb input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  appearance: none;
+  margin: 0;
+}
+
 ::-webkit-scrollbar {
   width: 10px;
   height: 10px;
