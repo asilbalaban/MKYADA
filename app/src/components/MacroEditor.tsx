@@ -103,6 +103,7 @@ export function MacroEditor({
   const anchor = useRef<number | null>(null);
   const [bulkFactor, setBulkFactor] = useState("1.0");
   const [bulkWaitMs, setBulkWaitMs] = useState("100");
+  const [bulkDelayMs, setBulkDelayMs] = useState("100");
   const [overlayOn, setOverlayOn] = useState(false);
   const [overlayOnlySelected, setOverlayOnlySelected] = useState(false);
   const stats = macroStats(macro);
@@ -114,6 +115,9 @@ export function MacroEditor({
   // Delete/Backspace removes the selected rows ("layers"); a ref keeps the
   // mount-only key handler pointed at the latest selection + remover.
   const deleteRef = useRef<() => void>(() => {});
+  // ⌘A / Ctrl+A selects every row (unless a text field is focused, where it
+  // keeps its native select-all-text meaning).
+  const selectAllRef = useRef<() => void>(() => {});
 
   // Keyboard: ⌘Z / ⇧⌘Z undo-redo, and Delete/Backspace to remove selected rows.
   // Text fields keep their own editing keys — we bail when a form control has
@@ -141,6 +145,11 @@ export function MacroEditor({
       if ((e.key === "Delete" || e.key === "Backspace") && !typingInField()) {
         e.preventDefault();
         deleteRef.current();
+        return;
+      }
+      if ((e.key === "a" || e.key === "A") && (e.metaKey || e.ctrlKey) && !typingInField()) {
+        e.preventDefault();
+        selectAllRef.current();
       }
     };
     window.addEventListener("keydown", onKey);
@@ -184,6 +193,13 @@ export function MacroEditor({
   }
   deleteRef.current = removeSelected;
 
+  function selectAll() {
+    if (items.length === 0) return;
+    setSelected(items.map((_, i) => i));
+    anchor.current = 0;
+  }
+  selectAllRef.current = selectAll;
+
   function duplicateItem(idx: number) {
     const next = [...items];
     next.splice(idx + 1, 0, JSON.parse(JSON.stringify(items[idx])));
@@ -217,6 +233,21 @@ export function MacroEditor({
     }
     commit(items.map((it) => (it.type === "wait" ? { ...it, delay: ms } : it)));
     toast.success(`${count} wait${count > 1 ? "s" : ""} set to ${ms} ms`);
+  }
+
+  /** Set the "delay before" of every row (or just the selected rows, if any)
+   *  to one value — e.g. type 100 and every delay-before becomes 100 ms. */
+  function applyBulkDelay() {
+    const ms = parseInt(bulkDelayMs);
+    if (!isFinite(ms) || ms < 0) return;
+    const target = selected.length ? new Set(selected) : null;
+    const count = target ? target.size : items.length;
+    if (count === 0) return;
+    commit(items.map((it, i) => (!target || target.has(i) ? setItemDelay(it, ms) : it)));
+    toast.success(
+      `Delay before set to ${ms} ms`,
+      target ? `${count} selected row${count > 1 ? "s" : ""}` : `all ${count} rows`,
+    );
   }
 
   // keep the on-screen overlay in sync while it's open, and heartbeat so the
@@ -331,6 +362,19 @@ export function MacroEditor({
         )}
 
         <ToolGroup label="Bulk edit">
+          <ToolField label="Delay before ms" align="start">
+            <Input
+              type="number" min="0" className="w-16"
+              value={bulkDelayMs}
+              onChange={(e) => setBulkDelayMs(e.target.value)}
+            />
+            <ToolMini
+              onClick={applyBulkDelay}
+              title="Set the delay-before of every row (or the selected rows) to this value"
+            >
+              <Check size={15} aria-hidden />
+            </ToolMini>
+          </ToolField>
           <ToolField label="Delays ×" align="start">
             <Input className="w-14" value={bulkFactor} onChange={(e) => setBulkFactor(e.target.value)} />
             <ToolMini onClick={applyBulk} title="Multiply every delay in the macro by this factor">
@@ -495,7 +539,7 @@ export function MacroEditor({
             </div>
             <div className="flex items-center gap-2">
               <span className="text-[11px] text-fg-faint hidden xl:inline">
-                Shift+click range · {IS_MAC ? "⌘" : "Ctrl"}+click toggle · Del removes
+                Shift+click range · {IS_MAC ? "⌘" : "Ctrl"}+click toggle · {IS_MAC ? "⌘" : "Ctrl"}+A all · Del removes
               </span>
               <Button
                 title={
