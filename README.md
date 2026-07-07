@@ -11,10 +11,10 @@
 </p>
 
 ```
-┌──────────────┐   serial (JSON-lines)    ┌───────────────┐    USB HID     ┌───────────┐
-│  MKYADA App  │ ◄──────────────────────► │  RP2040-Zero  │ ─────────────► │  Your PC  │
-│(Tauri, W/M/L) │   CIRCUITPY drive (JSON) │   (firmware)  │  kbd + mouse   │  / game   │
-└──────────────┘ ────────────────────────► └───────────────┘                └───────────┘
++----------------+   serial (JSON-lines)    +---------------+    USB HID    +-----------+
+|   MKYADA App   | <----------------------> |  RP2040-Zero  | ------------> |  Your PC  |
+| (Tauri, W/M/L) | CIRCUITPY drive (JSON)   |   (firmware)  | kbd + mouse   |   / game  |
++----------------+ ----------------------->  +---------------+               +-----------+
 ```
 
 **One repo for everything.** Build the hardware, flash the firmware, create macros, load them onto your keypad, fine-tune your recordings, and keep both the app and the firmware up to date — it all lives here.
