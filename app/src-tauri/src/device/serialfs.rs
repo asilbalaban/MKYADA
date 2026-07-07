@@ -10,6 +10,7 @@
 use super::serial::{self, DeviceManager};
 use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
 use serde_json::{json, Value};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Receiver;
 use std::sync::{Mutex, MutexGuard};
 use std::time::Duration;
@@ -36,6 +37,27 @@ pub fn is_fs_msg(v: &Value) -> bool {
 
 /// One fs op at a time — the wire protocol has no request ids.
 static OP: Mutex<()> = Mutex::new(());
+
+/// User-requested abort of an in-flight write (issue #15): the UI's cancel
+/// button flips this and the chunk loop checks it between chunks. Cleared
+/// again when the next write begins. Deliberately NOT a transient error —
+/// with_recovery must not retry a cancelled transfer.
+static CANCEL: AtomicBool = AtomicBool::new(false);
+
+/// Error marker for a user-cancelled write; the frontend matches on it.
+pub const CANCELLED: &str = "write cancelled";
+
+pub fn request_cancel() {
+    CANCEL.store(true, Ordering::Relaxed);
+}
+
+pub fn clear_cancel() {
+    CANCEL.store(false, Ordering::Relaxed);
+}
+
+pub fn cancel_requested() -> bool {
+    CANCEL.load(Ordering::Relaxed)
+}
 
 /// Raw bytes per fs_write line (~4KB of base64 on the wire; the firmware's
 /// line buffer takes 16KB).
@@ -182,6 +204,9 @@ fn write_once(
     progress(0, total);
     let mut written = 0;
     for (seq, chunk) in chunks.into_iter().enumerate() {
+        if cancel_requested() {
+            return Err(CANCELLED.to_string());
+        }
         op.send(&json!({
             "t": "fs_write", "path": path, "seq": seq,
             "data": B64.encode(chunk), "eof": seq == last,

@@ -13,6 +13,7 @@ export const ipc = {
   listDrives: () => invoke<DriveInfo[]>("list_drives"),
   driveWrite: (drive: string, path: string, content: string) =>
     invoke<void>("drive_write", { drive, path, content }),
+  driveWriteCancel: () => invoke<void>("drive_write_cancel"),
   driveRead: (drive: string, path: string) => invoke<string>("drive_read", { drive, path }),
   driveDelete: (drive: string, path: string) => invoke<void>("drive_delete", { drive, path }),
   driveList: (drive: string, path: string) => invoke<string[]>("drive_list", { drive, path }),

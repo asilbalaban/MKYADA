@@ -32,6 +32,7 @@ import { useHistory } from "../lib/history";
 import { takeRecorderEdit } from "../lib/recorder-handoff";
 import { Badge, Input, Select } from "../components/ui";
 import { ToolButton, ToolField, ToolGroup, ToolUnitInput } from "../components/toolbar";
+import { isWriteCancelled, useWriteGate, writeCancelledError } from "../components/WriteProgress";
 import { useToast } from "../components/toast";
 import { useConfirm } from "../components/dialog";
 import { MacroEditor } from "../components/MacroEditor";
@@ -42,6 +43,7 @@ export function RecorderPage({ active = true }: { active?: boolean }) {
   const { status: perms } = usePermissions();
   const toast = useToast();
   const confirm = useConfirm();
+  const { writeToKeypad } = useWriteGate();
   const captureError = useRecordError();
   const canRecord = !perms || perms.platform !== "macos" || perms.input_monitoring === "granted";
   const [recording, setRecording] = useState(false);
@@ -186,7 +188,21 @@ export function RecorderPage({ active = true }: { active?: boolean }) {
     // — a pure test-run knob. The editor macro (and the Repeat-per-key-press
     // setting saved to keys) stays exactly as the user configured it.
     const test = { ...macro, settings: { ...macro.settings, repeat: playCount } };
-    await ipc.driveWrite(drive.path, "live.json", serializeForDevice(test, hello?.proto ?? 0));
+    try {
+      // the transfer runs under the blocking modal (issue #15) — big macros
+      // take a while and pressing Play twice mid-send only makes it worse
+      await writeToKeypad("Test playback (live.json)", async (ctx) => {
+        await ipc.driveWrite(drive.path, "live.json", serializeForDevice(test, hello?.proto ?? 0));
+        if (ctx.cancelRequested()) throw writeCancelledError();
+      });
+    } catch (e) {
+      if (isWriteCancelled(e)) {
+        setStatus("Playback cancelled.");
+        return;
+      }
+      toast.error("Could not send the macro to the keypad", String(e));
+      return;
+    }
     const times = playCount > 1 ? ` ×${playCount}` : "";
     setStatus(startDelay > 0 ? `Playing on device${times} in ${startDelay}s…` : `Playing on device${times}…`);
     setTimeout(() => {
@@ -231,10 +247,16 @@ export function RecorderPage({ active = true }: { active?: boolean }) {
     if (!macro || !drive) return;
     const file = macroFileName(assignKey, assignLayer);
     try {
-      await ipc.driveWrite(drive.path, file, serializeForDevice(macro, hello?.proto ?? 0));
-      // Best-effort: a read-only drive makes the backend restart the keypad
-      // (it reboots with the new file); the port is briefly down then.
-      await send({ t: "reload" }).catch(() => {});
+      // Same blocking modal as the Keys page (issues #13/#15): the editor is
+      // unusable while the macro streams to the keypad, and it closes only
+      // once the file is fully written.
+      await writeToKeypad(`Macro → key ${assignKey}`, async (ctx) => {
+        await ipc.driveWrite(drive.path, file, serializeForDevice(macro, hello?.proto ?? 0));
+        if (ctx.cancelRequested()) throw writeCancelledError();
+        // Best-effort: a read-only drive makes the backend restart the keypad
+        // (it reboots with the new file); the port is briefly down then.
+        await send({ t: "reload" }).catch(() => {});
+      });
       // the Keys page remembers assignments (issue #14) — keep it in sync
       keysCache.setAssignment(drive.path, slotKey(assignKey, assignLayer), parseAssignment(macro));
       setStatus(`Assigned to ${file}`);
@@ -243,6 +265,14 @@ export function RecorderPage({ active = true }: { active?: boolean }) {
         `${macro.events.length} events written to the keypad. Press the key to try it.`,
       );
     } catch (e) {
+      if (isWriteCancelled(e)) {
+        // a half-written macro must not stay on the key (issue #15)
+        await ipc.driveDelete(drive.path, file).catch(() => {});
+        keysCache.setAssignment(drive.path, slotKey(assignKey, assignLayer), null);
+        setStatus(`Send cancelled — key ${assignKey} was left unassigned.`);
+        toast.info("Send cancelled", `Key ${assignKey} was left without a macro.`);
+        return;
+      }
       toast.error("Could not write to the keypad", String(e));
     }
   }

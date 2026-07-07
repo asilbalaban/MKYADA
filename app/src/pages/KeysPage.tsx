@@ -25,6 +25,7 @@ import { keysCache, slotKey } from "../lib/keys-cache";
 import { stashRecorderEdit } from "../lib/recorder-handoff";
 import { undoRedoFromEvent, useHistory } from "../lib/history";
 import { Button, Card, EmptyState, Spinner } from "../components/ui";
+import { isWriteCancelled, useWriteGate, writeCancelledError } from "../components/WriteProgress";
 import { useToast } from "../components/toast";
 import { Keypad } from "../components/Keypad";
 import { AssignmentEditor } from "../components/AssignmentEditor";
@@ -33,6 +34,7 @@ export function KeysPage() {
   const { hello, drive, send, onMsg } = useDevice();
   const nav = useNav();
   const toast = useToast();
+  const { writeToKeypad } = useWriteGate();
   const [cfg, setCfg] = useState<DeviceConfig | null>(null);
   const [layer, setLayer] = useState(0);
   const [selected, setSelected] = useState<number | null>(null);
@@ -195,40 +197,60 @@ export function KeysPage() {
     const macro = compileAssignment(draft);
     setSaving(true);
     try {
-      if (macro) {
-        macro.screen = cfg.screen;
-        await ipc.driveWrite(drive.path, file, serializeForDevice(macro, hello?.proto ?? 0));
-        // verify the write landed before claiming success
-        const back = await ipc.driveRead(drive.path, file);
-        if (!back.includes("mkyada-macro")) throw new Error("verification read failed");
-      } else {
-        try {
-          await ipc.driveDelete(drive.path, file);
-        } catch {
-          // was already unassigned
+      // The whole save runs under the blocking write modal (issue #15): the
+      // bar hits 100% only when the macro is fully written AND verified.
+      await writeToKeypad(`Key ${selected} macro`, async (ctx) => {
+        const bail = () => {
+          if (ctx.cancelRequested()) throw writeCancelledError();
+        };
+        if (macro) {
+          macro.screen = cfg!.screen;
+          await ipc.driveWrite(drive.path, file, serializeForDevice(macro, hello?.proto ?? 0));
+          bail();
+          // verify the write landed before claiming success
+          const back = await ipc.driveRead(drive.path, file);
+          if (!back.includes("mkyada-macro")) throw new Error("verification read failed");
+        } else {
+          try {
+            await ipc.driveDelete(drive.path, file);
+          } catch {
+            // was already unassigned
+          }
         }
-      }
-      // mixed sequences keep their HID steps in sibling part files
-      // (key3.s0.json…) the app plays over serial; write the current set and
-      // sweep any stale ones from a previous, longer sequence
-      const parts = draft.kind === "sequence" ? compileSequenceParts(draft, file) : [];
-      for (const p of parts) {
-        await ipc.driveWrite(drive.path, p.path, serializeForDevice(p.file, hello?.proto ?? 0));
-      }
-      const stem = file.split("/").pop()!.replace(/\.json$/, ".");
-      const keep = new Set(parts.map((p) => p.path.split("/").pop()));
-      const existing = await ipc.driveList(drive.path, "macros").catch(() => [] as string[]);
-      for (const f of existing) {
-        if (f.startsWith(stem) && AUX_FILE_RE.test(f) && !keep.has(f)) {
-          await ipc.driveDelete(drive.path, `macros/${f}`).catch(() => {});
+        // mixed sequences keep their HID steps in sibling part files
+        // (key3.s0.json…) the app plays over serial; write the current set and
+        // sweep any stale ones from a previous, longer sequence
+        const parts = draft!.kind === "sequence" ? compileSequenceParts(draft!, file) : [];
+        for (const p of parts) {
+          bail();
+          await ipc.driveWrite(drive.path, p.path, serializeForDevice(p.file, hello?.proto ?? 0));
         }
-      }
+        const stem = file.split("/").pop()!.replace(/\.json$/, ".");
+        const keep = new Set(parts.map((p) => p.path.split("/").pop()));
+        const existing = await ipc.driveList(drive.path, "macros").catch(() => [] as string[]);
+        for (const f of existing) {
+          if (f.startsWith(stem) && AUX_FILE_RE.test(f) && !keep.has(f)) {
+            await ipc.driveDelete(drive.path, `macros/${f}`).catch(() => {});
+          }
+        }
+      });
     } catch (e) {
+      setSaving(false);
+      if (isWriteCancelled(e)) {
+        // cancelled mid-transfer — the key must not keep a half-written
+        // macro, so remove the file and leave the slot unassigned (issue #15)
+        await ipc.driveDelete(drive.path, file).catch(() => {});
+        const next = new Map(assignments);
+        next.delete(slotKey(selected, layer));
+        setAssignments(next);
+        keysCache.setAssignment(drive.path, slotKey(selected, layer), null);
+        toast.info("Save cancelled", `Key ${selected} was left unassigned.`);
+        return;
+      }
       toast.error(
         "Could not save to the keypad",
         `${e}\n\nCheck that the keypad's USB drive is mounted and writable (unplug/replug if needed).`,
       );
-      setSaving(false);
       return;
     }
     setSaving(false);

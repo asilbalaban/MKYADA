@@ -155,6 +155,8 @@ async fn drive_write(
 /// large macros take seconds and the UI shows a progress bar (issue #10).
 /// Mounted-drive writes are a single fast fs call; no progress to report.
 fn write_to_device(app: &AppHandle, drive: &str, rel: &str, content: &str) -> Result<(), String> {
+    // a cancel request belongs to the previous transfer, not this one
+    serialfs::clear_cancel();
     if serialfs::is_serial(drive) {
         let mgr = app.state::<DeviceManager>();
         serialfs::write_file(&mgr, rel, content.as_bytes(), |written, total| {
@@ -190,6 +192,9 @@ fn drive_write_recovering(
             let _ = serial::send(&mgr, &serde_json::json!({"t": "stop"}));
             let mut last = e;
             for _ in 0..DRIVE_BUSY_RETRIES {
+                if serialfs::cancel_requested() {
+                    return Err(serialfs::CANCELLED.to_string());
+                }
                 std::thread::sleep(Duration::from_millis(300));
                 match drive::write_file(drive, rel, content) {
                     Ok(()) => return Ok(()),
@@ -230,6 +235,9 @@ fn drive_write_recovering(
     let deadline = Instant::now() + Duration::from_secs(25);
     let mut last = human;
     while Instant::now() < deadline {
+        if serialfs::cancel_requested() {
+            return Err(serialfs::CANCELLED.to_string());
+        }
         std::thread::sleep(Duration::from_millis(1500));
         let target = match &uid {
             Some(uid) => drive::list_drives()
@@ -251,6 +259,14 @@ fn drive_write_recovering(
             .trim_start_matches(drive::BUSY_MARKER)
             .trim()
     ))
+}
+
+/// Abort the in-flight keypad write (issue #15). The chunk loop notices the
+/// flag between chunks and the write command rejects with the CANCELLED
+/// marker; the frontend then removes the half-written file.
+#[tauri::command]
+fn drive_write_cancel() {
+    serialfs::request_cancel();
 }
 
 #[tauri::command]
@@ -828,6 +844,7 @@ pub fn run() {
             connected_port,
             list_drives,
             drive_write,
+            drive_write_cancel,
             drive_read,
             drive_delete,
             drive_list,
