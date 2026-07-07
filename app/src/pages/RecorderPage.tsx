@@ -25,7 +25,13 @@ import { readTextFile } from "../lib/fs";
 import { ipc } from "../lib/ipc";
 import { useDevice } from "../lib/device";
 import type { MacroEvent, MacroFile } from "../lib/types";
-import { captureScreen, serializeForDevice, thinForDevice } from "../lib/recorder-model";
+import {
+  captureScreen,
+  flattenItems,
+  groupEvents,
+  serializeForDevice,
+  thinForDevice,
+} from "../lib/recorder-model";
 import { macroFileName, migrateMacro, parseAssignment } from "../lib/macro-model";
 import { keysCache, slotKey } from "../lib/keys-cache";
 import { useHistory } from "../lib/history";
@@ -39,7 +45,7 @@ import { MacroEditor } from "../components/MacroEditor";
 import { usePermissions, useRecordError } from "../components/Permissions";
 
 export function RecorderPage({ active = true }: { active?: boolean }) {
-  const { hello, drive, send } = useDevice();
+  const { hello, drive, send, onMsg } = useDevice();
   const { status: perms } = usePermissions();
   const toast = useToast();
   const confirm = useConfirm();
@@ -65,6 +71,61 @@ export function RecorderPage({ active = true }: { active?: boolean }) {
   const raw = useRef<MacroEvent[]>([]);
   const recordingRef = useRef(false);
   const countdownTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Playback state (issue #13): Play/Preview become Stop while running, the
+  // Stop label counts the repeats, and the editor highlights the row the
+  // macro is currently on. The row/run tracker is a local simulation driven
+  // by the macro's own delays — the keypad doesn't stream per-event progress.
+  type Playing = { mode: "device" | "preview"; run: number; total: number; row: number };
+  const [playing, setPlaying] = useState<Playing | null>(null);
+  const playingRef = useRef<Playing | null>(null);
+  playingRef.current = playing;
+  const playTimers = useRef<{
+    delay?: ReturnType<typeof setTimeout>;
+    tick?: ReturnType<typeof setInterval>;
+  }>({});
+
+  const endPlayback = useCallback(() => {
+    if (playTimers.current.delay) clearTimeout(playTimers.current.delay);
+    if (playTimers.current.tick) clearInterval(playTimers.current.tick);
+    playTimers.current = {};
+    setPlaying(null);
+  }, []);
+
+  /** Walk the macro's timeline on a wall clock: which editor row is due at
+   * each moment, and which repeat we're in. Approximate by design — good
+   * enough to follow along. Ends on the real done signal (play_done /
+   * preview:done), with a generous clock-based fallback. */
+  const startProgress = useCallback(
+    (mode: "device" | "preview", runs: number) => {
+      if (!macro) return;
+      const items = groupEvents(macro.events);
+      const speed = Math.max(0.01, macro.settings?.speed ?? 1);
+      let t = 0;
+      const rowEnds = items.map((it) => {
+        for (const ev of flattenItems([it])) t += (ev.delay ?? 0) / speed;
+        return t;
+      });
+      const totalMs = Math.max(t, 1);
+      const start = Date.now();
+      setPlaying({ mode, run: 1, total: runs, row: 0 });
+      playTimers.current.tick = setInterval(() => {
+        const elapsed = Date.now() - start;
+        if (elapsed >= totalMs * runs + 10_000) {
+          // the done signal never came (disconnect mid-play?) — don't stay
+          // stuck on a Stop button forever
+          endPlayback();
+          return;
+        }
+        const run = Math.min(runs, Math.floor(elapsed / totalMs) + 1);
+        const within = elapsed % totalMs;
+        let row = rowEnds.findIndex((end) => within < end);
+        if (row === -1) row = rowEnds.length - 1;
+        setPlaying((p) => (p ? { ...p, run, row } : p));
+      }, 100);
+    },
+    [macro, endPlayback],
+  );
 
   // "Edit in Recorder" from the Keys page: load that key's macro into the
   // editor as if it was just recorded, with its key preselected below. The
@@ -205,8 +266,11 @@ export function RecorderPage({ active = true }: { active?: boolean }) {
     }
     const times = playCount > 1 ? ` ×${playCount}` : "";
     setStatus(startDelay > 0 ? `Playing on device${times} in ${startDelay}s…` : `Playing on device${times}…`);
-    setTimeout(() => {
+    // the button flips to Stop right away so the countdown can be aborted
+    setPlaying({ mode: "device", run: 1, total: playCount, row: -1 });
+    playTimers.current.delay = setTimeout(() => {
       void send({ t: "play", file: "live.json" });
+      startProgress("device", playCount);
     }, startDelay * 1000);
   }
 
@@ -218,17 +282,69 @@ export function RecorderPage({ active = true }: { active?: boolean }) {
       runs > 1 ? Array.from({ length: runs }, () => macro.events).flat() : macro.events;
     const times = runs > 1 ? ` ×${runs}` : "";
     setStatus(startDelay > 0 ? `Local preview${times} in ${startDelay}s…` : `Previewing${times}…`);
-    setTimeout(() => {
+    setPlaying({ mode: "preview", run: 1, total: runs, row: -1 });
+    playTimers.current.delay = setTimeout(() => {
       void invoke("preview_play", {
         events,
         speed: macro.settings?.speed ?? 1,
       });
+      startProgress("preview", runs);
     }, startDelay * 1000);
   }
 
-  function stopPlayback() {
+  const stopPlayback = useCallback(() => {
     void invoke("preview_stop").then(() => send({ t: "stop" }));
-  }
+    endPlayback();
+    setStatus("Playback stopped.");
+  }, [send, endPlayback]);
+
+  // The real end-of-playback signals beat the local clock: the keypad
+  // announces play_done, the local preview thread emits preview:done.
+  useEffect(
+    () =>
+      onMsg((m) => {
+        if (m.t === "play_done" && playingRef.current?.mode === "device") endPlayback();
+      }),
+    [onMsg, endPlayback],
+  );
+  useEffect(() => {
+    const un = listen("preview:done", () => {
+      if (playingRef.current?.mode === "preview") endPlayback();
+    });
+    return () => {
+      un.then((f) => f());
+    };
+  }, [endPlayback]);
+
+  // F10 toggles device play/stop (issue #13) — like F8 for recording. Only
+  // while the Recorder is the active tab, and never while typing in a field
+  // (KeyCapture must still be able to record an F10 keystroke).
+  const activeRef = useRef(active);
+  activeRef.current = active;
+  const playToggleRef = useRef<() => void>(() => {});
+  playToggleRef.current = () => {
+    if (playing) stopPlayback();
+    else void playOnDevice();
+  };
+  useEffect(() => {
+    const typingInField = () => {
+      const el = document.activeElement as HTMLElement | null;
+      return (
+        !!el &&
+        (el.tagName === "INPUT" ||
+          el.tagName === "SELECT" ||
+          el.tagName === "TEXTAREA" ||
+          el.isContentEditable)
+      );
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "F10" || !activeRef.current || typingInField()) return;
+      e.preventDefault();
+      playToggleRef.current();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   /** Clear the editor without saving — a fresh start for the next macro. */
   async function closeWithoutSaving() {
@@ -373,6 +489,7 @@ export function RecorderPage({ active = true }: { active?: boolean }) {
       macro={macro}
       onChange={macroHistory.set}
       history={macroHistory}
+      activeRow={playing && playing.row >= 0 ? playing.row : null}
       toolbarStart={
         <ToolGroup label="Capture">
           {importButton}
@@ -391,19 +508,34 @@ export function RecorderPage({ active = true }: { active?: boolean }) {
               onChange={(e) => setPlayCount(Math.max(1, parseInt(e.target.value) || 1))}
             />
           </ToolField>
-          <ToolButton
-            label="Play" tone="primary" icon={<Play size={18} aria-hidden />}
-            onClick={() => void playOnDevice()} disabled={!drive}
-            title="Play through the keypad's real hardware input (works in games)"
-          />
-          <ToolButton
-            label="Preview" icon={<Eye size={18} aria-hidden />}
-            onClick={() => void previewLocally()} title="Preview on this computer"
-          />
-          <ToolButton
-            label="Stop" icon={<Square size={18} aria-hidden />}
-            onClick={stopPlayback} title="Stop device + local playback"
-          />
+          {playing?.mode === "device" ? (
+            <ToolButton
+              label={playing.total > 1 ? `Stop ${playing.run}/${playing.total}` : "Stop"}
+              tone="danger" icon={<Square size={18} aria-hidden />}
+              onClick={stopPlayback} title="Stop playback (F10)"
+            />
+          ) : (
+            <ToolButton
+              label="Play" tone="primary" icon={<Play size={18} aria-hidden />}
+              onClick={() => void playOnDevice()}
+              disabled={!drive || playing !== null}
+              title="Play through the keypad's real hardware input (works in games) — F10"
+            />
+          )}
+          {playing?.mode === "preview" ? (
+            <ToolButton
+              label={playing.total > 1 ? `Stop ${playing.run}/${playing.total}` : "Stop"}
+              tone="danger" icon={<Square size={18} aria-hidden />}
+              onClick={stopPlayback} title="Stop the local preview"
+            />
+          ) : (
+            <ToolButton
+              label="Preview" icon={<Eye size={18} aria-hidden />}
+              onClick={() => void previewLocally()}
+              disabled={playing !== null}
+              title="Preview on this computer"
+            />
+          )}
         </ToolGroup>
       }
       toolbarEnd={

@@ -74,6 +74,9 @@ interface Props {
   /** When the owner keeps the macro in a useHistory stack, the editor shows
    * undo/redo buttons and answers ⌘Z/⇧⌘Z (Ctrl+Z/Ctrl+Y). */
   history?: Pick<History<unknown>, "canUndo" | "canRedo" | "undo" | "redo">;
+  /** Row currently executing during playback (issue #13) — drawn green and
+   * kept scrolled into view so the user can follow the macro live. */
+  activeRow?: number | null;
   /** Photoshop-style toolbar/sidebar slots filled by the owning page with the
    * device- and file-level actions. Group order across the bar is:
    * Capture → Playback → [Macro · Edit · Bulk · On key press] → File. */
@@ -87,6 +90,7 @@ export function MacroEditor({
   macro,
   onChange,
   history,
+  activeRow = null,
   toolbarStart,
   toolbarPlayback,
   toolbarEnd,
@@ -505,8 +509,18 @@ export function MacroEditor({
                 key={i}
                 onClick={(e) => rowClick(e, i)}
                 aria-pressed={selected.includes(i)}
+                ref={(el) => {
+                  // follow the playhead: keep the executing row in view
+                  if (el && activeRow === i) el.scrollIntoView({ block: "nearest" });
+                }}
                 className={`flex items-center gap-2 rounded-md px-2 py-1.5 text-xs text-left border
-                  ${selected.includes(i) ? "border-accent bg-accent/10" : "border-line bg-panel2 hover:border-fg-faint"}`}
+                  ${
+                    activeRow === i
+                      ? "border-success-line bg-success-bg"
+                      : selected.includes(i)
+                        ? "border-accent bg-accent/10"
+                        : "border-line bg-panel2 hover:border-fg-faint"
+                  }`}
               >
                 <span className="w-6 flex justify-center text-fg-muted">{itemIcon(item)}</span>
                 <span className="w-8 text-fg-faint">#{i + 1}</span>

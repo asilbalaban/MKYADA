@@ -45,7 +45,7 @@ export function ToolButton({
   return (
     <button
       {...props}
-      className={`h-11 w-12 flex flex-col items-center rounded-md border transition-colors disabled:opacity-40 disabled:pointer-events-none ${tones} ${className}`}
+      className={`h-11 min-w-12 px-1 flex flex-col items-center rounded-md border transition-colors disabled:opacity-40 disabled:pointer-events-none ${tones} ${className}`}
     >
       <span className="h-4 mb-0.5 flex items-center text-[10px] leading-none text-fg-faint">{label}</span>
       <span className="flex-1 flex items-center justify-center">{icon}</span>
