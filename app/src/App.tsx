@@ -44,7 +44,7 @@ function Shell() {
   const [page, setPage] = useState<Page>("devices");
   const [update, setUpdate] = useState<UpdateInfo | null>(null);
   const [nickname, setNickname] = useState("");
-  const { hello, port, layer } = useDevice();
+  const { hello, port, layer, status } = useDevice();
   // key labels everywhere show what they type on the user's real keyboard
   // layout; re-render the tree when that map loads or changes
   useLayoutVersion();
@@ -115,10 +115,25 @@ function Shell() {
           </nav>
           <div className="px-4 py-3 border-t border-line flex flex-col gap-2">
             {port && hello ? (
-              <div className="flex flex-col gap-1 items-start">
-                <Badge tone="green">
-                  ● {nickname.trim() || `${hello.key_count}-key keypad`} connected
-                </Badge>
+              <div
+                className="flex flex-col gap-1 items-start"
+                title={`Keypad link: ${status}`}
+              >
+                {/* live link state (issue #16): what the keypad is doing
+                    right now, not just that it exists */}
+                {status === "unresponsive" ? (
+                  <Badge tone="red">● Not responding</Badge>
+                ) : status === "transfer" ? (
+                  <Badge tone="blue">● Data transfer…</Badge>
+                ) : status === "reloading" ? (
+                  <Badge tone="amber">● Reloading…</Badge>
+                ) : status === "busy" ? (
+                  <Badge tone="amber">● Busy — macro playing</Badge>
+                ) : (
+                  <Badge tone="green">
+                    ● {nickname.trim() || `${hello.key_count}-key keypad`} connected
+                  </Badge>
+                )}
                 {hello.layer_key && (
                   <Badge tone="blue">Layer {layer.toUpperCase()}</Badge>
                 )}

@@ -39,3 +39,9 @@ export function onWriteProgress(cb: (p: WriteProgress) => void): Promise<Unliste
 export function onDeviceDisconnected(cb: (port: string) => void): Promise<UnlistenFn> {
   return listen("device:disconnected", (e) => cb(e.payload as string));
 }
+
+/** Link-state pulses around drive operations (issue #16): "transfer" when
+ * one starts, then "idle" | "busy" | "unresponsive" when it finishes. */
+export function onDeviceStatus(cb: (state: string) => void): Promise<UnlistenFn> {
+  return listen("device:status", (e) => cb(e.payload as string));
+}

@@ -10,10 +10,20 @@ import {
   useRef,
   useState,
 } from "react";
-import { ipc, onDeviceDisconnected, onDeviceMsg } from "./ipc";
+import { ipc, onDeviceDisconnected, onDeviceMsg, onDeviceStatus } from "./ipc";
 import { keysCache } from "./keys-cache";
 import { rememberDevice, syncNameWithDevice } from "./devnames";
 import type { BtnEvent, DeviceInfo, DriveInfo, Hello } from "./types";
+
+/** What the keypad link is doing right now (issue #16), for the sidebar
+ * status badge. Derived from serial traffic and drive-op pulses. */
+export type DeviceStatus =
+  | "disconnected"
+  | "connected"
+  | "busy" // a macro is playing on the keypad
+  | "transfer" // files are streaming to/from the keypad
+  | "reloading" // reload/reset sent — the firmware is restarting its config
+  | "unresponsive"; // a drive op timed out; the link may be wedged
 
 interface DeviceState {
   scanning: boolean;
@@ -23,6 +33,7 @@ interface DeviceState {
   drive: DriveInfo | null;
   /** active layer letter ("a", "b", …) as reported live by the device */
   layer: string;
+  status: DeviceStatus;
   scan: () => Promise<DeviceInfo[]>;
   connect: (info: DeviceInfo) => Promise<void>;
   disconnect: () => Promise<void>;
@@ -55,12 +66,26 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
   const btnSubs = useRef(new Set<(e: BtnEvent) => void>());
   const msgSubs = useRef(new Set<(m: Record<string, unknown>) => void>());
 
+  // Status ingredients (issue #16): macro playing, drive ops in flight,
+  // a timed-out op, a reload in progress.
+  const [playingBusy, setPlayingBusy] = useState(false);
+  const [transferCount, setTransferCount] = useState(0);
+  const [stalled, setStalled] = useState(false);
+  const [reloading, setReloading] = useState(false);
+  const stallTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reloadTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   useEffect(() => {
     const un1 = onDeviceMsg((msg) => {
       msgSubs.current.forEach((cb) => cb(msg));
+      // any message proves the link is alive again
+      setStalled(false);
+      if (msg.t === "play_start") setPlayingBusy(true);
+      if (msg.t === "play_done") setPlayingBusy(false);
       if (msg.t === "hello") {
         setHello(msg as unknown as Hello);
         setLayer(String((msg as { layer?: string }).layer ?? "a"));
+        setReloading(false);
       }
       if (msg.t === "layer") setLayer(String((msg as { layer?: string }).layer ?? "a"));
       if (msg.t === "btn") {
@@ -72,10 +97,32 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
       setPort(null);
       setHello(null);
       setDrive(null);
+      setPlayingBusy(false);
+      setTransferCount(0);
+      setStalled(false);
+      setReloading(false);
+    });
+    const un3 = onDeviceStatus((s) => {
+      if (s === "transfer") {
+        setTransferCount((n) => n + 1);
+        return;
+      }
+      // terminal pulse of one drive op
+      setTransferCount((n) => Math.max(0, n - 1));
+      if (s === "busy") setPlayingBusy(true);
+      if (s === "unresponsive") {
+        setStalled(true);
+        if (stallTimer.current) clearTimeout(stallTimer.current);
+        // clear on its own — the next successful op or message also clears it
+        stallTimer.current = setTimeout(() => setStalled(false), 10_000);
+      }
     });
     return () => {
       un1.then((f) => f());
       un2.then((f) => f());
+      un3.then((f) => f());
+      if (stallTimer.current) clearTimeout(stallTimer.current);
+      if (reloadTimer.current) clearTimeout(reloadTimer.current);
     };
   }, []);
 
@@ -181,7 +228,16 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
     setDrive(null);
   }, []);
 
-  const send = useCallback((msg: Record<string, unknown>) => ipc.deviceSend(msg), []);
+  const send = useCallback((msg: Record<string, unknown>) => {
+    // reload/reset restart the firmware's config — show it as Reloading
+    // until the fresh hello lands (with a timeout fallback)
+    if (msg.t === "reload" || msg.t === "reset") {
+      setReloading(true);
+      if (reloadTimer.current) clearTimeout(reloadTimer.current);
+      reloadTimer.current = setTimeout(() => setReloading(false), 4000);
+    }
+    return ipc.deviceSend(msg);
+  }, []);
 
   const writeAndReload = useCallback(
     async (files: { path: string; content: string }[]) => {
@@ -210,6 +266,20 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
     return () => void msgSubs.current.delete(cb);
   }, []);
 
+  // Worst-first: a wedged link outranks everything, then live transfers,
+  // then a restarting firmware, then playback.
+  const status: DeviceStatus = !port
+    ? "disconnected"
+    : stalled
+      ? "unresponsive"
+      : transferCount > 0
+        ? "transfer"
+        : reloading
+          ? "reloading"
+          : playingBusy
+            ? "busy"
+            : "connected";
+
   return (
     <Ctx.Provider
       value={{
@@ -219,6 +289,7 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
         hello,
         drive,
         layer,
+        status,
         scan,
         connect,
         disconnect,

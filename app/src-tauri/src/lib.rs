@@ -129,6 +129,24 @@ fn list_drives() -> Vec<DriveInfo> {
     drive::list_drives()
 }
 
+/// Live device-link state for the sidebar status indicator (issue #16):
+/// "transfer" when a drive operation starts, then one terminal state when it
+/// finishes — "idle", "busy" (firmware answered busy) or "unresponsive"
+/// (reply timeout / stalled serial write).
+fn emit_status(app: &AppHandle, state: &str) {
+    let _ = app.emit("device:status", state);
+}
+
+fn emit_result_status<T>(app: &AppHandle, r: &Result<T, String>) {
+    match r {
+        Err(e) if e.contains("did not answer in time") || e.contains("os error 121") => {
+            emit_status(app, "unresponsive")
+        }
+        Err(e) if e.contains("busy") => emit_status(app, "busy"),
+        _ => emit_status(app, "idle"),
+    }
+}
+
 /// Write to the keypad. `drive` is either a CIRCUITPY mount point or the
 /// `serial:<uid>` sentinel (USB drive hidden — files travel over serial).
 /// If a real drive is read-only (FAT dirty bit on macOS, or the firmware
@@ -144,7 +162,10 @@ async fn drive_write(
     content: String,
 ) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
-        write_to_device(&app, &drive, &path, &content)
+        emit_status(&app, "transfer");
+        let r = write_to_device(&app, &drive, &path, &content);
+        emit_result_status(&app, &r);
+        r
     })
     .await
     .map_err(|e| e.to_string())?
@@ -272,13 +293,16 @@ fn drive_write_cancel() {
 #[tauri::command]
 async fn drive_read(app: AppHandle, drive: String, path: String) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        if serialfs::is_serial(&drive) {
+        emit_status(&app, "transfer");
+        let r = if serialfs::is_serial(&drive) {
             let mgr = app.state::<DeviceManager>();
-            let bytes = serialfs::read_file(&mgr, &path)?;
-            String::from_utf8(bytes).map_err(|e| e.to_string())
+            serialfs::read_file(&mgr, &path)
+                .and_then(|bytes| String::from_utf8(bytes).map_err(|e| e.to_string()))
         } else {
             drive::read_file(&drive, &path)
-        }
+        };
+        emit_result_status(&app, &r);
+        r
     })
     .await
     .map_err(|e| e.to_string())?
@@ -287,12 +311,15 @@ async fn drive_read(app: AppHandle, drive: String, path: String) -> Result<Strin
 #[tauri::command]
 async fn drive_delete(app: AppHandle, drive: String, path: String) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
-        if serialfs::is_serial(&drive) {
+        emit_status(&app, "transfer");
+        let r = if serialfs::is_serial(&drive) {
             let mgr = app.state::<DeviceManager>();
             serialfs::delete_file(&mgr, &path)
         } else {
             drive::delete_file(&drive, &path)
-        }
+        };
+        emit_result_status(&app, &r);
+        r
     })
     .await
     .map_err(|e| e.to_string())?
@@ -301,12 +328,15 @@ async fn drive_delete(app: AppHandle, drive: String, path: String) -> Result<(),
 #[tauri::command]
 async fn drive_list(app: AppHandle, drive: String, path: String) -> Result<Vec<String>, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        if serialfs::is_serial(&drive) {
+        emit_status(&app, "transfer");
+        let r = if serialfs::is_serial(&drive) {
             let mgr = app.state::<DeviceManager>();
             serialfs::list_dir(&mgr, &path)
         } else {
             drive::list_dir(&drive, &path)
-        }
+        };
+        emit_result_status(&app, &r);
+        r
     })
     .await
     .map_err(|e| e.to_string())?
