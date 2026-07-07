@@ -13,7 +13,7 @@
 ```
 ┌──────────────┐   serial (JSON-lines)    ┌───────────────┐    USB HID     ┌───────────┐
 │  MKYADA App  │ ◄──────────────────────► │  RP2040-Zero  │ ─────────────► │  Your PC  │
-│ (Tauri, W/M/L)│   CIRCUITPY drive (JSON) │   (firmware)  │  kbd + mouse   │  / game   │
+│(Tauri, W/M/L) │   CIRCUITPY drive (JSON) │   (firmware)  │  kbd + mouse   │  / game   │
 └──────────────┘ ────────────────────────► └───────────────┘                └───────────┘
 ```
 
