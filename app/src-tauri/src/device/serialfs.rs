@@ -59,9 +59,12 @@ pub fn cancel_requested() -> bool {
     CANCEL.load(Ordering::Relaxed)
 }
 
-/// Raw bytes per fs_write line (~4KB of base64 on the wire; the firmware's
-/// line buffer takes 16KB).
-const CHUNK: usize = 3072;
+/// Raw bytes per fs_write line. base64 inflates this by 4/3 (9KB -> ~12KB)
+/// plus the JSON envelope; the firmware's line buffer (proto.py MAX_LINE) is
+/// 16KB, so 9KB leaves ~4KB of headroom. Bigger chunks mean fewer stop-and-wait
+/// round-trips, which dominate transfer time — do NOT raise past ~10KB without
+/// re-checking that base64+envelope stays comfortably under 16KB.
+const CHUNK: usize = 9216;
 const TIMEOUT: Duration = Duration::from_secs(8);
 
 /// A macro playing on the single-threaded firmware starves the serial link,
