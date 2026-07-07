@@ -3,7 +3,8 @@
 //! When config.json sets `"usb_drive": false` the keypad hides its CIRCUITPY
 //! drive from the host ("finished product" mode) and the app manages files
 //! over the serial protocol instead: fs_list / fs_read / fs_write /
-//! fs_delete, base64 payloads, one chunk in flight at a time. The frontend
+//! fs_delete, base64 payloads. Reads stream one chunk in flight; writes
+//! pipeline a shallow window (see WINDOW) to hide round-trip latency. The frontend
 //! keeps calling the same drive_* commands — it just passes the
 //! `serial:<uid>` sentinel instead of a mount point, and lib.rs routes here.
 
@@ -61,10 +62,21 @@ pub fn cancel_requested() -> bool {
 
 /// Raw bytes per fs_write line. base64 inflates this by 4/3 (9KB -> ~12KB)
 /// plus the JSON envelope; the firmware's line buffer (proto.py MAX_LINE) is
-/// 16KB, so 9KB leaves ~4KB of headroom. Bigger chunks mean fewer stop-and-wait
-/// round-trips, which dominate transfer time — do NOT raise past ~10KB without
-/// re-checking that base64+envelope stays comfortably under 16KB.
+/// 16KB, so 9KB leaves ~4KB of headroom. Bigger chunks mean fewer round-trips,
+/// which dominate transfer time — do NOT raise past ~10KB without re-checking
+/// that base64+envelope stays comfortably under 16KB.
 const CHUNK: usize = 9216;
+
+/// fs_write chunks kept in flight before collecting acks. Measured on-device,
+/// stop-and-wait wastes a full serial round-trip (~0.5s) between every chunk;
+/// keeping a few in flight hides that latency so the transfer runs at the link
+/// rate instead. The firmware processes chunks in arrival order and acks each,
+/// and serial delivery is in-order, so its seq check still holds — no firmware
+/// change needed. Kept shallow on purpose: the device RX buffer is ~256B and
+/// the write handle times out at ~1s (LIVE_TIMEOUT), so 4 chunks (~48KB) is the
+/// most that stays safely ahead of the drain without stalling a send, and it
+/// bounds how many stray replies an aborted transfer leaves behind.
+const WINDOW: usize = 4;
 const TIMEOUT: Duration = Duration::from_secs(8);
 
 /// A macro playing on the single-threaded firmware starves the serial link,
@@ -107,6 +119,30 @@ impl<'a> Op<'a> {
             Some("ok") if v.get("re").and_then(Value::as_str) == Some(re) => Ok(v),
             Some("err") => Err(fs_err(&v)),
             _ => Err(format!("unexpected keypad reply: {v}")),
+        }
+    }
+
+    /// Non-blocking: discard any replies already queued when the op begins —
+    /// stale acks/errs left in flight by an aborted earlier transfer. The route
+    /// was just installed and nothing has been sent yet, so anything here is by
+    /// definition not ours; without this a straggler could be misread as the
+    /// first chunk's ack and desync the whole transfer.
+    fn drain_stale(&self) {
+        while self.rx.try_recv().is_ok() {}
+    }
+
+    /// Best-effort cleanup after a windowed write aborts mid-flight: absorb the
+    /// `n` replies still owed for chunks we already sent, so they don't leak
+    /// into the retry. Polls briefly rather than blocking a full reply timeout
+    /// per chunk — the firmware bad_seqs each queued chunk promptly once it has
+    /// discarded the upload, and drain_stale mops up anything that arrives late.
+    fn drain_inflight(&self, n: usize) {
+        let deadline = std::time::Instant::now() + Duration::from_secs(1);
+        let mut got = 0;
+        while got < n && std::time::Instant::now() < deadline {
+            if self.rx.recv_timeout(Duration::from_millis(200)).is_ok() {
+                got += 1;
+            }
         }
     }
 }
@@ -197,26 +233,42 @@ fn write_once(
     progress: &mut impl FnMut(usize, usize),
 ) -> Result<(), String> {
     let op = Op::begin(mgr)?;
+    op.drain_stale();
     let total = bytes.len();
     let chunks: Vec<&[u8]> = if bytes.is_empty() {
         vec![&[]]
     } else {
         bytes.chunks(CHUNK).collect()
     };
-    let last = chunks.len() - 1;
+    let n = chunks.len();
+    let last = n - 1;
     progress(0, total);
-    let mut written = 0;
-    for (seq, chunk) in chunks.into_iter().enumerate() {
-        if cancel_requested() {
-            return Err(CANCELLED.to_string());
+    // Slide a window of unacked chunks along the file: send until WINDOW are in
+    // flight, collect one ack, send the next. The extra in-flight chunks keep
+    // the firmware's pipe full so it never idles waiting on a round-trip.
+    let mut sent = 0;
+    let mut acked = 0;
+    while acked < n {
+        while sent < n && sent - acked < WINDOW {
+            if cancel_requested() {
+                return Err(CANCELLED.to_string());
+            }
+            op.send(&json!({
+                "t": "fs_write", "path": path, "seq": sent,
+                "data": B64.encode(chunks[sent]), "eof": sent == last,
+            }))?;
+            sent += 1;
         }
-        op.send(&json!({
-            "t": "fs_write", "path": path, "seq": seq,
-            "data": B64.encode(chunk), "eof": seq == last,
-        }))?;
-        op.expect_ok("fs_write")?;
-        written += chunk.len();
-        progress(written, total);
+        if let Err(e) = op.expect_ok("fs_write") {
+            // one ack was owed for each chunk still in flight; the failed one is
+            // this reply, drain the rest so the retry starts on a clean channel.
+            op.drain_inflight(sent - acked - 1);
+            return Err(e);
+        }
+        acked += 1;
+        // chunks are CHUNK bytes except the last, and acks arrive in order, so
+        // acked*CHUNK is the byte count through the last acked chunk (capped).
+        progress((acked * CHUNK).min(total), total);
     }
     Ok(())
 }
