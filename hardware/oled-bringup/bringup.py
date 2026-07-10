@@ -31,6 +31,7 @@ TESTS = {
     "diag": "diag.py",
     "oled": "oled.py",
     "inputs": "inputs.py",
+    "keytest": "keytest.py",
     "demo": "demo.py",
 }
 

@@ -97,6 +97,10 @@ keys = keypad.Keys((board.GP4, board.GP5, board.GP6),
                    value_when_pressed=False, pull=True)
 K_PSH, K_BACK, K_CONFIRM = 0, 1, 2
 
+# 6 makro tusu (3V3 altinda sirali): K1=GP29 ... K6=GP14
+MACRO_PINS = (board.GP29, board.GP28, board.GP27, board.GP26, board.GP15, board.GP14)
+macro_keys = keypad.Keys(MACRO_PINS, value_when_pressed=False, pull=True)
+
 
 def speed_color(t):
     f = (t - SPEED_MIN_T) / (SPEED_MAX_T - SPEED_MIN_T)
@@ -233,6 +237,17 @@ def show_home(layer):
     display.root_group = g
 
 
+def show_key(n, on):
+    # makro tusu geri bildirimi: buyuk K<n> yanip soner (on=False -> bos ekran)
+    g = displayio.Group()
+    if on:
+        bold_txt(g, "K%d" % n, CX, 58, scale=4)
+        led((255, 255, 255))
+    else:
+        led((0, 0, 0))
+    display.root_group = g
+
+
 def show_select(layer, sel_key, settings):
     g = displayio.Group()
     # layer ekrani gibi: buyuk K no + altinda hiz + 6 nokta, ortali
@@ -274,13 +289,20 @@ def show_saved(layer, sel_key, t):
 settings = load_settings()
 boot_animation()
 
-S_HOME, S_SELECT, S_SPEED, S_SAVED = 0, 1, 2, 3
+S_HOME, S_SELECT, S_SPEED, S_SAVED, S_KEY = 0, 1, 2, 3, 4
 state = S_HOME
 layer = 0
 sel_key = 0
 speed_t = SPEED_DEF_T
 saved_at = 0.0
 last_move = 0.0   # hiz ayarinda ivme icin son cevirme zamani
+key_num = 0       # gosterilen makro tusu
+key_started = 0.0
+key_dur = 5.0     # yanip sonme suresi = tusun hizi (saniye)
+blink_on = True
+last_blink = 0.0
+activity_at = 0.0  # menu ekranlarinda son islem zamani (15 sn timeout)
+IDLE_TIMEOUT = 15.0
 
 last_enc = enc.position
 show_home(layer)
@@ -300,6 +322,19 @@ def clamp(v, lo, hi):
 
 while True:
     d = enc_delta()
+    mev = macro_keys.events.get()
+    now = time.monotonic()
+
+    # makro tusu HER ekranda: acik menuyu iptal et, ana ekrana don ve
+    # basilan tusu yanip sondur (menudeki degisiklik KAYDEDILMEZ)
+    if mev and mev.pressed:
+        key_num = mev.key_number + 1
+        key_dur = settings[layer][mev.key_number] / 10.0  # hiz kadar saniye
+        key_started = now
+        blink_on = True
+        last_blink = now
+        state = S_KEY
+        show_key(key_num, True)
 
     if state == S_HOME:
         if d:
@@ -310,14 +345,17 @@ while True:
         if ev and ev.pressed and ev.key_number in (K_PSH, K_CONFIRM):
             state = S_SELECT
             sel_key = 0
+            activity_at = now
             show_select(layer, sel_key, settings)
 
     elif state == S_SELECT:
         if d:
             sel_key = clamp(sel_key + (1 if d > 0 else -1), 0, KEYS - 1)
             show_select(layer, sel_key, settings)
+            activity_at = now
         ev = keys.events.get()
         if ev and ev.pressed:
+            activity_at = now
             # CONFIRM veya tekere basma -> sec
             if ev.key_number in (K_CONFIRM, K_PSH):
                 speed_t = settings[layer][sel_key]
@@ -327,6 +365,10 @@ while True:
             elif ev.key_number == K_BACK:
                 state = S_HOME
                 show_home(layer)
+        # 15 sn islem yok -> ana menu (gizli sayac)
+        if state == S_SELECT and now - activity_at > IDLE_TIMEOUT:
+            state = S_HOME
+            show_home(layer)
 
     elif state == S_SPEED:
         if d:
@@ -344,8 +386,10 @@ while True:
                 per = 1        # yavas = hassas 0.1x
             speed_t = clamp(speed_t + d * per, SPEED_MIN_T, SPEED_MAX_T)
             show_speed(layer, sel_key, speed_t)
+            activity_at = now
         ev = keys.events.get()
         if ev and ev.pressed:
+            activity_at = now
             # CONFIRM veya tekere basma -> kaydet
             if ev.key_number in (K_CONFIRM, K_PSH):
                 settings[layer][sel_key] = speed_t
@@ -355,12 +399,34 @@ while True:
                 show_saved(layer, sel_key, speed_t)
             elif ev.key_number == K_BACK:
                 state = S_SELECT
+                activity_at = now
                 show_select(layer, sel_key, settings)
+        # 15 sn islem yok -> ana menu (gizli sayac)
+        if state == S_SPEED and now - activity_at > IDLE_TIMEOUT:
+            state = S_HOME
+            show_home(layer)
 
     elif state == S_SAVED:
         keys.events.get()
         if time.monotonic() - saved_at > 1.1:
             state = S_SELECT
+            activity_at = time.monotonic()
             show_select(layer, sel_key, settings)
+
+    elif state == S_KEY:
+        # yanip sonme
+        if now - last_blink > 0.4:
+            blink_on = not blink_on
+            last_blink = now
+            show_key(key_num, blink_on)
+        # tusun hizi kadar saniye sonra ana ekrana don (yeni tus basimi sifirlar)
+        if now - key_started > key_dur:
+            state = S_HOME
+            show_home(layer)
+        else:
+            ev = keys.events.get()
+            if ev and ev.pressed and ev.key_number == K_BACK:
+                state = S_HOME
+                show_home(layer)
 
     time.sleep(0.005)
