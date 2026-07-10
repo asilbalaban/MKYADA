@@ -33,6 +33,7 @@ TESTS = {
     "inputs": "inputs.py",
     "keytest": "keytest.py",
     "demo": "demo.py",
+    "demoh": "demo_h.py",
 }
 
 # ANSI/OSC kacis dizilerini temizle (CircuitPython'in yilan/baslik ciktisi)
