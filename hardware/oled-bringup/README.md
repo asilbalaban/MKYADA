@@ -57,6 +57,13 @@ Runner seçtiğin testi `device/*.py` içinden `CIRCUITPY/code.py`'ye kopyalar v
 
 (`i2cdisplaybus`, `displayio`, `terminalio` CircuitPython 10 çekirdeğinde, ayrı dosya gerekmez.)
 
+`demoh` (yatay demo) grid yazıları için ek olarak küçük (dar) bir bitmap font kullanır:
+
+- `CIRCUITPY/lib/adafruit_bitmap_font/` → repo'daki `lib/adafruit_bitmap_font/` (tüm `.py`'ler; `lvfontbin.py` dahil şart)
+- `CIRCUITPY/fonts/spleen-5x8.bdf` → repo'daki `fonts/spleen-5x8.bdf`
+
+Font/lib yoksa demo hata vermez, terminalio (6px) fontuna düşer. `fonts/4x6.bdf` daha da dar bir alternatiftir.
+
 ## Sık karşılaşılan hata
 
 `RuntimeError: No pull up found on SDA or SCL` → I2C hattı fiziksel sorun. Önce `diag`

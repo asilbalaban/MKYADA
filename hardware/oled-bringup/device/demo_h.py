@@ -14,6 +14,7 @@ import rotaryio
 import keypad
 from adafruit_display_text import label
 import adafruit_displayio_sh1106
+from adafruit_bitmap_font import bitmap_font
 
 try:
     import microcontroller
@@ -26,18 +27,18 @@ KEYS = 6
 LAYER_NAMES = ["A", "B", "C", "D"]
 # Her layer icin 6 tus etiketi (2 satir, hucreye sigacak). Layer basina farkli tema.
 LAYER_LABELS = [
-    # A - FPS oyun
+    # A - FPS oyun (kucuk font: hucreye ~8 karakter sigar)
     [("silah", "degistir"), ("kalkan", "vur"), ("upgrade", "et"),
      ("mikrofon", "sustur"), ("mikrofon", "ac"), ("update", "yap")],
     # B - yayin / stream
     [("sahne", "gecis"), ("kayit", "basla"), ("klip", "al"),
      ("ses", "kis"), ("ses", "ac"), ("chat", "temizle")],
     # C - medya
-    [("oynat", "dur"), ("ileri", "atla"), ("geri", "atla"),
-     ("ses", "azalt"), ("ses", "arttir"), ("kaydet", "")],
+    [("oynat", "durdur"), ("ileri", "atla"), ("geri", "atla"),
+     ("ses", "azalt"), ("ses", "artir"), ("kaydet", "")],
     # D - kisayol / dev
     [("kopyala", ""), ("yapistir", ""), ("geri", "al"),
-     ("kaydet", ""), ("derle", "calis"), ("terminal", "ac")],
+     ("kaydet", ""), ("derle", ""), ("terminal", "")],
 ]
 SPEED_MIN_T = 1
 SPEED_MAX_T = 100
@@ -97,6 +98,21 @@ W = display.width    # 128
 H = display.height   # 64
 CX = W // 2
 
+# --- Kucuk (dar) grid fontu: spleen 5x8 (terminalio 6px -> 5px) ---
+# BDF'yi yukle, kullanilan karakterleri onbellege al (hiz icin). Yoksa terminalio'ya dus.
+try:
+    GRID_FONT = bitmap_font.load_font("/fonts/spleen-5x8.bdf")
+    _chars = set()
+    for _lay in LAYER_LABELS:
+        for _a, _b in _lay:
+            _chars |= set(_a) | set(_b)
+    GRID_FONT.load_glyphs(_chars)
+    GRID_SMALL = True
+except Exception as _e:
+    print("kucuk font yuklenemedi, terminalio kullanilacak:", _e)
+    GRID_FONT = terminalio.FONT
+    GRID_SMALL = False
+
 # --- Girisler ---
 enc = rotaryio.IncrementalEncoder(board.GP2, board.GP3)
 keys = keypad.Keys((board.GP4, board.GP5, board.GP6),
@@ -129,6 +145,14 @@ def circ(x, y, r, pal=WHITE):
 
 def txt(s, x, y, scale=1, color=0xFFFFFF, anchor=(0.5, 0.5)):
     l = label.Label(terminalio.FONT, text=s, scale=scale, color=color)
+    l.anchor_point = anchor
+    l.anchored_position = (x, y)
+    return l
+
+
+def gtxt(s, x, y, color=0xFFFFFF, anchor=(0.5, 0.5)):
+    # grid hucre yazisi: kucuk font (spleen 5x8) ile
+    l = label.Label(GRID_FONT, text=s, color=color)
     l.anchor_point = anchor
     l.anchored_position = (x, y)
     return l
@@ -246,13 +270,15 @@ def show_grid(layer, active, invert=True):
     # 6 hucreli grid, her hucrede o layer'daki tusun ne yaptigi (etiket).
     # active hucresi invert=True iken ters renk (secili / yanip sonme).
     g = displayio.Group()
-    cols, rows = 2, 3
-    cw = W // cols   # 64
-    ch = H // rows   # 21
-    maxc = cw // 6   # hucreye sigan karakter sayisi
+    cols, rows = 3, 2
+    cw = W // cols   # 42
+    ch = H // rows   # 32
+    cpx = 5 if GRID_SMALL else 6   # karakter genisligi (spleen 5px / terminalio 6px)
+    maxc = (cw - 2) // cpx  # hucreye sigan karakter sayisi (kalani kesilir)
+    # grid cizgileri (2 dikey + 1 yatay)
     g.append(rect(cw, 0, 1, H))
+    g.append(rect(2 * cw, 0, 1, H))
     g.append(rect(0, ch, W, 1))
-    g.append(rect(0, 2 * ch, W, 1))
     labels = LAYER_LABELS[layer]
     for k in range(KEYS):
         x = (k % cols) * cw
@@ -264,10 +290,10 @@ def show_grid(layer, active, invert=True):
             col = 0xFFFFFF
         l1, l2 = labels[k]
         if l2:
-            g.append(txt(_cut(l1, maxc), x + cw // 2, y + 6, color=col))
-            g.append(txt(_cut(l2, maxc), x + cw // 2, y + 15, color=col))
+            g.append(gtxt(_cut(l1, maxc), x + cw // 2, y + 11, color=col))
+            g.append(gtxt(_cut(l2, maxc), x + cw // 2, y + 22, color=col))
         else:
-            g.append(txt(_cut(l1, maxc), x + cw // 2, y + ch // 2, color=col))
+            g.append(gtxt(_cut(l1, maxc), x + cw // 2, y + ch // 2, color=col))
     display.root_group = g
 
 
@@ -319,6 +345,7 @@ activity_at = 0.0
 IDLE_TIMEOUT = 15.0
 
 last_enc = enc.position
+activity_at = time.monotonic()  # acilis layer secim ekrani icin 15 sn sayaci
 show_home(layer)
 
 
@@ -353,11 +380,17 @@ while True:
         if d:
             layer = clamp(layer + (1 if d > 0 else -1), 0, LAYERS - 1)
             show_home(layer)
+            activity_at = now
         ev = keys.events.get()
         if ev and ev.pressed and ev.key_number in (K_PSH, K_CONFIRM):
             state = S_SELECT
             sel_key = 0
             activity_at = now
+            show_select(layer, sel_key, settings)
+        # 15 sn layer secilmezse aktif layer otomatik secilir -> grid
+        if state == S_HOME and now - activity_at > IDLE_TIMEOUT:
+            state = S_SELECT
+            sel_key = 0
             show_select(layer, sel_key, settings)
 
     elif state == S_SELECT:
@@ -376,6 +409,7 @@ while True:
             elif ev.key_number == K_BACK:
                 # grid = ana ekran; BACK -> layer secim ekranina cik
                 state = S_HOME
+                activity_at = now  # layer secim 15 sn sayacini yenile
                 show_home(layer)
         # grid ana ekran oldugu icin burada timeout yok (kullanici kalir)
 
