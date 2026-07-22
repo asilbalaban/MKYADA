@@ -30,7 +30,7 @@ identically.
 | `kind` | no | UI metadata: `"combo"` \| `"keystroke"` \| `"text"` \| `"media"` \| `"recorded"` \| `"launch"` \| `"command"` \| `"sound"` \| `"sequence"`. The firmware ignores it; the app uses it to show and re-edit the assignment. |
 | `combo` / `text` / `seq` … | no | UI metadata matching `kind` |
 | `screen` | for mouse macros | Capture resolution; absolute coordinates are rescaled from it (`x * 32767 / (width-1)`). |
-| `settings.speed` | no | Playback speed multiplier (default `1.0`) |
+| `settings.speed` | no | Playback speed multiplier (default `1.0`; `2` = half the run time). On the Vision 6 the on-device speed editor rewrites this field in place and announces `macro_changed` (fw ≥ 0.7.0) |
 | `settings.repeat` | no | Repeat count. **`0` = loop until the key is pressed again.** Default `1`. |
 | `settings.on_repress` | no | What pressing the macro's own key does while it plays: `"stop"` (default) or `"restart"` (play again from the top). |
 | `settings.hold_repeat` | no | `true` = replay while the physical key is held down, like holding a letter key. Default `false`. Ignored when `variants` exist. |
@@ -132,15 +132,22 @@ play back at full fidelity (no thinning):
 
 ```
 CIRCUITPY/
-├── config.json          key count, layers, busy_other policy (see firmware/config.example.json)
+├── config.json          model, key count, pins, layers, busy_other (see firmware/config.example.json)
 └── macros/
     ├── key1.json        key 1, layer A
     ├── key1-b.json      key 1, layer B
     ├── key1-c.json      key 1, layer C
-    └── key2.json ...
+    ├── key2.json ...
+    ├── enc-cw.json      Vision 6: encoder clockwise, layer A (fw ≥ 0.7.0)
+    ├── enc-ccw-b.json   Vision 6: encoder counter-clockwise, layer B
+    ├── btn-back.json    Vision 6: BACK button on the resting grid
+    └── btn-confirm.json Vision 6: CONFIRM button on the resting grid
 ```
 
 No app needed: drop a file with the right name onto the drive and press the key.
+Vision 6 slot files follow the same layer-suffix rule; a layer without its own
+slot file falls back to the layer-A one. The `name` field is what the Vision 6
+grid shows for each key (two lines, split at a word gap).
 
 ## Size guidance
 

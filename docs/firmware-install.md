@@ -1,9 +1,16 @@
 # Firmware installation (RP2040-Zero)
 
+> **Easiest path:** the desktop app can do all of this. Plug a blank board in
+> with **BOOT** held and use **Set up a new board** — the app flashes
+> CircuitPython, installs the firmware and writes the config for either
+> model (Core 6 or Vision 6).
+
 ## 1. Flash CircuitPython
 
-1. Download CircuitPython **9.x** UF2 for the *Waveshare RP2040-Zero*:
+1. Download the CircuitPython UF2 for the *Waveshare RP2040-Zero*:
    https://circuitpython.org/board/waveshare_rp2040_zero/
+   — **10.2.x recommended** for new installs (required tier for the Vision 6
+   display stack; Core 6 also keeps working on 9.x).
 2. Hold the **BOOT** button while plugging the board in (or hold BOOT and tap
    RESET). A drive named `RPI-RP2` appears.
 3. Copy the `.uf2` file onto `RPI-RP2`. The board reboots and a `CIRCUITPY`
@@ -22,7 +29,8 @@ CIRCUITPY/
 ├── VERSION
 ├── config.json          # copy config.example.json and adjust
 ├── mkyada/              # firmware modules
-├── lib/                 # adafruit_hid, neopixel (bundled in the release zip)
+├── lib/                 # adafruit_hid, neopixel + display libs (in the zip)
+├── fonts/               # OLED grid fonts (Vision 6; harmless on Core 6)
 └── macros/              # your macro JSON files
 ```
 
@@ -40,9 +48,11 @@ Edit `config.json` (see `config.example.json`):
 
 | Field | Meaning |
 |---|---|
+| `model` | `"core6"` (screenless, default) or `"vision6"` (OLED + encoder). A config-less board auto-detects the OLED once at boot |
 | `key_count` | How many keys you soldered (1–6, GP0…GP5) |
-| `layer_key` | Key number that switches layers, or `null` |
-| `layer_count` | Number of layers (2+) when `layer_key` is set |
+| `pins` | Explicit per-key GPIO names when a key is soldered off the default order, e.g. `["GP29","GP28","GP27","GP26","GP15","GP13"]`. `null` = model default. Easiest set via the app: **Setup → Key wiring** |
+| `layer_key` | Key number that switches layers, or `null`. Always `null` on Vision 6 (layers are picked with the wheel) |
+| `layer_count` | Number of layers — Core 6: 2–8 when `layer_key` is set; Vision 6: 1–8 |
 | `layer_mode` | `"toggle"` (press cycles A→B→…) or `"hold"` (hold = layer B) |
 | `key_map` | Fixes a mismatched solder order: logical key number per GPIO, e.g. `[3, 1, 2]` = GP0 acts as key 3. `null` = GP0 is key 1. Easiest set via the app: **Setup → Key order (remap)** |
 | `screen` | Default target resolution for mouse macros |
@@ -62,5 +72,14 @@ Then drop macro files into `macros/` (`key1.json`, `key1-b.json`, …) — see
 
 ## Wiring
 
-Six switches between **GP0…GP5** and **GND** (common ground). Internal pull-ups
-are used; no resistors needed. See [hardware/wiring.md](../hardware/wiring.md).
+Core 6: six switches between **GP0…GP5** and **GND** (common ground). Internal
+pull-ups are used; no resistors needed. See
+[hardware/wiring.md](../hardware/wiring.md).
+
+Vision 6 (OLED + encoder): see [vision6.md](vision6.md).
+
+## Recovery (hidden USB drive)
+
+When `usb_drive: false` (finished-product mode), hold **key 1** while
+plugging the keypad in to bring the CIRCUITPY drive back for one session:
+**GP0** on Core 6, **GP29** (macro key 1) on Vision 6.

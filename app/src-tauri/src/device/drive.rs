@@ -51,30 +51,34 @@ fn parse_boot_out(dir: &Path) -> Option<DriveInfo> {
     })
 }
 
-pub fn list_drives() -> Vec<DriveInfo> {
-    let mut found = Vec::new();
+/// Every directory that could be a removable drive's mount point: drive
+/// letters on Windows, children of the OS mount roots elsewhere. Shared by
+/// the CIRCUITPY discovery here and the UF2 bootloader scan
+/// (device::bootloader).
+pub(crate) fn candidate_mounts() -> Vec<PathBuf> {
     #[cfg(target_os = "windows")]
     {
-        for letter in b'A'..=b'Z' {
-            let dir = PathBuf::from(format!("{}:\\", letter as char));
-            if dir.join("boot_out.txt").is_file() {
-                if let Some(info) = parse_boot_out(&dir) {
-                    found.push(info);
-                }
-            }
-        }
+        (b'A'..=b'Z')
+            .map(|letter| PathBuf::from(format!("{}:\\", letter as char)))
+            .collect()
     }
     #[cfg(not(target_os = "windows"))]
     {
+        let mut dirs = Vec::new();
         for root in mount_roots() {
             let Ok(entries) = fs::read_dir(&root) else { continue };
-            for entry in entries.flatten() {
-                let dir = entry.path();
-                if dir.join("boot_out.txt").is_file() {
-                    if let Some(info) = parse_boot_out(&dir) {
-                        found.push(info);
-                    }
-                }
+            dirs.extend(entries.flatten().map(|e| e.path()));
+        }
+        dirs
+    }
+}
+
+pub fn list_drives() -> Vec<DriveInfo> {
+    let mut found = Vec::new();
+    for dir in candidate_mounts() {
+        if dir.join("boot_out.txt").is_file() {
+            if let Some(info) = parse_boot_out(&dir) {
+                found.push(info);
             }
         }
     }
@@ -114,7 +118,9 @@ pub fn uid_of(mount: &str) -> Option<String> {
         .filter(|u| !u.is_empty())
 }
 
-pub fn write_file(drive: &str, rel: &str, content: &str) -> Result<(), String> {
+/// Takes raw bytes because not everything we install is UTF-8 (BDF fonts,
+/// vendored libraries); string callers go through lib.rs write_to_device.
+pub fn write_file_bytes(drive: &str, rel: &str, content: &[u8]) -> Result<(), String> {
     let path = safe_join(drive, rel)?;
     match write_file_raw(&path, content) {
         Err(e) if is_read_only(&e) => {
@@ -139,12 +145,12 @@ pub fn write_file(drive: &str, rel: &str, content: &str) -> Result<(), String> {
     }
 }
 
-fn write_file_raw(path: &Path, content: &str) -> std::io::Result<()> {
+fn write_file_raw(path: &Path, content: &[u8]) -> std::io::Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
     let mut f = fs::File::create(path)?;
-    f.write_all(content.as_bytes())?;
+    f.write_all(content)?;
     // FAT + a microcontroller on the other side: make sure bytes hit the disk
     // before the caller sends a `reload`/`play` over serial.
     f.sync_all()

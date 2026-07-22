@@ -64,6 +64,102 @@ neopixel = types.ModuleType("neopixel")
 neopixel.NeoPixel = FakeNeoPixel
 sys.modules["neopixel"] = neopixel
 
+# --- display / encoder stubs (vision6 UI). busio, i2cdisplaybus and
+# adafruit_displayio_sh1106 are deliberately NOT stubbed: Oled.__init__ then
+# fails its retries and runs headless, which is exactly the code path a
+# desktop test can exercise.
+
+
+class FakeGroup(list):
+    def append(self, item):  # noqa: A003 - mirror displayio.Group
+        super().append(item)
+
+
+class FakePalette:
+    def __init__(self, n):
+        self.colors = [0] * n
+
+    def __setitem__(self, i, v):
+        self.colors[i] = v
+
+
+class FakeBitmap:
+    def __init__(self, w, h, n):
+        self.width, self.height = w, h
+
+    def __setitem__(self, xy, v):
+        pass
+
+
+displayio = types.ModuleType("displayio")
+displayio.Group = FakeGroup
+displayio.Palette = FakePalette
+displayio.Bitmap = FakeBitmap
+displayio.TileGrid = lambda *a, **k: ("tilegrid",)
+displayio.release_displays = lambda: None
+sys.modules["displayio"] = displayio
+
+terminalio = types.ModuleType("terminalio")
+terminalio.FONT = object()
+sys.modules["terminalio"] = terminalio
+
+vectorio = types.ModuleType("vectorio")
+vectorio.Rectangle = lambda **k: ("rect", k)
+vectorio.Circle = lambda **k: ("circ", k)
+sys.modules["vectorio"] = vectorio
+
+
+class FakeLabel:
+    def __init__(self, font, text="", scale=1, color=0xFFFFFF):
+        self.text = text
+        self.anchor_point = None
+        self.anchored_position = None
+
+
+adt = types.ModuleType("adafruit_display_text")
+adt_label = types.ModuleType("adafruit_display_text.label")
+adt_label.Label = FakeLabel
+adt.label = adt_label
+sys.modules["adafruit_display_text"] = adt
+sys.modules["adafruit_display_text.label"] = adt_label
+
+rotaryio = types.ModuleType("rotaryio")
+
+
+class FakeEncoder:
+    def __init__(self, a, b):
+        self.position = 0
+
+
+rotaryio.IncrementalEncoder = FakeEncoder
+sys.modules["rotaryio"] = rotaryio
+
+keypad = types.ModuleType("keypad")
+
+
+class FakeKeyEvent:
+    def __init__(self, key_number, pressed):
+        self.key_number, self.pressed = key_number, pressed
+
+
+class FakeEventQueue:
+    def __init__(self):
+        self.queue = []
+
+    def get(self):
+        return self.queue.pop(0) if self.queue else None
+
+
+class FakeKeys:
+    def __init__(self, pins, value_when_pressed=False, pull=True):
+        self.pins = pins
+        self.events = FakeEventQueue()
+
+
+keypad.Keys = FakeKeys
+keypad.Event = FakeKeyEvent
+sys.modules["keypad"] = keypad
+
 sys.path.insert(0, FFW)
 
 # ---------- tests ----------
@@ -564,6 +660,197 @@ app.load_config()
 check("usb_drive defaults on", app.config["usb_drive"] is True)
 _b.open = _real_open
 app.load_config()
+
+# --- models / two-device plumbing -----------------------------------------
+from mkyada import models as modelsmod  # noqa: E402
+
+VIS_PINS = ["GP29", "GP28", "GP27", "GP26", "GP15", "GP14"]
+check("resolve core6", modelsmod.resolve_model("core6") == "core6")
+check("resolve vision6", modelsmod.resolve_model("vision6") == "vision6")
+check("resolve default (no i2c hw)", modelsmod.resolve_model(None) == "core6")
+check("pins valid", modelsmod.validate_key_pins(VIS_PINS, 6, "vision6") == VIS_PINS)
+check("pins wrong len", modelsmod.validate_key_pins(VIS_PINS[:5], 6, "vision6") is None)
+check("pins reserved refused",
+      modelsmod.validate_key_pins(["GP0"] + VIS_PINS[1:], 6, "vision6") is None)
+check("pins duplicate refused",
+      modelsmod.validate_key_pins(["GP29"] + VIS_PINS[:5], 6, "vision6") is None)
+check("pins unknown refused",
+      modelsmod.validate_key_pins(["GP99"] + VIS_PINS[1:], 6, "vision6") is None)
+cands = modelsmod.detect_candidates("vision6")
+check("detect candidates skip reserved",
+      "GP13" in cands and not any(c in cands for c in
+                                  ("GP0", "GP1", "GP2", "GP3", "GP4", "GP5", "GP6", "GP16")),
+      str(cands))
+
+hello2 = app.hello()
+check("hello model core6", hello2["model"] == "core6", str(hello2.get("model")))
+check("hello pins default order", hello2["pins"] == ["GP0", "GP1", "GP2", "GP3", "GP4", "GP5"],
+      str(hello2["pins"]))
+
+# custom pins survive load_config and drive the button pin list
+_b.open = _cfg_open({"pins": ["GP5", "GP4", "GP3", "GP2", "GP1", "GP0"]})
+app.load_config()
+check("custom pins accepted", app.key_pin_names() == ["GP5", "GP4", "GP3", "GP2", "GP1", "GP0"])
+_b.open = _cfg_open({"pins": ["GP16", "GP4", "GP3", "GP2", "GP1", "GP0"]})
+app.load_config()
+check("reserved pin falls back to default", app.config["pins"] is None)
+_b.open = _real_open
+app.load_config()
+
+# pin_detect: wiring wizard streams GPIO edges, then restores the keys
+outbox.clear()
+app.proto.send = lambda obj: outbox.append(obj)
+app.proto.ser = FakeSerial([])
+app.handle_msg({"t": "pin_detect", "on": True})
+check("pin watch armed", app.pin_watch is not None)
+watch_names, watch_btns = app.pin_watch
+watch_btns.ios[watch_names.index("GP13")].value = False  # user presses the key
+import time as _t2  # noqa: E402
+
+app.tick_pin_watch(_t2.monotonic())
+check("pin event streamed",
+      any(m.get("t") == "pin" and m.get("pin") == "GP13" and m.get("down") for m in outbox),
+      str(outbox))
+app.handle_msg({"t": "pin_detect", "on": False})
+check("pin watch restored", app.pin_watch is None and len(app.buttons.ios) == 6)
+app.proto.send = _orig_send
+app.proto.ser = None
+
+# --- vision6: fresh module exec with a vision6 config ---------------------
+_b.open = _cfg_open({"model": "vision6", "layer_key": 3, "layer_count": 1,
+                     "key_count": 12})
+vis_mod = types.ModuleType("fwvis")
+exec(compile(src, "code.py", "exec"), vis_mod.__dict__)
+vapp = vis_mod.App()
+_b.open = _real_open
+import mkyada.ui as uimod  # noqa: E402
+
+check("vision6 model resolved", vapp.model == "vision6")
+check("vision6 layer_key forced null", vapp.config["layer_key"] is None)
+check("vision6 single layer allowed", vapp.config["layer_count"] == 1)
+check("vision6 key_count clamped to 6", vapp.config["key_count"] == 6)
+vhello = vapp.hello()
+check("vision6 hello model", vhello["model"] == "vision6")
+check("vision6 hello pins", vhello["pins"] == VIS_PINS, str(vhello["pins"]))
+check("vision6 oled headless on desktop", vis_mod.OLED is not None and not vis_mod.OLED.ok)
+check("vision6 ui attached", vapp.ui is not None)
+
+# --- vision6 UI: labels, speed persistence, slots, host events ------------
+ui = vapp.ui
+voutbox = []
+vapp.proto.send = lambda obj: voutbox.append(obj)
+vapp.proto.ser = FakeSerial([])
+mac_dir = tempfile.mkdtemp()
+LN = "abcdefgh"
+
+
+def vpath(k, l):
+    return os.path.join(mac_dir, "key%d%s.json" % (k, "" if l == 0 else "-" + LN[l]))
+
+
+vapp.macro_path_for = vpath
+vapp.slot_path = lambda s, l: os.path.join(
+    mac_dir, "%s%s.json" % (s, "" if l == 0 else "-" + LN[l]))
+
+with open(vpath(1, 0), "w") as f:  # v4 stream file: name+speed in the header
+    f.write(json.dumps({"format": "mkyada-macro", "version": 4, "stream": True,
+                        "name": "volume up", "settings": {"speed": 1.5}}) + "\n")
+    f.write(json.dumps({"delay": 0, "type": "key", "action": "down", "key": "a"}) + "\n")
+    f.write(json.dumps({"delay": 0, "type": "key", "action": "up", "key": "a"}) + "\n")
+with open(vpath(2, 0), "w") as f:  # single-line legacy whole-file macro
+    json.dump({"format": "mkyada-macro", "version": 2, "name": "mute",
+               "settings": {"speed": 2.0}, "events": []}, f)
+
+ui.load_layer(0)
+vlabels = ui.labels(0)
+check("label split from stream header", vlabels[0] == ("volume", "up"), str(vlabels[0]))
+check("label fallback K3", vlabels[2][0] == "K3", str(vlabels))
+check("speed tenths from stream", ui.speed_tenths(0, 0) == 15)
+check("speed tenths from legacy", ui.speed_tenths(0, 1) == 20)
+
+ui.oled.grid_cpx = 4  # Small font: 10 chars per cell
+check("split short stays", ui._split_name("copy") == ("copy", ""))
+check("split at word gap", ui._split_name("switch weapon") == ("switch", "weapon"))
+check("split hard cut", ui._split_name("abcdefghijklmnop") == ("abcdefghij", "klmnop"))
+
+res = ui.persist_speed(0, 0, 30)
+with open(vpath(1, 0)) as f:
+    vlines = f.read().strip().split("\n")
+vhdr = json.loads(vlines[0])
+check("persist stream ok", res == "ok")
+check("persist header speed 3.0", vhdr["settings"]["speed"] == 3.0 and vhdr.get("stream"))
+check("persist events intact", len(vlines) == 3, str(len(vlines)))
+check("persist announces macro_changed",
+      any(m.get("t") == "macro_changed" and m.get("reason") == "speed" for m in voutbox),
+      str(voutbox))
+check("persist cache updated", ui.speed_tenths(0, 0) == 30)
+check("persist missing file", ui.persist_speed(0, 4, 10) == "missing")
+res2 = ui.persist_speed(0, 1, 5)
+with open(vpath(2, 0)) as f:
+    vdata2 = json.load(f)
+check("persist whole-file speed 0.5", res2 == "ok" and vdata2["settings"]["speed"] == 0.5)
+check("persist keeps name", vdata2["name"] == "mute")
+
+with open(vapp.slot_path("enc-cw", 0), "w") as f:  # custom encoder slot
+    json.dump({"format": "mkyada-macro", "version": 2, "name": "vol+",
+               "events": []}, f)
+ui.invalidate_labels()
+check("slot found on layer a", bool(ui.slots(0)["enc-cw"]))
+check("slot layer b falls back to a", ui.slots(1)["enc-cw"] == vapp.slot_path("enc-cw", 0))
+check("slot unassigned is None", ui.slots(0)["btn-back"] is None)
+
+vplays = []
+vapp.play_file = lambda path, trigger=None, **k: vplays.append(path)
+ui.state = uimod.S_SELECT
+ui.sel_mode = False
+ui.enc.position += 2
+ui.tick(_t2.monotonic())
+check("custom encoder plays per detent",
+      vplays == [vapp.slot_path("enc-cw", 0)] * 2, str(vplays))
+ui.state = uimod.S_SELECT
+ui.sel_mode = True  # select mode: rotation moves the cell instead
+vplays.clear()
+ui.enc.position += 1
+ui.tick(_t2.monotonic())
+check("select mode keeps navigation", vplays == [] and ui.sel_key == 1,
+      "%s sel=%d" % (vplays, ui.sel_key))
+
+ui._labels[1] = [("x", "")] * 6
+ui.invalidate_labels("/macros/key3-b.json")
+check("invalidate drops layer b", 1 not in ui._labels)
+
+voutbox.clear()
+vapp.handle_msg({"t": "host_enter"})
+check("host mode shows host screen", ui.state == uimod.S_HOST)
+ui.enc.position += 3
+ui.tick(_t2.monotonic())
+check("host encoder event batched",
+      any(m.get("t") == "enc" and m.get("d") == 1 and m.get("n") == 3 for m in voutbox),
+      str(voutbox))
+ui.nav.events.queue.append(FakeKeyEvent(1, True))
+ui.tick(_t2.monotonic())
+check("host nav slot event",
+      any(m.get("t") == "btn" and m.get("slot") == "back" and m.get("down") for m in voutbox),
+      str(voutbox))
+vapp.handle_msg({"t": "host_leave"})
+check("host exit restores grid", ui.state == uimod.S_SELECT)
+
+# NVM prefs roundtrip (magic 0x4E: font, idle timeout, last layer)
+class FakeNvm(bytearray):
+    pass
+
+
+uimod.NVM = FakeNvm(16)
+ui.font_idx, ui.idle_secs = 1, 42
+vapp.layer = 0
+ui._nvm_save()
+check("nvm magic", uimod.NVM[0] == 0x4E)
+check("nvm roundtrip", ui._nvm_load() == (1, 42, 0), str(ui._nvm_load()))
+uimod.NVM = None
+
+vapp.proto.send = _orig_send
+vapp.proto.ser = None
+shutil.rmtree(mac_dir, ignore_errors=True)
 
 # 5. app<->firmware contract: every fixture the app compiles (tests/fixtures/,
 # regenerated by `npx tsx tests/gen_fixtures.ts`) must play cleanly in the

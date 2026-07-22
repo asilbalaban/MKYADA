@@ -1,7 +1,9 @@
 {
   "format": "mkyada-config",
   "version": 1,
+  "model": "core6",
   "key_count": 6,
+  "pins": null,
   "layer_key": null,
   "layer_count": 2,
   "busy_other": "ignore",
