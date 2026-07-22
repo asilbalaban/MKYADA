@@ -763,14 +763,19 @@ class App:
             self.run_loop()
         except Exception as e:
             # Finished-product UX: a branded error screen instead of a raw
-            # traceback; the traceback still reaches the serial console.
+            # traceback (which CircuitPython would otherwise paint onto the
+            # OLED once code stops), then a self-heal restart — a transient
+            # failure (e.g. a MemoryError under load) must not leave a dead
+            # keypad, and the console must never own the screen.
+            print("fatal:", repr(e))
             if OLED:
                 try:
                     OLED.show_error(repr(e))
                 except Exception:
                     pass
-                time.sleep(5)
-            raise
+            time.sleep(5)
+            import supervisor
+            supervisor.reload()
 
     def run_loop(self):
         self.led.set(state=ledmod.IDLE, layer=0)
