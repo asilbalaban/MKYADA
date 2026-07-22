@@ -4,7 +4,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Play, RefreshCw, SquarePen, Usb } from "lucide-react";
 import { useDevice } from "../lib/device";
-import { useHostMode } from "../lib/focus";
 import { useNav } from "../lib/nav";
 import { ipc } from "../lib/ipc";
 import type { Assignment, DeviceConfig, ModuleSlot } from "../lib/types";
@@ -211,10 +210,9 @@ export function KeysPage() {
     [onMsg, refreshSlot],
   );
 
-  // Keep the live-press highlight working while this page is open — but only
-  // while the window is focused, so a backgrounded/tray'd app never blocks
-  // standalone playback (issue #8).
-  useHostMode(send);
+  // No host mode: the live-press highlight rides the standalone btn stream
+  // (proto v2), so keys keep firing their macros even while this page is
+  // open — the keypad works the same on every screen.
 
   // Surface playback / error feedback from the device.
   useEffect(

@@ -5,12 +5,15 @@
 # A broken or absent display must never brick the keypad: init retries a few
 # times, then the instance goes "headless" and every show_* is a no-op.
 
+import gc
 import time
 
 import displayio
 import terminalio
 import vectorio
 from adafruit_display_text import label
+
+from mkyada.i18n import tr
 
 try:
     from adafruit_bitmap_font import bitmap_font
@@ -106,6 +109,7 @@ class Oled:
             self._font_cache[path] = f
         else:
             f.load_glyphs(set(glyphs))
+        gc.collect()  # font rasterization litters the heap
         return f
 
     def _load_ui_fonts(self):
@@ -169,7 +173,7 @@ class Oled:
         y = self.H - 13
         g.append(_rect(0, y, self.W, 1))
         if back:
-            g.append(self._txt("< back", 2, self.H - 6, anchor=(0.0, 0.5),
+            g.append(self._txt(tr("back"), 2, self.H - 6, anchor=(0.0, 0.5),
                                font=self.ui_font))
         if action:
             g.append(self._txt(action, self.W - 2, self.H - 6, anchor=(1.0, 0.5),
@@ -215,6 +219,8 @@ class Oled:
             self.display.refresh()
         except Exception:
             pass
+        gc.collect()  # drop the previous screen's group right away —
+        # displayio churn is the main fragmentation source on the RP2040
 
     # --- screens ---
     def show_boot(self):
@@ -223,7 +229,7 @@ class Oled:
             return
         g = displayio.Group()
         g.append(self._txt("MKYADA", self.CX, 24, scale=2))
-        g.append(self._txt("loading", self.CX, 56, font=self.ui_font))
+        g.append(self._txt(tr("loading"), self.CX, 56, font=self.ui_font))
         bw = self.W - 24
         bmp = displayio.Bitmap(bw, 5, 2)
         pal = displayio.Palette(2)
@@ -299,11 +305,11 @@ class Oled:
         if not self.display:
             return
         g = displayio.Group()
-        self._top_bar(g, "%s > K%d  speed" % (layer_name.upper(), key_no))
+        self._top_bar(g, "%s > K%d  %s" % (layer_name.upper(), key_no, tr("speed")))
         g.append(self._txt(fmt_hero(t), self.CX, 28, scale=self.hero_scale,
                            font=self.hero_font))
         self._hbar(g, (t - 1) / 99.0)
-        self._bottom_bar(g, action="save")
+        self._bottom_bar(g, action=tr("save"))
         self.paint(g)
 
     def show_saved(self, layer_name, key_no, t):
@@ -326,7 +332,7 @@ class Oled:
             g.append(self._txt(line2, self.CX, 42, font=self.ui_font))
         self.paint(g)
 
-    def show_menu(self, title, items, sel, marked=None, action="select"):
+    def show_menu(self, title, items, sel, marked=None, action=None):
         """Generic list menu (Settings, Font). marked = index tagged with >."""
         if not self.display:
             return
@@ -342,18 +348,18 @@ class Oled:
             text = name if marked is None else (
                 "%s %s" % (">" if i == marked else " ", name))
             g.append(self._txt(text, self.CX, y, color=c))
-        self._bottom_bar(g, action=action)
+        self._bottom_bar(g, action=action or tr("select"))
         self.paint(g)
 
     def show_timeout(self, sec, lo, hi):
         if not self.display:
             return
         g = displayio.Group()
-        self._top_bar(g, "AUTO RETURN")
+        self._top_bar(g, tr("auto_return_title"))
         g.append(self._txt("%ds" % sec, self.CX, 28, scale=self.hero_scale,
                            font=self.hero_font))
         self._hbar(g, (sec - lo) / float(hi - lo))
-        self._bottom_bar(g, action="save")
+        self._bottom_bar(g, action=tr("save"))
         self.paint(g)
 
     def show_host(self):
@@ -361,7 +367,7 @@ class Oled:
             return
         g = displayio.Group()
         self._top_bar(g, "MKYADA")
-        g.append(self._txt("Connected to app", self.CX, 34, font=self.ui_font))
+        g.append(self._txt(tr("host"), self.CX, 34, font=self.ui_font))
         self.paint(g)
 
     def show_error(self, msg):
@@ -369,7 +375,7 @@ class Oled:
             return
         g = displayio.Group()
         self._top_bar(g, "MKYADA")
-        g.append(self._txt("error - see serial log", self.CX, 26, font=self.ui_font))
+        g.append(self._txt(tr("err_title"), self.CX, 26, font=self.ui_font))
         msg = str(msg)
         g.append(self._txt(msg[:25], self.CX, 40, font=self.ui_font))
         if len(msg) > 25:

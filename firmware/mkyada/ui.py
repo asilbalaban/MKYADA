@@ -16,6 +16,7 @@
 # NVM keeps only UI prefs: [magic, font_idx, idle_secs, last_layer].
 # Macro speeds live in the macro files — single source of truth.
 
+import gc
 import json
 import os
 import time
@@ -33,6 +34,8 @@ try:
 except Exception:
     NVM = None
 
+from mkyada import i18n
+from mkyada.i18n import tr
 from mkyada.models import MODELS, UI_SLOTS
 from mkyada.oled import FONTS, FONT_DESC, DEFAULT_FONT_IDX, fmt_speed
 
@@ -48,10 +51,13 @@ K_PSH, K_BACK, K_CONFIRM = 0, 1, 2
 NAV_SLOT = ("psh", "back", "confirm")  # host-mode event names
 
 (S_HOME, S_SELECT, S_SPEED, S_SAVED, S_SET_MENU, S_FONT, S_TIMEOUT,
- S_PLAYING, S_HOST, S_TOAST) = range(10)
+ S_PLAYING, S_HOST, S_TOAST, S_LANG) = range(11)
 
-SET_ITEMS = ("Font", "Auto return", "Restart")
-SET_FONT, SET_TMO, SET_REBOOT = 0, 1, 2
+SET_FONT, SET_TMO, SET_LANG, SET_REBOOT = 0, 1, 2, 3
+
+
+def set_items():
+    return (tr("font"), tr("auto_return"), tr("language"), tr("restart"))
 
 SAVED_DWELL_S = 1.1
 TOAST_DWELL_S = 1.6
@@ -74,7 +80,9 @@ class Ui:
                                value_when_pressed=False, pull=True)
         self.last_enc = self.enc.position
 
+        i18n.set_lang(app.config.get("lang"))
         self.font_idx, self.idle_secs, last_layer = self._nvm_load()
+        self.lang_sel = 0
         self.state = S_HOME
         self.prev_state = S_HOME  # where to return after host mode / toast
         self.home_pos = 0
@@ -185,6 +193,7 @@ class Ui:
                 p = p0 if (l != 0 and self._exists(p0)) else None
             slots[s] = p
         self._slots[l] = slots
+        gc.collect()
 
     def labels(self, l):
         if l not in self._labels:
@@ -324,6 +333,7 @@ class Ui:
                 self._draw_home()
 
     def on_reload(self):
+        i18n.set_lang(self.app.config.get("lang"))
         self._labels.clear()
         self._speeds.clear()
         self._slots.clear()
@@ -448,6 +458,8 @@ class Ui:
             self._st_font(now, d, press)
         elif self.state == S_TIMEOUT:
             self._st_timeout(now, d, press)
+        elif self.state == S_LANG:
+            self._st_lang(now, d, press)
 
     def _tick_host(self):
         """Forward encoder/nav to the app; it performs the assigned actions
@@ -472,7 +484,7 @@ class Ui:
             if self.home_pos == c:  # SETTINGS
                 self.set_menu_sel = 0
                 self.state = S_SET_MENU
-                self.oled.show_menu("SETTINGS", SET_ITEMS, 0)
+                self.oled.show_menu(tr("settings"), set_items(), 0)
             else:
                 self.app.set_layer_idx(self.home_pos)
                 self._nvm_save()
@@ -545,11 +557,11 @@ class Ui:
                 self.oled.show_saved(LAYER_NAMES[self.app.layer],
                                      self.sel_key + 1, self.speed_t)
             elif res == "missing":
-                self._toast("SPEED", "no macro on this key", "assign one in the app")
+                self._toast(tr("speed").upper(), tr("no_macro"), tr("assign_app"))
             elif res == "readonly":
-                self._toast("SPEED", "USB drive is on", "read-only - use the app")
+                self._toast(tr("speed").upper(), tr("usb_on"), tr("read_only"))
             else:
-                self._toast("SPEED", "could not save", "")
+                self._toast(tr("speed").upper(), tr("save_fail"), "")
         elif press == K_BACK:
             self._enter_grid()
         elif now - self.activity_at > self.idle_secs:
@@ -558,19 +570,24 @@ class Ui:
     def _st_set_menu(self, now, d, press):
         if d:
             self.set_menu_sel = clamp(self.set_menu_sel + (1 if d > 0 else -1),
-                                      0, len(SET_ITEMS) - 1)
-            self.oled.show_menu("SETTINGS", SET_ITEMS, self.set_menu_sel)
+                                      0, len(set_items()) - 1)
+            self.oled.show_menu(tr("settings"), set_items(), self.set_menu_sel)
         if press in (K_PSH, K_CONFIRM):
             if self.set_menu_sel == SET_FONT:
                 self.font_sel = self.font_idx
                 self.state = S_FONT
-                self.oled.show_menu("SETTINGS > FONT", FONT_DESC,
+                self.oled.show_menu(tr("font_title"), FONT_DESC,
                                     self.font_sel, marked=self.font_idx)
             elif self.set_menu_sel == SET_TMO:
                 self.tmo_val = self.idle_secs
                 self.last_move = 0.0
                 self.state = S_TIMEOUT
                 self.oled.show_timeout(self.tmo_val, TMO_MIN, TMO_MAX)
+            elif self.set_menu_sel == SET_LANG:
+                self.lang_sel = i18n.LANGS.index(i18n.get_lang())
+                self.state = S_LANG
+                self.oled.show_menu(tr("lang_title"), i18n.LANG_DESC,
+                                    self.lang_sel, marked=self.lang_sel)
             elif microcontroller:
                 microcontroller.reset()
         elif press == K_BACK:
@@ -584,7 +601,7 @@ class Ui:
         if d:
             self.font_sel = clamp(self.font_sel + (1 if d > 0 else -1),
                                   0, len(FONTS) - 1)
-            self.oled.show_menu("SETTINGS > FONT", FONT_DESC, self.font_sel,
+            self.oled.show_menu(tr("font_title"), FONT_DESC, self.font_sel,
                                 marked=self.font_idx)
         if press in (K_PSH, K_CONFIRM):
             self.font_idx = self.font_sel
@@ -595,7 +612,60 @@ class Ui:
             self._enter_grid()
         elif press == K_BACK:
             self.state = S_SET_MENU
-            self.oled.show_menu("SETTINGS", SET_ITEMS, self.set_menu_sel)
+            self.oled.show_menu(tr("settings"), set_items(), self.set_menu_sel)
+        elif now - self.activity_at > self.idle_secs:
+            self._enter_grid()
+
+    def persist_lang(self, lang):
+        """Rewrite config.json "lang" so the app sees the same choice.
+        Returns "ok" | "readonly" | "error"."""
+        path = "/config.json"
+        tmp = path + ".part"
+        try:
+            with open(path) as f:
+                data = json.load(f)
+            if not isinstance(data, dict):
+                data = {}
+        except (OSError, ValueError, MemoryError):
+            data = {}
+        data["lang"] = lang
+        try:
+            with open(tmp, "w") as f:
+                json.dump(data, f)
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+            os.rename(tmp, path)
+        except OSError as e:
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+            return "readonly" if (e.args and e.args[0] == 30) else "error"
+        self.app.config["lang"] = lang
+        i18n.set_lang(lang)
+        self.app.send_config()  # a connected app refreshes its Setup view
+        return "ok"
+
+    def _st_lang(self, now, d, press):
+        if d:
+            self.lang_sel = clamp(self.lang_sel + (1 if d > 0 else -1),
+                                  0, len(i18n.LANGS) - 1)
+            self.oled.show_menu(tr("lang_title"), i18n.LANG_DESC, self.lang_sel,
+                                marked=i18n.LANGS.index(i18n.get_lang()))
+        if press in (K_PSH, K_CONFIRM):
+            res = self.persist_lang(i18n.LANGS[self.lang_sel])
+            if res == "ok":
+                self.state = S_SET_MENU
+                self.oled.show_menu(tr("settings"), set_items(), self.set_menu_sel)
+            elif res == "readonly":
+                self._toast(tr("language").upper(), tr("usb_on"), tr("read_only"))
+            else:
+                self._toast(tr("language").upper(), tr("save_fail"), "")
+        elif press == K_BACK:
+            self.state = S_SET_MENU
+            self.oled.show_menu(tr("settings"), set_items(), self.set_menu_sel)
         elif now - self.activity_at > self.idle_secs:
             self._enter_grid()
 
@@ -610,9 +680,9 @@ class Ui:
             self.idle_secs = self.tmo_val
             self._nvm_save()
             self.state = S_SET_MENU
-            self.oled.show_menu("SETTINGS", SET_ITEMS, self.set_menu_sel)
+            self.oled.show_menu(tr("settings"), set_items(), self.set_menu_sel)
         elif press == K_BACK:
             self.state = S_SET_MENU
-            self.oled.show_menu("SETTINGS", SET_ITEMS, self.set_menu_sel)
+            self.oled.show_menu(tr("settings"), set_items(), self.set_menu_sel)
         elif now - self.activity_at > self.idle_secs:
             self._enter_grid()

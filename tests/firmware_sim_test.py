@@ -835,6 +835,72 @@ check("host nav slot event",
 vapp.handle_msg({"t": "host_leave"})
 check("host exit restores grid", ui.state == uimod.S_SELECT)
 
+# --- language (config "lang", i18n tables) --------------------------------
+from mkyada import i18n as i18nmod  # noqa: E402
+
+check("lang default en", vapp.config["lang"] == "en", str(vapp.config.get("lang")))
+_b.open = _cfg_open({"model": "vision6", "lang": "tr"})
+vapp.load_config()
+check("lang tr accepted", vapp.config["lang"] == "tr")
+_b.open = _cfg_open({"model": "vision6", "lang": "xx"})
+vapp.load_config()
+check("lang invalid -> en", vapp.config["lang"] == "en")
+_b.open = _real_open
+i18nmod.set_lang("tr")
+check("i18n tr strings", i18nmod.tr("settings") == "AYARLAR"
+      and i18nmod.tr("restart") == "Yeniden Baslat")
+check("i18n tr ascii-safe", all(ord(ch) < 128
+      for tbl in i18nmod.STRINGS.values() for v in tbl.values() for ch in v))
+i18nmod.set_lang("en")
+check("i18n back to en", i18nmod.tr("settings") == "SETTINGS")
+check("i18n unknown key echoes", i18nmod.tr("nope-key") == "nope-key")
+
+# settings menu now has 4 localized items incl. Language
+check("set menu has language", uimod.set_items()[uimod.SET_LANG] == "Language")
+
+# persist_lang rewrites config.json and announces the fresh config
+
+_lang_dir = tempfile.mkdtemp()
+_lang_cfg = os.path.join(_lang_dir, "config.json")
+with open(_lang_cfg, "w") as f:
+    json.dump({"model": "vision6", "layer_count": 4}, f)
+
+
+def _lang_open(path, *a, **k):
+    p = str(path)
+    if p.startswith("/config.json"):
+        return _real_open(_lang_cfg + p[len("/config.json"):], *a, **k)
+    return _real_open(path, *a, **k)
+
+
+_orig_os_remove, _orig_os_rename = os.remove, os.rename
+
+
+def _map(p):
+    p = str(p)
+    return _lang_cfg + p[len("/config.json"):] if p.startswith("/config.json") else p
+
+
+os.remove = lambda p: _orig_os_remove(_map(p))
+os.rename = lambda a, b: _orig_os_rename(_map(a), _map(b))
+_b.open = _lang_open
+voutbox.clear()
+vapp.proto.send = lambda obj: voutbox.append(obj)
+res_lang = ui.persist_lang("tr")
+_b.open = _real_open
+os.remove, os.rename = _orig_os_remove, _orig_os_rename
+with open(_lang_cfg) as f:
+    _lang_data = json.load(f)
+check("persist_lang ok", res_lang == "ok")
+check("persist_lang wrote file", _lang_data.get("lang") == "tr"
+      and _lang_data.get("layer_count") == 4, str(_lang_data))
+check("persist_lang announces config",
+      any(m.get("t") == "config" and m.get("lang") == "tr" for m in voutbox), str(voutbox))
+check("persist_lang applied", i18nmod.get_lang() == "tr")
+i18nmod.set_lang("en")
+vapp.config["lang"] = "en"
+shutil.rmtree(_lang_dir, ignore_errors=True)
+
 # NVM prefs roundtrip (magic 0x4E: font, idle timeout, last layer)
 class FakeNvm(bytearray):
     pass

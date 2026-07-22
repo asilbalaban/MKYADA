@@ -35,7 +35,11 @@ def _read_config_dict():
 # Resolve the model and put the branded boot screen up BEFORE the heavy
 # imports below — on Vision 6 the display must never show console text, and
 # engine/proto imports cost enough time to leave a visible gap otherwise.
-MODEL = resolve_model(_read_config_dict().get("model"))
+_cfg_early = _read_config_dict()
+MODEL = resolve_model(_cfg_early.get("model"))
+from mkyada import i18n
+i18n.set_lang(_cfg_early.get("lang"))
+del _cfg_early
 OLED = None
 if MODELS[MODEL]["display"]:
     try:
@@ -59,19 +63,25 @@ try:
 except ImportError:
     Ui = None
 
+gc.collect()  # the display stack litters the heap; start the app compacted
+
 DEBOUNCE_S = 0.02
 PING_TIMEOUT_S = 5.0
 PROTO_VERSION = 4  # v4: streamed JSONL macro files (full-rate playback);
                    # v3: fs_* file management over serial (hidden-drive mode)
 MACRO_FORMATS = ("mkyada-macro", "asil-macro")
 LAYER_NAMES = "abcdefgh"
-FS_CHUNK = 8192  # raw bytes per fs_chunk line (base64 ~11KB, under MAX_LINE);
-                 # bigger chunks mean far fewer ack round-trips, so reading a
-                 # large recorded macro over serial isn't painfully slow.
+# Raw bytes per fs_chunk line (base64 inflates 4/3, must stay under MAX_LINE).
+# Bigger chunks mean fewer ack round-trips; but on vision6 the display stack
+# fragments the heap, so large contiguous line allocations can MemoryError —
+# halve the chunk there and trade a little transfer speed for stability.
+FS_CHUNK = 4096 if MODELS[MODEL]["display"] else 8192
 FS_ACK_TIMEOUT_S = 3.0
 
 DEFAULT_CONFIG = {
     "model": None,       # "core6" | "vision6"; null = auto (I2C probe once)
+    "lang": "en",        # device UI language ("en" | "tr"); editable from the
+                         # app (Setup) and on the device (Settings > Language)
     "key_count": 6,
     "pins": None,        # per-key GPIO names, e.g. ["GP29",...,"GP13"] when a
                          # key is soldered off the model's default order;
@@ -175,6 +185,8 @@ class App:
             self.led.error()
         m = MODELS[MODEL]
         cfg["model"] = MODEL  # resolved value, not the raw file field
+        if cfg.get("lang") not in i18n.LANGS:
+            cfg["lang"] = i18n.DEFAULT_LANG
         max_keys = min(len(m["pin_order"]), m["max_keys"])
         cfg["key_count"] = max(1, min(max_keys, int(cfg.get("key_count") or 6)))
         cfg["pins"] = validate_key_pins(cfg.get("pins"), cfg["key_count"], MODEL)
@@ -221,8 +233,24 @@ class App:
         self.layer = i
         self.led.set(layer=i)
         self.announce_layer()
-        if self.ui:
-            self.ui.on_layer()
+        self.ui_call("on_layer")
+
+    def ui_call(self, name, *args):
+        """Run a UI hook, but never let a display/menu failure (including a
+        MemoryError from displayio churn) take the keypad down with it —
+        keys and serial must keep working even if a screen draw dies."""
+        if not self.ui:
+            return
+        try:
+            getattr(self.ui, name)(*args)
+        except Exception as e:
+            print("ui error in", name, ":", repr(e))
+            gc.collect()
+
+    def send_config(self):
+        cfg = dict(self.config)
+        cfg["t"] = "config"
+        self.proto.send(cfg)
 
     # --- serial ---
     def hello(self):
@@ -276,9 +304,7 @@ class App:
             self.engine.tap_combo(msg.get("mods"), str(msg.get("key", "")))
             self.proto.send({"t": "ok", "re": "keys"})
         elif t == "get_config":
-            cfg = dict(self.config)
-            cfg["t"] = "config"
-            self.proto.send(cfg)
+            self.send_config()
         elif t == "reload":
             self.stop_pin_watch()
             self.load_config()
@@ -289,8 +315,7 @@ class App:
             self.proto.send({"t": "ok", "re": "reload"})
             self.proto.send(self.hello())
             self.announce_layer()
-            if self.ui:
-                self.ui.on_reload()
+            self.ui_call("on_reload")
         elif t == "reset":
             # Hard reset: re-runs boot.py (needed after firmware updates).
             self.proto.send({"t": "ok", "re": "reset"})
@@ -450,8 +475,8 @@ class App:
         except OSError as e:
             return self.fs_err("fs_write", "io", e)
         self.proto.send({"t": "ok", "re": "fs_write", "seq": seq, "eof": True})
-        if self.ui and path.startswith("/macros/"):
-            self.ui.invalidate_labels(path)
+        if path.startswith("/macros/"):
+            self.ui_call("invalidate_labels", path)
 
     def fs_mkparents(self, path):
         parts = path.split("/")[1:-1]
@@ -478,8 +503,7 @@ class App:
         self.mode = mode
         self.led.set(state=ledmod.HOST if mode == "host" else ledmod.IDLE,
                      layer=self.layer)
-        if self.ui:
-            self.ui.on_mode(mode)
+        self.ui_call("on_mode", mode)
 
     # --- pin detect (key wiring wizard) ---
     # The app turns this on, asks the user to press the mystery key, and
@@ -641,8 +665,7 @@ class App:
         self.playing_key = trigger
         self.led.set(state=ledmod.LOOPING if loop else ledmod.PLAYING)
         self.proto.send({"t": "play_start", "file": path})
-        if self.ui:
-            self.ui.on_play_start(trigger, path)
+        self.ui_call("on_play_start", trigger, path)
         stopped = False
 
         def should_stop():
@@ -712,8 +735,7 @@ class App:
             gc.collect()
             self.set_mode(self.mode)  # restore idle/host LED
             self.proto.send({"t": "play_done", "file": path, "stopped": stopped})
-            if self.ui:
-                self.ui.on_play_done()
+            self.ui_call("on_play_done")
 
     # --- key handling ---
     def on_edge(self, i, pressed):
@@ -752,8 +774,7 @@ class App:
 
     def run_loop(self):
         self.led.set(state=ledmod.IDLE, layer=0)
-        if self.ui:
-            self.ui.start()
+        self.ui_call("start")
         while True:
             now = time.monotonic()
             if self.pin_watch:
@@ -779,8 +800,7 @@ class App:
             # a half-received upload must not leak its file handle either
             if self.upload and not self.proto.connected:
                 self.close_upload(discard=True)
-            if self.ui:
-                self.ui.tick(now)
+            self.ui_call("tick", now)
             self.led.tick()
             time.sleep(0.002)
 

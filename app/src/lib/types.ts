@@ -52,6 +52,8 @@ export interface DeviceConfig {
   model?: string | null;
   /** per-key GPIO names (key 1 first); null = the model's default order */
   pins?: string[] | null;
+  /** Vision 6 device UI language ("en" | "tr") — also editable on the device */
+  lang?: string | null;
   screen: { width: number; height: number };
 }
 

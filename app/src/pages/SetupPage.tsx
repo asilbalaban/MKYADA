@@ -4,7 +4,6 @@
 import { useEffect, useState } from "react";
 import { Pencil, Usb } from "lucide-react";
 import { useDevice } from "../lib/device";
-import { useHostMode } from "../lib/focus";
 import { useNav } from "../lib/nav";
 import { ipc } from "../lib/ipc";
 import { Button, Card, EmptyState, Field, Input, Select, Spinner, Stepper } from "../components/ui";
@@ -14,7 +13,7 @@ import { MODEL_META, assignablePins, defaultPins, deviceModel } from "../lib/typ
 import { Keypad } from "../components/Keypad";
 
 export function SetupPage({ onDone }: { onDone: () => void }) {
-  const { hello, drive, writeAndReload, send } = useDevice();
+  const { hello, drive, writeAndReload, send, onMsg } = useDevice();
   const nav = useNav();
   const [cfg, setCfg] = useState<DeviceConfig>(() => {
     const c = defaultConfig();
@@ -43,6 +42,18 @@ export function SetupPage({ onDone }: { onDone: () => void }) {
       model: hello.model ?? c.model ?? null,
     }));
   }, [hello]);
+
+  // The device can change its own language (Settings > Language) — it then
+  // rewrites config.json and announces the fresh config; mirror the field.
+  useEffect(
+    () =>
+      onMsg((m) => {
+        if (m.t === "config" && typeof (m as { lang?: unknown }).lang === "string") {
+          setCfg((c) => ({ ...c, lang: (m as { lang: string }).lang }));
+        }
+      }),
+    [onMsg],
+  );
 
   // If the drive already holds a config, show the summary instead of the wizard.
   useEffect(() => {
@@ -154,6 +165,12 @@ export function SetupPage({ onDone }: { onDone: () => void }) {
             </span>
             <span>Macro slots</span>
             <span className="text-fg">{macroSlots(cfg)}</span>
+            {model === "vision6" && (
+              <>
+                <span>Language</span>
+                <span className="text-fg">{cfg.lang === "tr" ? "Türkçe" : "English"}</span>
+              </>
+            )}
             <span>Screen (mouse macros)</span>
             <span className="text-fg">
               {cfg.screen.width} × {cfg.screen.height}
@@ -310,6 +327,18 @@ export function SetupPage({ onDone }: { onDone: () => void }) {
                 <option value="switch">Stop it and play the new key's macro</option>
               </Select>
             </Field>
+
+            {model === "vision6" && (
+              <Field label="Device language — also changeable on the device (Settings > Language)">
+                <Select
+                  value={cfg.lang ?? "en"}
+                  onChange={(e) => setCfg({ ...cfg, lang: e.target.value })}
+                >
+                  <option value="en">English</option>
+                  <option value="tr">Türkçe</option>
+                </Select>
+              </Field>
+            )}
 
             <div className="grid grid-cols-2 gap-3">
               <Field label="Screen width (mouse macros)">
@@ -702,10 +731,9 @@ function RemapPanel({
   );
 }
 
-function TestPad({ cfg, send }: { cfg: DeviceConfig; send: (m: Record<string, unknown>) => Promise<void> }) {
-  // Host mode makes the firmware stream btn events instead of firing macros —
-  // held only while the window is focused (issue #8).
-  useHostMode(send);
-
+function TestPad({ cfg }: { cfg: DeviceConfig; send: (m: Record<string, unknown>) => Promise<void> }) {
+  // No host mode here: since proto v2 the firmware streams btn events in
+  // standalone mode too, so presses light up AND the macros still fire —
+  // the keypad keeps working on every screen.
   return <Keypad config={cfg} selected={null} onSelect={() => {}} />;
 }

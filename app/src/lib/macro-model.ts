@@ -589,9 +589,10 @@ export function defaultConfig(): DeviceConfig {
     layer_mode: "toggle",
     key_map: null,
     busy_other: "ignore",
-    // null passthroughs: device-set model/wiring survive config rewrites
+    // null passthroughs: device-set model/wiring/language survive rewrites
     model: null,
     pins: null,
+    lang: null,
     screen: { width: screen.width, height: screen.height },
   };
 }
