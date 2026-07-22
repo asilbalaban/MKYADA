@@ -43,7 +43,11 @@ LAYER_LABELS = [
 SPEED_MIN_T = 1
 SPEED_MAX_T = 100
 SPEED_DEF_T = 10
-MAGIC = 0x4C
+# Otomatik geri donus (idle) suresi - saniye. Kullanici AYARLAR'dan degistirebilir.
+DEFAULT_TIMEOUT = 10
+TMO_MIN = 3
+TMO_MAX = 60
+MAGIC = 0x4D  # NVM formati degisti (font+sure+layer eklendi) -> yeni magic
 
 
 def fmt_speed(t):
@@ -98,20 +102,69 @@ W = display.width    # 128
 H = display.height   # 64
 CX = W // 2
 
-# --- Kucuk (dar) grid fontu: spleen 5x8 (terminalio 6px -> 5px) ---
-# BDF'yi yukle, kullanilan karakterleri onbellege al (hiz icin). Yoksa terminalio'ya dus.
+# --- Grid fontu: 3 boyut, AYAR menusunden secilir, NVM'de saklanir ---
+#  0=Kucuk (4x6, 4px)   1=Orta (spleen 5x8, 5px)   2=Buyuk (terminalio, 6px)
+FONTS = [
+    ("Kucuk", "/fonts/4x6.bdf"),
+    ("Orta", "/fonts/spleen-5x8.bdf"),
+    ("Buyuk", None),  # None -> terminalio
+]
+FONT_DESC = ["Kucuk  4x6", "Orta   5x8", "Buyuk  6px"]
+DEFAULT_FONT_IDX = 0
+
+# grid'de gecen tum karakterler (BDF glyph onbellegi icin)
+GLYPH_SET = set()
+for _lay in LAYER_LABELS:
+    for _a, _b in _lay:
+        GLYPH_SET |= set(_a) | set(_b)
+
+_font_cache = {}
+GRID_FONT = terminalio.FONT
+GRID_CPX = 6
+GRID_SMALL = False
+font_idx = DEFAULT_FONT_IDX
+
+
+def load_grid_font(idx):
+    # secili fontu global GRID_FONT'a yukle (BDF'leri onbellekler), font_idx'i gunceller
+    global GRID_FONT, GRID_CPX, GRID_SMALL, font_idx
+    font_idx = idx
+    _name, path = FONTS[idx]
+    if path is None:
+        GRID_FONT, GRID_CPX, GRID_SMALL = terminalio.FONT, 6, False
+        return
+    try:
+        f = _font_cache.get(path)
+        if f is None:
+            f = bitmap_font.load_font(path)
+            f.load_glyphs(GLYPH_SET | set("Mgpy"))  # +ascent/descent prob glyph'leri
+            label.Label(f, text="Mg")  # ilk render'daki ascent/descent hesabini isit
+            _font_cache[path] = f
+        GRID_FONT = f
+        GRID_CPX = f.get_bounding_box()[0]
+        GRID_SMALL = True
+    except Exception as _e:
+        print("font yuklenemedi:", path, _e)
+        GRID_FONT, GRID_CPX, GRID_SMALL = terminalio.FONT, 6, False
+
+
+# Hiz ekranindaki buyuk rakam: terminalio scale 3 yerine spleen 5x8 scale 2
+# (~%10 daha kucuk, daha dar). Font yoksa terminalio scale 3'e duser.
+HERO_FONT = terminalio.FONT
+HERO_SCALE = 3
+# UI ipuclari (< geri, aksiyon) icin sabit kucuk font (spleen 5x8, scale 1)
+UI_FONT = terminalio.FONT
 try:
-    GRID_FONT = bitmap_font.load_font("/fonts/spleen-5x8.bdf")
-    _chars = set()
-    for _lay in LAYER_LABELS:
-        for _a, _b in _lay:
-            _chars |= set(_a) | set(_b)
-    GRID_FONT.load_glyphs(_chars)
-    GRID_SMALL = True
+    _hf = _font_cache.get("/fonts/spleen-5x8.bdf")
+    if _hf is None:
+        _hf = bitmap_font.load_font("/fonts/spleen-5x8.bdf")
+        _font_cache["/fonts/spleen-5x8.bdf"] = _hf
+    _hf.load_glyphs(set("Mgpy0123456789.xds< abcdefghijklmnopqrstuvwxyz"))
+    label.Label(_hf, text="Mg")  # ascent/descent isitmasi (hiz ekrani ilk giris gecikmesini onler)
+    HERO_FONT, HERO_SCALE = _hf, 2
+    UI_FONT = _hf
 except Exception as _e:
-    print("kucuk font yuklenemedi, terminalio kullanilacak:", _e)
-    GRID_FONT = terminalio.FONT
-    GRID_SMALL = False
+    print("hero/ui font yok:", _e)
 
 # --- Girisler ---
 enc = rotaryio.IncrementalEncoder(board.GP2, board.GP3)
@@ -143,8 +196,8 @@ def circ(x, y, r, pal=WHITE):
     return vectorio.Circle(pixel_shader=pal, radius=r, x=x, y=y)
 
 
-def txt(s, x, y, scale=1, color=0xFFFFFF, anchor=(0.5, 0.5)):
-    l = label.Label(terminalio.FONT, text=s, scale=scale, color=color)
+def txt(s, x, y, scale=1, color=0xFFFFFF, anchor=(0.5, 0.5), font=None):
+    l = label.Label(font or terminalio.FONT, text=s, scale=scale, color=color)
     l.anchor_point = anchor
     l.anchored_position = (x, y)
     return l
@@ -156,6 +209,16 @@ def gtxt(s, x, y, color=0xFFFFFF, anchor=(0.5, 0.5)):
     l.anchor_point = anchor
     l.anchored_position = (x, y)
     return l
+
+
+def paint(g):
+    # ekrani hemen guncelle. auto_refresh kapali oldugundan manuel refresh sart;
+    # bu, ilk acilistaki "gec guncelleme" gecikmesini de yok eder.
+    display.root_group = g
+    try:
+        display.refresh()
+    except Exception:
+        pass
 
 
 def bold_txt(g, s, x, y, scale=1):
@@ -194,17 +257,22 @@ def top_bar(g, title):
 def bottom_bar(g, action=None, back=True):
     y = H - 13
     g.append(rect(0, y, W, 1))
-    if back and action:
-        g.append(txt("< geri", 2, H - 6, anchor=(0.0, 0.5)))
-    elif back:
-        g.append(txt("< geri", CX, H - 6))
+    if back:  # "geri" her zaman sol altta, kucuk font
+        g.append(txt("< geri", 2, H - 6, anchor=(0.0, 0.5), font=UI_FONT))
     if action:
-        g.append(txt(action, W - 2, H - 6, anchor=(1.0, 0.5)))
+        g.append(txt(action, W - 2, H - 6, anchor=(1.0, 0.5), font=UI_FONT))
 
 
 # --- NVM ---
+_FI = 1 + LAYERS * KEYS       # font_idx byte
+_TMO = 2 + LAYERS * KEYS      # idle sure byte
+_LYR = 3 + LAYERS * KEYS      # son secilen layer byte
+NVM_LEN = 4 + LAYERS * KEYS
+
+
 def load_settings():
-    if NVM is not None and len(NVM) >= 1 + LAYERS * KEYS and NVM[0] == MAGIC:
+    # (grid_ayarlari, font_idx, idle_sure, son_layer) dondurur
+    if NVM is not None and len(NVM) >= NVM_LEN and NVM[0] == MAGIC:
         d = NVM[1:1 + LAYERS * KEYS]
         out = []
         for l in range(LAYERS):
@@ -213,18 +281,37 @@ def load_settings():
                 v = d[l * KEYS + k]
                 row.append(v if SPEED_MIN_T <= v <= SPEED_MAX_T else SPEED_DEF_T)
             out.append(row)
-        return out
-    return [[SPEED_DEF_T] * KEYS for _ in range(LAYERS)]
+        fi = NVM[_FI]
+        if not (0 <= fi < len(FONTS)):
+            fi = DEFAULT_FONT_IDX
+        tmo = NVM[_TMO]
+        if not (TMO_MIN <= tmo <= TMO_MAX):
+            tmo = DEFAULT_TIMEOUT
+        lyr = NVM[_LYR]
+        if not (0 <= lyr < LAYERS):
+            lyr = 0
+        return out, fi, tmo, lyr
+    return ([[SPEED_DEF_T] * KEYS for _ in range(LAYERS)],
+            DEFAULT_FONT_IDX, DEFAULT_TIMEOUT, 0)
 
 
-def save_settings(s):
+def save_settings(s, fi=None, tmo=None, lyr=None):
     if NVM is None:
         return
-    buf = bytearray(1 + LAYERS * KEYS)
+    if fi is None:
+        fi = font_idx
+    if tmo is None:
+        tmo = idle_secs
+    if lyr is None:
+        lyr = layer
+    buf = bytearray(NVM_LEN)
     buf[0] = MAGIC
     for l in range(LAYERS):
         for k in range(KEYS):
             buf[1 + l * KEYS + k] = s[l][k]
+    buf[_FI] = int(fi)
+    buf[_TMO] = int(tmo)
+    buf[_LYR] = int(lyr)
     NVM[0:len(buf)] = buf
 
 
@@ -250,15 +337,23 @@ def boot_animation():
 
 
 # --- Ekranlar (yatay) ---
-def show_home(layer):
+N_HOME = LAYERS + 1  # A,B,C,D + AYAR
+AYAR_POS = LAYERS
+
+
+def show_home(pos):
     g = displayio.Group()
-    bold_txt(g, LAYER_NAMES[layer], CX, 22, scale=5)  # biraz kucuk, ustte
+    if pos < LAYERS:
+        bold_txt(g, LAYER_NAMES[pos], CX, 22, scale=5)  # layer harfi
+        led(LAYER_COLORS[pos])
+    else:
+        g.append(txt("AYARLAR", CX, 24, scale=2))       # duz (bold degil) - harfler bitismesin
+        led((160, 160, 160))
     gap = 14
-    x0 = CX - (LAYERS - 1) * gap // 2
-    for i in range(LAYERS):
-        g.append(circ(x0 + i * gap, 54, 3 if i == layer else 1))  # daha asagida
-    led(LAYER_COLORS[layer])
-    display.root_group = g
+    x0 = CX - (N_HOME - 1) * gap // 2
+    for i in range(N_HOME):
+        g.append(circ(x0 + i * gap, 54, 3 if i == pos else 1))
+    paint(g)
 
 
 def _cut(s, n):
@@ -273,8 +368,7 @@ def show_grid(layer, active, invert=True):
     cols, rows = 3, 2
     cw = W // cols   # 42
     ch = H // rows   # 32
-    cpx = 5 if GRID_SMALL else 6   # karakter genisligi (spleen 5px / terminalio 6px)
-    maxc = (cw - 2) // cpx  # hucreye sigan karakter sayisi (kalani kesilir)
+    maxc = (cw - 2) // GRID_CPX  # hucreye sigan karakter sayisi (kalani kesilir)
     # grid cizgileri (2 dikey + 1 yatay)
     g.append(rect(cw, 0, 1, H))
     g.append(rect(2 * cw, 0, 1, H))
@@ -294,7 +388,7 @@ def show_grid(layer, active, invert=True):
             g.append(gtxt(_cut(l2, maxc), x + cw // 2, y + 22, color=col))
         else:
             g.append(gtxt(_cut(l1, maxc), x + cw // 2, y + ch // 2, color=col))
-    display.root_group = g
+    paint(g)
 
 
 def show_select(layer, sel_key, settings):
@@ -305,33 +399,93 @@ def show_select(layer, sel_key, settings):
 
 def show_speed(layer, sel_key, t):
     g = displayio.Group()
-    top_bar(g, "L%d > K%d" % (layer + 1, sel_key + 1))
-    g.append(txt(fmt_hero(t), CX, 28, scale=3))
-    # genis yatay gosterge cubugu
+    top_bar(g, "%s > K%d" % (LAYER_NAMES[layer], sel_key + 1))
+    g.append(txt(fmt_hero(t), CX, 28, scale=HERO_SCALE, font=HERO_FONT))
+    # genis yatay gosterge cubugu (ince, rakama yakin, geri bandindan uzak)
     f = (t - SPEED_MIN_T) / (SPEED_MAX_T - SPEED_MIN_T)
-    bx, by, bw = 8, 42, W - 16
-    g.append(rect(bx, by + 3, bw, 1))
-    g.append(rect(bx, by, int(f * bw), 7))
-    bottom_bar(g)
+    bx, by, bw, bh = 8, 39, W - 16, 4
+    g.append(rect(bx, by + bh // 2, bw, 1))     # ince iz cizgisi
+    g.append(rect(bx, by, int(f * bw), bh))     # dolum
+    bottom_bar(g, action="onayla")              # sag alt: onayla, sol alt: geri
     led(speed_color(t))
-    display.root_group = g
+    paint(g)
 
 
 def show_saved(layer, sel_key, t):
     g = displayio.Group()
-    draw_check(g, CX, 24, 24)
-    g.append(txt(fmt_speed(t), CX, 50, scale=2))
+    top_bar(g, "%s > K%d" % (LAYER_NAMES[layer], sel_key + 1))
+    draw_check(g, CX, 32, 22)
+    g.append(txt(fmt_speed(t), CX, 54, scale=2))
     led((0, 255, 0))
-    display.root_group = g
+    paint(g)
 
 
-# --- Durum makinesi (dikey demo ile birebir ayni) ---
-settings = load_settings()
+SET_ITEMS = ["Font", "Otomatik Donus", "Yeniden Baslat"]
+SET_FONT, SET_TMO, SET_REBOOT = 0, 1, 2
+
+
+def show_set_menu(sel):
+    # AYARLAR ana menusu (layer gibi): Font / Sure / Yeniden Baslat
+    g = displayio.Group()
+    top_bar(g, "AYARLAR")
+    for i, n in enumerate(SET_ITEMS):
+        y = 22 + i * 12
+        if i == sel:
+            g.append(rect(0, y - 6, W, 12))
+            c = 0x000000
+        else:
+            c = 0xFFFFFF
+        g.append(txt(n, CX, y, color=c))
+    bottom_bar(g, action="sec")
+    led((160, 160, 160))
+    paint(g)
+
+
+def show_timeout(sec):
+    # AYARLAR > OTOMATIK DONUS: islemsiz kalinca kac sn sonra geri donsun
+    g = displayio.Group()
+    top_bar(g, "OTOMATIK DONUS")
+    g.append(txt("%ds" % sec, CX, 28, scale=HERO_SCALE, font=HERO_FONT))
+    f = (sec - TMO_MIN) / (TMO_MAX - TMO_MIN)
+    bx, by, bw, bh = 8, 39, W - 16, 4
+    g.append(rect(bx, by + bh // 2, bw, 1))
+    g.append(rect(bx, by, int(f * bw), bh))
+    bottom_bar(g, action="onayla")
+    led((160, 160, 160))
+    paint(g)
+
+
+def show_font(sel):
+    # AYARLAR > FONT: 3 boyut listesi; sel = imlec, font_idx = aktif (isaretli)
+    g = displayio.Group()
+    top_bar(g, "AYARLAR > FONT")
+    for i, n in enumerate(FONT_DESC):
+        y = 22 + i * 12
+        if i == sel:
+            g.append(rect(0, y - 6, W, 12))
+            c = 0x000000
+        else:
+            c = 0xFFFFFF
+        mark = ">" if i == font_idx else " "
+        g.append(txt("%s %s" % (mark, n), CX, y, color=c))
+    bottom_bar(g, action="sec")
+    led((160, 160, 160))
+    paint(g)
+
+
+# --- Durum makinesi ---
+settings, font_idx, idle_secs, layer = load_settings()
+load_grid_font(font_idx)  # kayitli fontu uygula
 boot_animation()
+display.auto_refresh = False  # bundan sonra ekrani paint() manuel tazeler (gecikmesiz)
 
 S_HOME, S_SELECT, S_SPEED, S_SAVED, S_KEY = 0, 1, 2, 3, 4
+S_SET_MENU, S_FONT, S_TIMEOUT = 5, 6, 7
 state = S_HOME
-layer = 0
+home_pos = layer   # ana ekran imleci: son secilen layer'da acilir
+set_menu_sel = 0   # AYARLAR ana menu imleci
+set_sel = 0        # font secim imleci
+tmo_val = idle_secs  # sure ayar ekrani gecici degeri
 sel_key = 0
 speed_t = SPEED_DEF_T
 saved_at = 0.0
@@ -342,11 +496,10 @@ key_dur = 5.0
 blink_on = True
 last_blink = 0.0
 activity_at = 0.0
-IDLE_TIMEOUT = 15.0
 
 last_enc = enc.position
-activity_at = time.monotonic()  # acilis layer secim ekrani icin 15 sn sayaci
-show_home(layer)
+activity_at = time.monotonic()  # acilis layer secim ekrani icin idle sayaci
+show_home(home_pos)
 
 
 def enc_delta():
@@ -378,17 +531,25 @@ while True:
 
     if state == S_HOME:
         if d:
-            layer = clamp(layer + (1 if d > 0 else -1), 0, LAYERS - 1)
-            show_home(layer)
+            home_pos = clamp(home_pos + (1 if d > 0 else -1), 0, N_HOME - 1)
+            show_home(home_pos)
             activity_at = now
         ev = keys.events.get()
         if ev and ev.pressed and ev.key_number in (K_PSH, K_CONFIRM):
-            state = S_SELECT
-            sel_key = 0
             activity_at = now
-            show_select(layer, sel_key, settings)
-        # 15 sn layer secilmezse aktif layer otomatik secilir -> grid
-        if state == S_HOME and now - activity_at > IDLE_TIMEOUT:
+            if home_pos == AYAR_POS:
+                # AYARLAR bolumu -> ayar ana menusu (Font / Sure / Yeniden Baslat)
+                set_menu_sel = 0
+                state = S_SET_MENU
+                show_set_menu(set_menu_sel)
+            else:
+                layer = home_pos
+                state = S_SELECT
+                sel_key = 0
+                save_settings(settings)  # son manuel secilen layer'i sakla
+                show_select(layer, sel_key, settings)
+        # islemsiz kalinca imlece DEGIL, son ONAYLANAN aktif layer'a doner
+        if state == S_HOME and now - activity_at > idle_secs:
             state = S_SELECT
             sel_key = 0
             show_select(layer, sel_key, settings)
@@ -407,10 +568,11 @@ while True:
                 state = S_SPEED
                 show_speed(layer, sel_key, speed_t)
             elif ev.key_number == K_BACK:
-                # grid = ana ekran; BACK -> layer secim ekranina cik
+                # grid = ana ekran; BACK -> layer/ayar secim ekranina cik
+                home_pos = layer
                 state = S_HOME
                 activity_at = now  # layer secim 15 sn sayacini yenile
-                show_home(layer)
+                show_home(home_pos)
         # grid ana ekran oldugu icin burada timeout yok (kullanici kalir)
 
     elif state == S_SPEED:
@@ -442,7 +604,7 @@ while True:
                 activity_at = now
                 show_select(layer, sel_key, settings)
         # 15 sn islem yok -> aktif layer grid'ine don (gizli sayac)
-        if state == S_SPEED and now - activity_at > IDLE_TIMEOUT:
+        if state == S_SPEED and now - activity_at > idle_secs:
             state = S_SELECT
             show_select(layer, sel_key, settings)
 
@@ -470,5 +632,89 @@ while True:
                 sel_key = key_num - 1
                 state = S_SELECT
                 show_select(layer, sel_key, settings)
+
+    elif state == S_SET_MENU:
+        # AYARLAR ana menusu: Font / Sure / Yeniden Baslat
+        if d:
+            set_menu_sel = clamp(set_menu_sel + (1 if d > 0 else -1), 0, len(SET_ITEMS) - 1)
+            show_set_menu(set_menu_sel)
+            activity_at = now
+        ev = keys.events.get()
+        if ev and ev.pressed:
+            activity_at = now
+            if ev.key_number in (K_CONFIRM, K_PSH):
+                if set_menu_sel == SET_FONT:
+                    set_sel = font_idx
+                    state = S_FONT
+                    show_font(set_sel)
+                elif set_menu_sel == SET_TMO:
+                    tmo_val = idle_secs
+                    last_move = 0.0
+                    state = S_TIMEOUT
+                    show_timeout(tmo_val)
+                else:
+                    # cihazi yeniden baslat
+                    led((0, 0, 255))
+                    try:
+                        microcontroller.reset()
+                    except Exception as _re:
+                        print("reset yok:", _re)
+            elif ev.key_number == K_BACK:
+                home_pos = AYAR_POS
+                state = S_HOME
+                show_home(home_pos)
+        if state == S_SET_MENU and now - activity_at > idle_secs:
+            home_pos = AYAR_POS
+            state = S_HOME
+            show_home(home_pos)
+
+    elif state == S_FONT:
+        if d:
+            set_sel = clamp(set_sel + (1 if d > 0 else -1), 0, len(FONTS) - 1)
+            show_font(set_sel)
+            activity_at = now
+        ev = keys.events.get()
+        if ev and ev.pressed:
+            activity_at = now
+            if ev.key_number in (K_CONFIRM, K_PSH):
+                load_grid_font(set_sel)            # secili fontu uygula
+                save_settings(settings, font_idx)  # NVM'ye kaydet
+                led((0, 255, 0))
+                # font secilince el ile geri donmeye gerek yok: son aktif grid'e don
+                state = S_SELECT
+                show_select(layer, sel_key, settings)
+            elif ev.key_number == K_BACK:
+                state = S_SET_MENU
+                show_set_menu(set_menu_sel)
+        if state == S_FONT and now - activity_at > idle_secs:
+            home_pos = AYAR_POS
+            state = S_HOME
+            show_home(home_pos)
+
+    elif state == S_TIMEOUT:
+        if d:
+            now = time.monotonic()
+            dt = now - last_move
+            last_move = now
+            per = 3 if (abs(d) > 1 or dt < 0.05) else 1
+            tmo_val = clamp(tmo_val + d * per, TMO_MIN, TMO_MAX)
+            show_timeout(tmo_val)
+            activity_at = now
+        ev = keys.events.get()
+        if ev and ev.pressed:
+            activity_at = now
+            if ev.key_number in (K_CONFIRM, K_PSH):
+                idle_secs = tmo_val
+                save_settings(settings, font_idx, idle_secs)  # NVM'ye kaydet
+                led((0, 255, 0))
+                state = S_SET_MENU
+                show_set_menu(set_menu_sel)
+            elif ev.key_number == K_BACK:
+                state = S_SET_MENU
+                show_set_menu(set_menu_sel)
+        if state == S_TIMEOUT and now - activity_at > idle_secs:
+            home_pos = AYAR_POS
+            state = S_HOME
+            show_home(home_pos)
 
     time.sleep(0.005)
