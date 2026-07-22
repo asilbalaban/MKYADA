@@ -18,7 +18,10 @@ try:
 except ImportError:
     neopixel = None  # lib missing: run without a status LED
 
-LAYER_COLORS = ((0, 255, 0), (0, 80, 255), (170, 0, 255), (0, 255, 180))
+# A-D unchanged from the original 4-layer palette; E-H added for the
+# 8-layer cap (amber is reserved for "playing", red for errors).
+LAYER_COLORS = ((0, 255, 0), (0, 80, 255), (170, 0, 255), (0, 255, 180),
+                (255, 255, 255), (255, 0, 150), (160, 255, 0), (255, 200, 0))
 AMBER = (255, 120, 0)
 RED = (255, 0, 0)
 

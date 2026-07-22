@@ -1,5 +1,8 @@
 # MKYADA firmware — main loop.
 #
+# One codebase, two models (see mkyada/models.py):
+#   core6    screenless keypad, keys on GP0.., layer key cycles layers
+#   vision6  SH1106 OLED + EC11 encoder menu module, keys on the far edge
 # Standalone: a key press plays the macro JSON mapped to it by name convention
 #   (macros/key<N>.json, layer B -> key<N>-b.json, ...). No app required.
 # Host mode: entered when the desktop app sends {"t":"host_enter"}; key events
@@ -16,22 +19,46 @@ import board
 import digitalio
 import microcontroller
 
+from mkyada.models import (MODELS, resolve_model, resolve_pins,
+                           validate_key_pins, detect_candidates)
+
+
+def _read_config_dict():
+    try:
+        with open("/config.json") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError, MemoryError):
+        return {}
+
+
+# Resolve the model and put the branded boot screen up BEFORE the heavy
+# imports below — on Vision 6 the display must never show console text, and
+# engine/proto imports cost enough time to leave a visible gap otherwise.
+MODEL = resolve_model(_read_config_dict().get("model"))
+OLED = None
+if MODELS[MODEL]["display"]:
+    try:
+        from mkyada.oled import Oled
+        OLED = Oled(MODELS[MODEL]["display"])
+        OLED.show_boot()
+    except Exception as e:  # display stack missing/broken: run headless
+        print("oled init failed:", e)
+        OLED = None
+
 from mkyada import led as ledmod
 from mkyada.engine import Engine, StopPlayback
 from mkyada.led import Led
 from mkyada.proto import Proto
 
-# Key pins in solder order — every castellated GPIO on the RP2040-Zero's
-# edge, walking the perimeter: GP0-GP8 down the right side, GP9-GP14 along
-# the bottom, GP15 + GP26-GP29 up the left. (GP16 drives the onboard
-# WS2812; GP17-GP25 are rear test pads, not edge pins.) 6 keys is the
-# reference build; solder GP0..GP(n-1) for any n up to 20 and set key_count.
-PIN_ORDER = (
-    board.GP0, board.GP1, board.GP2, board.GP3, board.GP4, board.GP5,
-    board.GP6, board.GP7, board.GP8, board.GP9, board.GP10, board.GP11,
-    board.GP12, board.GP13, board.GP14, board.GP15,
-    board.GP26, board.GP27, board.GP28, board.GP29,
-)
+if OLED:
+    OLED.boot_progress(0.5)  # heavy imports done
+
+try:
+    from mkyada.ui import Ui
+except ImportError:
+    Ui = None
+
 DEBOUNCE_S = 0.02
 PING_TIMEOUT_S = 5.0
 PROTO_VERSION = 4  # v4: streamed JSONL macro files (full-rate playback);
@@ -44,8 +71,12 @@ FS_CHUNK = 8192  # raw bytes per fs_chunk line (base64 ~11KB, under MAX_LINE);
 FS_ACK_TIMEOUT_S = 3.0
 
 DEFAULT_CONFIG = {
+    "model": None,       # "core6" | "vision6"; null = auto (I2C probe once)
     "key_count": 6,
-    "layer_key": None,   # 1-based key number, or null
+    "pins": None,        # per-key GPIO names, e.g. ["GP29",...,"GP13"] when a
+                         # key is soldered off the model's default order;
+                         # null = the model's pin_order (mkyada/models.py)
+    "layer_key": None,   # 1-based key number, or null (always null on vision6)
     "layer_count": 2,
     "layer_mode": "toggle",  # kept for config compat; press always cycles a->b->...
     "key_map": None,     # per-GPIO logical key numbers, e.g. [3,1,2] when the
@@ -73,15 +104,24 @@ def uid_hex():
 class Buttons:
     """Active-low buttons with per-key debounce and press/release edges."""
 
-    def __init__(self, count):
+    def __init__(self, pins):
         self.ios = []
-        for pin in PIN_ORDER[:count]:
+        for pin in pins:
             io = digitalio.DigitalInOut(pin)
             io.direction = digitalio.Direction.INPUT
             io.pull = digitalio.Pull.UP
             self.ios.append(io)
+        count = len(self.ios)
         self.stable = [False] * count
         self.changed_at = [0.0] * count
+
+    def deinit(self):
+        for io in self.ios:
+            try:
+                io.deinit()
+            except Exception:
+                pass
+        self.ios = []
 
     def scan(self):
         """Return [(index, pressed_bool), ...] edges since last scan."""
@@ -99,18 +139,27 @@ class Buttons:
 class App:
     def __init__(self):
         self.fw_version = read_text("/VERSION") or "0.0.0"
+        self.model = MODEL
         self.engine = Engine()
         self.proto = Proto()
         self.led = Led()
         self.config = dict(DEFAULT_CONFIG)
         self.load_config()
-        self.buttons = Buttons(self.config["key_count"])
+        self.buttons = Buttons(resolve_pins(self.key_pin_names()))
         self.layer = 0
         self.mode = "standalone"
         self.last_rx = 0.0
         self.playing_key = None  # 0-based index of the key that started playback
         self.pending_play = None  # (path, trigger) queued by restart/switch policies
         self.upload = None  # in-flight fs_write: {"path", "tmp", "f", "seq"}
+        self.pin_watch = None  # ("names", Buttons) while pin-detect mode is on
+        self.pin_watch_until = 0.0
+        self.ui = None  # vision6 menu module (encoder + OLED state machine)
+        if OLED and Ui:
+            try:
+                self.ui = Ui(self, OLED)
+            except Exception as e:
+                print("ui init failed:", e)
 
     # --- config ---
     def load_config(self):
@@ -124,10 +173,18 @@ class App:
                         cfg[k] = data[k]
         except (OSError, ValueError, MemoryError):
             self.led.error()
-        cfg["key_count"] = max(1, min(len(PIN_ORDER), int(cfg.get("key_count") or 6)))
-        lk = cfg.get("layer_key")
-        cfg["layer_key"] = int(lk) if lk and 1 <= int(lk) <= cfg["key_count"] else None
-        cfg["layer_count"] = max(2, min(len(LAYER_NAMES), int(cfg.get("layer_count") or 2)))
+        m = MODELS[MODEL]
+        cfg["model"] = MODEL  # resolved value, not the raw file field
+        max_keys = min(len(m["pin_order"]), m["max_keys"])
+        cfg["key_count"] = max(1, min(max_keys, int(cfg.get("key_count") or 6)))
+        cfg["pins"] = validate_key_pins(cfg.get("pins"), cfg["key_count"], MODEL)
+        if m["layer_via"] == "ui":
+            cfg["layer_key"] = None  # all keys are macro keys on vision6
+        else:
+            lk = cfg.get("layer_key")
+            cfg["layer_key"] = int(lk) if lk and 1 <= int(lk) <= cfg["key_count"] else None
+        cfg["layer_count"] = max(m["min_layers"],
+                                 min(len(LAYER_NAMES), int(cfg.get("layer_count") or 2)))
         km = cfg.get("key_map")
         if not (isinstance(km, list) and len(km) == cfg["key_count"]
                 and sorted(km) == list(range(1, cfg["key_count"] + 1))):
@@ -140,19 +197,42 @@ class App:
         self.engine.set_screen(cfg["screen"].get("width", 1920),
                                cfg["screen"].get("height", 1080))
 
+    def key_pin_names(self):
+        c = self.config
+        return c["pins"] or list(MODELS[MODEL]["pin_order"][: c["key_count"]])
+
     def macro_path(self, key_no):
-        if self.layer == 0:
+        return self.macro_path_for(key_no, self.layer)
+
+    def macro_path_for(self, key_no, layer_idx):
+        if layer_idx == 0:
             return "/macros/key%d.json" % key_no
-        return "/macros/key%d-%s.json" % (key_no, LAYER_NAMES[self.layer])
+        return "/macros/key%d-%s.json" % (key_no, LAYER_NAMES[layer_idx])
+
+    def slot_path(self, slot, layer_idx):
+        """Macro file behind an encoder/nav virtual slot (see UI_SLOTS)."""
+        if layer_idx == 0:
+            return "/macros/%s.json" % slot
+        return "/macros/%s-%s.json" % (slot, LAYER_NAMES[layer_idx])
+
+    def set_layer_idx(self, i):
+        """Single path for layer changes: serial set_layer, the layer key,
+        and the vision6 encoder menu all land here."""
+        self.layer = i
+        self.led.set(layer=i)
+        self.announce_layer()
+        if self.ui:
+            self.ui.on_layer()
 
     # --- serial ---
     def hello(self):
         c = self.config
         return {"t": "hello", "fw": self.fw_version, "proto": PROTO_VERSION,
-                "format": "mkyada", "uid": uid_hex(),
+                "format": "mkyada", "uid": uid_hex(), "model": self.model,
                 "key_count": c["key_count"], "layer_key": c["layer_key"],
                 "layer_count": c["layer_count"], "layer_mode": c["layer_mode"],
                 "key_map": c["key_map"], "usb_drive": c["usb_drive"],
+                "pins": self.key_pin_names(),
                 "layer": LAYER_NAMES[self.layer], "mode": self.mode}
 
     def handle_msg(self, msg, in_playback=False):
@@ -200,12 +280,17 @@ class App:
             cfg["t"] = "config"
             self.proto.send(cfg)
         elif t == "reload":
+            self.stop_pin_watch()
             self.load_config()
+            self.buttons.deinit()
+            self.buttons = Buttons(resolve_pins(self.key_pin_names()))
             self.layer = 0
             self.led.set(layer=0)
             self.proto.send({"t": "ok", "re": "reload"})
             self.proto.send(self.hello())
             self.announce_layer()
+            if self.ui:
+                self.ui.on_reload()
         elif t == "reset":
             # Hard reset: re-runs boot.py (needed after firmware updates).
             self.proto.send({"t": "ok", "re": "reset"})
@@ -214,10 +299,14 @@ class App:
         elif t == "set_layer":
             name = str(msg.get("layer", "a"))
             if name in LAYER_NAMES[: self.config["layer_count"]]:
-                self.layer = LAYER_NAMES.index(name)
-                self.led.set(layer=self.layer)
                 self.proto.send({"t": "ok", "re": "set_layer"})
-                self.announce_layer()
+                self.set_layer_idx(LAYER_NAMES.index(name))
+        elif t == "pin_detect":
+            if msg.get("on"):
+                self.start_pin_watch()
+            else:
+                self.stop_pin_watch()
+            self.proto.send({"t": "ok", "re": "pin_detect"})
         elif t == "led":
             # app feedback color (e.g. mic muted -> red); "off" restores the
             # normal LED grammar. Cleared automatically on app disconnect.
@@ -361,6 +450,8 @@ class App:
         except OSError as e:
             return self.fs_err("fs_write", "io", e)
         self.proto.send({"t": "ok", "re": "fs_write", "seq": seq, "eof": True})
+        if self.ui and path.startswith("/macros/"):
+            self.ui.invalidate_labels(path)
 
     def fs_mkparents(self, path):
         parts = path.split("/")[1:-1]
@@ -387,6 +478,35 @@ class App:
         self.mode = mode
         self.led.set(state=ledmod.HOST if mode == "host" else ledmod.IDLE,
                      layer=self.layer)
+        if self.ui:
+            self.ui.on_mode(mode)
+
+    # --- pin detect (key wiring wizard) ---
+    # The app turns this on, asks the user to press the mystery key, and
+    # reads which GPIO toggles. Normal key handling is suspended meanwhile.
+    PIN_WATCH_TIMEOUT_S = 120.0
+
+    def start_pin_watch(self):
+        self.stop_pin_watch()
+        self.buttons.deinit()
+        names = detect_candidates(MODEL)
+        self.pin_watch = (names, Buttons(resolve_pins(names)))
+        self.pin_watch_until = time.monotonic() + self.PIN_WATCH_TIMEOUT_S
+
+    def stop_pin_watch(self):
+        if not self.pin_watch:
+            return
+        _, watch = self.pin_watch
+        self.pin_watch = None
+        watch.deinit()
+        self.buttons = Buttons(resolve_pins(self.key_pin_names()))
+
+    def tick_pin_watch(self, now):
+        names, watch = self.pin_watch
+        for i, pressed in watch.scan():
+            self.proto.send({"t": "pin", "pin": names[i], "down": pressed})
+        if now > self.pin_watch_until or not self.proto.connected:
+            self.stop_pin_watch()
 
     # --- key logic (macro format v3) ---
     def resolve_variant(self, i, variants, settings):
@@ -521,6 +641,8 @@ class App:
         self.playing_key = trigger
         self.led.set(state=ledmod.LOOPING if loop else ledmod.PLAYING)
         self.proto.send({"t": "play_start", "file": path})
+        if self.ui:
+            self.ui.on_play_start(trigger, path)
         stopped = False
 
         def should_stop():
@@ -590,6 +712,8 @@ class App:
             gc.collect()
             self.set_mode(self.mode)  # restore idle/host LED
             self.proto.send({"t": "play_done", "file": path, "stopped": stopped})
+            if self.ui:
+                self.ui.on_play_done()
 
     # --- key handling ---
     def on_edge(self, i, pressed):
@@ -606,19 +730,37 @@ class App:
             return
         if c["layer_key"] == key_no:
             if pressed:
-                self.layer = (self.layer + 1) % c["layer_count"]
-                self.led.set(layer=self.layer)
-                self.announce_layer()
+                self.set_layer_idx((self.layer + 1) % c["layer_count"])
             return
         if pressed:
             self.play_file(self.macro_path(key_no), trigger=i)
 
     # --- main loop ---
     def run(self):
+        try:
+            self.run_loop()
+        except Exception as e:
+            # Finished-product UX: a branded error screen instead of a raw
+            # traceback; the traceback still reaches the serial console.
+            if OLED:
+                try:
+                    OLED.show_error(repr(e))
+                except Exception:
+                    pass
+                time.sleep(5)
+            raise
+
+    def run_loop(self):
         self.led.set(state=ledmod.IDLE, layer=0)
+        if self.ui:
+            self.ui.start()
         while True:
-            for i, pressed in self.buttons.scan():
-                self.on_edge(i, pressed)
+            now = time.monotonic()
+            if self.pin_watch:
+                self.tick_pin_watch(now)  # wiring wizard owns the keys
+            else:
+                for i, pressed in self.buttons.scan():
+                    self.on_edge(i, pressed)
             # restart/switch policies queue the next macro instead of
             # recursing inside the playback stack
             while self.pending_play:
@@ -637,6 +779,8 @@ class App:
             # a half-received upload must not leak its file handle either
             if self.upload and not self.proto.connected:
                 self.close_upload(discard=True)
+            if self.ui:
+                self.ui.tick(now)
             self.led.tick()
             time.sleep(0.002)
 

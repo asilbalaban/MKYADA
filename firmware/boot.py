@@ -10,7 +10,13 @@
 #   Mass storage: CIRCUITPY drive enabled by default; `"usb_drive": false` in
 #     config.json hides it (finished-product mode: the app manages all files
 #     over serial — see the fs_* commands in docs/serial-protocol.md).
-#     Recovery: hold key 1 (GP0) while plugging in to force the drive back on.
+#     Recovery: hold key 1 while plugging in to force the drive back on —
+#     GP0 on Core 6; GP29 (macro key 1) on Vision 6, whose GP0 is OLED SDA.
+#
+# Model comes from config.json "model" only — boot.py never probes hardware
+# (must stay fast and dependency-light). An unreadable config falls back to
+# core6 defaults, which are safe on both boards: GP0 idles high on Vision 6,
+# so the drive simply stays visible, the default for a config-less board.
 
 import json
 
@@ -20,6 +26,17 @@ import storage
 import supervisor
 import usb_cdc
 import usb_hid
+
+try:
+    with open("/config.json") as _f:
+        _data = json.load(_f)
+    CFG = _data if isinstance(_data, dict) else {}
+except (OSError, ValueError):
+    CFG = {}
+
+VISION6 = CFG.get("model") == "vision6"
+RECOVERY_PIN = board.GP29 if VISION6 else board.GP0
+PRODUCT = "MKYADA Vision 6" if VISION6 else "MKYADA Keypad"
 
 ABS_MOUSE_DESCRIPTOR = bytes((
     0x05, 0x01,        # Usage Page (Generic Desktop)
@@ -67,11 +84,11 @@ abs_mouse = usb_hid.Device(
 )
 
 def usb_drive_wanted():
-    """config.json `usb_drive` (default: visible). Holding key 1 (GP0, active
+    """config.json `usb_drive` (default: visible). Holding key 1 (active
     low) during power-on overrides to visible — the escape hatch if the app
     is unavailable while the drive is hidden."""
     try:
-        io = digitalio.DigitalInOut(board.GP0)
+        io = digitalio.DigitalInOut(RECOVERY_PIN)
         io.direction = digitalio.Direction.INPUT
         io.pull = digitalio.Pull.UP
         held = not io.value
@@ -80,14 +97,17 @@ def usb_drive_wanted():
             return True
     except Exception:
         pass
-    try:
-        with open("/config.json") as f:
-            return json.load(f).get("usb_drive") is not False
-    except (OSError, ValueError):
-        return True
+    return CFG.get("usb_drive") is not False
 
 
-supervisor.set_usb_identification(manufacturer="MKYADA", product="MKYADA Keypad")
+supervisor.set_usb_identification(manufacturer="MKYADA", product=PRODUCT)
+try:
+    # No supervisor scribbles on the Vision 6 OLED or serial titles; the
+    # branded boot screen in code.py owns the display from the first frame.
+    supervisor.status_bar.console = False
+    supervisor.status_bar.display = False
+except Exception:
+    pass
 usb_hid.enable((usb_hid.Device.KEYBOARD, abs_mouse, usb_hid.Device.CONSUMER_CONTROL))
 usb_cdc.enable(console=True, data=True)
 if not usb_drive_wanted():

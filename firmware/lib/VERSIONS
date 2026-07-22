@@ -1,0 +1,11 @@
+Vendored CircuitPython libraries (Vision 6 display stack).
+Shipped as .py sources so the same files run on CircuitPython 9.x and 10.x.
+
+adafruit_displayio_sh1106.py   2.0.4   github.com/adafruit/Adafruit_CircuitPython_DisplayIO_SH1106
+adafruit_display_text/         5.0.4   github.com/adafruit/Adafruit_CircuitPython_Display_Text (only __init__ + label)
+adafruit_bitmap_font/          copied from hardware/oled-bringup/lib (Adafruit_CircuitPython_Bitmap_Font)
+neopixel.py                    fetched at release time by .github/workflows/firmware-release.yml (NEOPIXEL_REF)
+
+Fonts (firmware/fonts/):
+spleen-5x8.bdf   Spleen 2.2.0 (BSD) — grid "Medium", hero + UI font
+4x6.bdf          Misc-Fixed 4x6 (public domain) — grid "Small", the default
