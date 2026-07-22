@@ -11,9 +11,10 @@ export interface KeysSnapshot {
   assignments: Map<string, Assignment>;
 }
 
-/** Slot identifier shared by the Keys page and the cache: "key:layer". */
-export function slotKey(keyNo: number, layerIndex: number): string {
-  return `${keyNo}:${layerIndex}`;
+/** Slot identifier shared by the Keys page and the cache: "key:layer".
+ * Keys are numbers; Vision 6 module slots use their name ("enc-cw", …). */
+export function slotKey(slot: number | string, layerIndex: number): string {
+  return `${slot}:${layerIndex}`;
 }
 
 const cache = new Map<string, KeysSnapshot>();

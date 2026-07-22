@@ -8,10 +8,11 @@ import type {
   MacroEvent,
   MacroFile,
   MicMode,
+  ModuleSlot,
   SequenceStep,
   WebhookRequest,
 } from "./types";
-import { LAYER_NAMES } from "./types";
+import { deviceModel, LAYER_NAMES, MODULE_SLOTS } from "./types";
 import { charToKeystroke, displayKey } from "./layout";
 
 export const MEDIA_USAGES = [
@@ -101,6 +102,42 @@ export function fileBaseName(path: string): string {
 export function macroFileName(keyNo: number, layerIndex: number): string {
   const suffix = layerIndex > 0 ? `-${LAYER_NAMES[layerIndex]}` : "";
   return `macros/key${keyNo}${suffix}.json`;
+}
+
+/** File name for a Vision 6 encoder/nav slot macro — same layer-suffix rule
+ * as key files (layer 0 unsuffixed). An absent file keeps the device's
+ * built-in menu navigation for that control. */
+export function slotFileName(slot: ModuleSlot, layerIndex: number): string {
+  const suffix = layerIndex > 0 ? `-${LAYER_NAMES[layerIndex]}` : "";
+  return `macros/${slot}${suffix}.json`;
+}
+
+/** Reverse of macroFileName/slotFileName: which slot + layer a device macro
+ * path (e.g. from a `macro_changed` message) belongs to. Null for aux part
+ * files, profile macros and anything else. */
+export function parseMacroFileName(
+  path: string,
+): { slot: number | ModuleSlot; layer: number } | null {
+  const base = path.replace(/^\/?(macros\/)?/, "");
+  if (base.includes("/") || AUX_FILE_RE.test(base)) return null;
+  const key = base.match(/^key(\d+)(?:-([a-h]))?\.json$/);
+  if (key) return { slot: Number(key[1]), layer: key[2] ? LAYER_NAMES.indexOf(key[2]) : 0 };
+  const mod = base.match(/^(enc-ccw|enc-cw|btn-back|btn-confirm)(?:-([a-h]))?\.json$/);
+  if (mod && (MODULE_SLOTS as readonly string[]).includes(mod[1])) {
+    return { slot: mod[1] as ModuleSlot, layer: mod[2] ? LAYER_NAMES.indexOf(mod[2]) : 0 };
+  }
+  return null;
+}
+
+/** How many layers actually exist: Vision 6 picks layers with its wheel, so
+ * layer_count stands alone; elsewhere layers need a layer key to be reachable. */
+export function effectiveLayers(cfg: {
+  model?: string | null;
+  layer_key?: number | null;
+  layer_count: number;
+}): number {
+  if (deviceModel(cfg) === "vision6") return cfg.layer_count;
+  return cfg.layer_key ? cfg.layer_count : 1;
 }
 
 // ------------------------------------------------------------- sequences ---
@@ -552,6 +589,9 @@ export function defaultConfig(): DeviceConfig {
     layer_mode: "toggle",
     key_map: null,
     busy_other: "ignore",
+    // null passthroughs: device-set model/wiring survive config rewrites
+    model: null,
+    pins: null,
     screen: { width: screen.width, height: screen.height },
   };
 }
@@ -559,6 +599,5 @@ export function defaultConfig(): DeviceConfig {
 /** Number of assignable macro slots for a config (the layer key isn't one). */
 export function macroSlots(cfg: DeviceConfig): number {
   const keys = cfg.layer_key ? cfg.key_count - 1 : cfg.key_count;
-  const layers = cfg.layer_key ? cfg.layer_count : 1;
-  return keys * layers;
+  return keys * effectiveLayers(cfg);
 }

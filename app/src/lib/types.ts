@@ -15,6 +15,10 @@ export interface Hello {
   /** false = CIRCUITPY drive hidden, files managed over serial
    * (fs_* commands); absent on firmware < 0.4.0 */
   usb_drive?: boolean;
+  /** hardware model ("core6" | "vision6"); absent on older firmware = core6 */
+  model?: string;
+  /** GPIO names in use, key 1 first (length == key_count); absent on older firmware */
+  pins?: string[];
   layer: string;
   mode: "standalone" | "host";
 }
@@ -44,8 +48,61 @@ export interface DeviceConfig {
   busy_other?: "ignore" | "switch";
   /** false hides the CIRCUITPY drive (boot.py); the app manages files over serial */
   usb_drive?: boolean;
+  /** hardware model ("core6" | "vision6"); null/absent = firmware default (core6) */
+  model?: string | null;
+  /** per-key GPIO names (key 1 first); null = the model's default order */
+  pins?: string[] | null;
   screen: { width: number; height: number };
 }
+
+// -------------------------------------------------- models & key wiring ---
+
+export type DeviceModel = "core6" | "vision6";
+
+/** Resolve a hello/config's model; old firmware omits the field = Core 6. */
+export function deviceModel(h: { model?: string | null } | null | undefined): DeviceModel {
+  return h?.model === "vision6" ? "vision6" : "core6";
+}
+
+export const MODEL_META: Record<DeviceModel, { label: string; image: string }> = {
+  core6: { label: "MKYADA Core 6", image: "/devices/core6.png" },
+  vision6: { label: "MKYADA Vision 6", image: "/devices/vision6.png" },
+};
+
+/** Every RP2040-Zero edge pin, in the order default key wiring walks them. */
+export const EDGE_PINS = [
+  ...Array.from({ length: 16 }, (_, i) => `GP${i}`), // GP0..GP15
+  "GP26", "GP27", "GP28", "GP29",
+];
+
+/** Pins the firmware refuses for keys (Vision 6: screen/encoder/nav wiring). */
+export const RESERVED_PINS: Record<DeviceModel, string[]> = {
+  core6: ["GP16"],
+  vision6: ["GP0", "GP1", "GP2", "GP3", "GP4", "GP5", "GP6", "GP16"],
+};
+
+/** Vision 6 factory key order (key 1 = GP29, walking down the right edge). */
+export const VISION6_DEFAULT_PINS = ["GP29", "GP28", "GP27", "GP26", "GP15", "GP14"];
+
+/** Edge pins a key may be wired to on this model (reserved ones excluded). */
+export function assignablePins(model: DeviceModel): string[] {
+  const reserved = new Set(RESERVED_PINS[model]);
+  return EDGE_PINS.filter((p) => !reserved.has(p));
+}
+
+/** The model's default wiring when config.pins is null. */
+export function defaultPins(model: DeviceModel, keyCount: number): string[] {
+  if (model === "vision6") {
+    // factory order first, then any remaining assignable pins for odd builds
+    const rest = assignablePins("vision6").filter((p) => !VISION6_DEFAULT_PINS.includes(p));
+    return [...VISION6_DEFAULT_PINS, ...rest].slice(0, keyCount);
+  }
+  return assignablePins("core6").slice(0, keyCount); // GP0..GP15 then GP26..GP29
+}
+
+/** Vision 6 encoder/nav slots that can carry macros like keys do. */
+export const MODULE_SLOTS = ["enc-cw", "enc-ccw", "btn-back", "btn-confirm"] as const;
+export type ModuleSlot = (typeof MODULE_SLOTS)[number];
 
 export type MacroEvent = (
   | { delay: number; type: "key"; action: "down" | "up"; key: string; vk?: number | null }
