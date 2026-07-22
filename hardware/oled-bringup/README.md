@@ -9,14 +9,44 @@ donanımı breadboard'da doğrulamak için test araçları.
 - **Modül:** SH1106 1.3" OLED (128x64, I2C 0x3C), EC11 encoder, BACK/CONFIRM butonlar
 - **Güç:** modül SADECE 3.3V. RP2040'ın `3V3` pini kullanılır, `5V` **kullanılmaz**.
 
-### Bağlantı (I2C)
+### Tam bağlantı tablosu — ekranlı model
 
-| Modül | RP2040-Zero |
-|-------|-------------|
-| VCC   | 3V3         |
-| GND   | GND         |
-| SDA   | GP0         |
-| SCL   | GP1         |
+Bağlantı sırası **kodla birebir** ([device/demo_h.py](device/demo_h.py)). Her buton/tuşun
+bir bacağı ilgili GP pinine, diğer bacağı **ortak GND**'ye gider (dahili pull-up,
+harici direnç yok). Ayrı bir şema: [SCHEMATIC.md](SCHEMATIC.md).
+
+**OLED (SH1106, I2C 0x3C @ 400 kHz)**
+
+| Modül | RP2040-Zero | Not |
+|-------|-------------|-----|
+| VCC   | 3V3         | ⚠️ SADECE 3.3V, `5V` kullanma |
+| GND   | GND         | |
+| SDA   | GP0         | I2C data |
+| SCL   | GP1         | I2C clock |
+
+**Encoder + navigasyon butonları**
+
+| Modül | İşlev | RP2040-Zero | Kod indexi |
+|-------|-------|-------------|------------|
+| TRA   | Encoder faz A  | GP2 | — |
+| TRB   | Encoder faz B  | GP3 | — |
+| PSH   | Encoder butonu | GP4 | `K_PSH` = 0 |
+| BAK   | BACK           | GP5 | `K_BACK` = 1 |
+| CON   | CONFIRM        | GP6 | `K_CONFIRM` = 2 |
+
+**Makro tuşları** — grid gözesi = pin sırası. Yanlış sırada lehimlersen ekrandaki göze
+ile fiziksel tuş eşleşmez. `MACRO_PINS` tuple sırası:
+
+| Makro tuş | RP2040-Zero | `key_number` |
+|-----------|-------------|--------------|
+| Tuş 1 | GP29 | 0 |
+| Tuş 2 | GP28 | 1 |
+| Tuş 3 | GP27 | 2 |
+| Tuş 4 | GP26 | 3 |
+| Tuş 5 | GP15 | 4 |
+| Tuş 6 | GP14 | 5 |
+
+**RGB LED:** onboard WS2812 (`board.NEOPIXEL`), yoksa GP16 — ayrı kablo gerekmez.
 
 ## Kullanım
 
@@ -30,16 +60,6 @@ python3 hardware/oled-bringup/bringup.py inputs   # encoder + buton + nvm testi
 python3 hardware/oled-bringup/bringup.py demo     # tam OLED menu demosu
 python3 hardware/oled-bringup/bringup.py monitor  # sadece seri ciktiyi izle
 ```
-
-### Aşama 4 kablolama (encoder + butonlar)
-
-| Modül | İşlev | RP2040-Zero |
-|-------|-------|-------------|
-| TRA   | Encoder faz A | GP2 |
-| TRB   | Encoder faz B | GP3 |
-| PSH   | Encoder butonu | GP4 |
-| BAK   | BACK | GP5 |
-| CON   | CONFIRM | GP6 |
 
 Encoder/PSH iç pull-up ile okunur; BACK/CONFIRM modülde 4.7K pull-up'lı (kodda iç
 pull-up da açık, paralel — sorun değil). Ayarlar `microcontroller.nvm`'e yazılır,
