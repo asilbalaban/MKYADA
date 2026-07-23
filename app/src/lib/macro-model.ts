@@ -305,6 +305,8 @@ export function assignmentComplete(a: Assignment): boolean {
 
 /** Compile an assignment to a macro file, or null when the key is unassigned. */
 export function compileAssignment(a: Assignment, name?: string): MacroFile | null {
+  // a user-typed display name (Keys tab) overrides the auto-generated one
+  name = name ?? (a.label?.trim() || undefined);
   const base = {
     format: "mkyada-macro" as const,
     version: 2,
@@ -446,6 +448,12 @@ export function parseAssignment(m: MacroFile): Assignment {
       ...(m.variants.hold ? { hold: parseAssignmentBase(m.variants.hold) } : {}),
     };
   }
+  // A stored name that differs from what we'd auto-generate is a user
+  // override — surface it as the editable label. (Recorded macros carry
+  // their name in the assignment itself.)
+  if (m.name && a.kind !== "recorded" && compileAssignment(a)?.name !== m.name) {
+    a.label = m.name;
+  }
   return a;
 }
 
@@ -529,6 +537,7 @@ export function migrateMacro(m: MacroFile): MacroFile {
 }
 
 export function describeAssignment(a: Assignment): string {
+  if (a.kind !== "none" && a.label?.trim()) return a.label.trim();
   switch (a.kind) {
     case "none":
       return "Not assigned";

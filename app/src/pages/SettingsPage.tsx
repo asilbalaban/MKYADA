@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { getVersion } from "@tauri-apps/api/app";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { HardDrive, MicOff, Monitor, Moon, Pin, Power, Rocket, Sun } from "lucide-react";
+import { HardDrive, Monitor, Moon, Pin, Power, Rocket, Sun } from "lucide-react";
 import { ipc } from "../lib/ipc";
 import { keysCache } from "../lib/keys-cache";
 import { useDevice } from "../lib/device";
@@ -9,19 +9,16 @@ import type { UpdateInfo } from "../lib/types";
 import {
   setAlwaysOnTop,
   setAutostart,
-  setLedMicFeedback,
   setRunInBackground,
   setThemePref,
   ThemePref,
   useAlwaysOnTop,
   useAutostart,
-  useLedMicFeedback,
   useRunInBackground,
   useThemePref,
 } from "../lib/settings";
 import { Badge, Button, Card } from "../components/ui";
 import { PermissionsCard } from "../components/Permissions";
-import { SystemStatusStrip } from "../components/SystemStatus";
 import { useToast } from "../components/toast";
 import { useConfirm } from "../components/dialog";
 
@@ -215,36 +212,6 @@ function KeypadCard() {
   );
 }
 
-function FeedbackCard() {
-  const ledMic = useLedMicFeedback();
-  return (
-    <Card title="Live feedback">
-      <div className="flex flex-col gap-3">
-        <SystemStatusStrip />
-        <div className="flex items-center justify-between gap-4">
-          <div className="flex flex-col gap-0.5 text-sm">
-            <span className="text-fg font-medium">Keypad LED shows mic status</span>
-            <span className="text-xs text-fg-faint">
-              The keypad's LED turns solid red while your microphone is muted —
-              a glance tells you if you're live. Reverts the moment the app
-              disconnects.
-            </span>
-          </div>
-          <Button
-            variant={ledMic ? "primary" : "default"}
-            role="switch"
-            aria-checked={ledMic}
-            onClick={() => setLedMicFeedback(!ledMic)}
-          >
-            <MicOff size={14} aria-hidden />
-            {ledMic ? "On" : "Off"}
-          </Button>
-        </div>
-      </div>
-    </Card>
-  );
-}
-
 export function SettingsPage() {
   const [version, setVersion] = useState("");
   const [update, setUpdate] = useState<UpdateInfo | null>(null);
@@ -272,7 +239,6 @@ export function SettingsPage() {
       <AppearanceCard />
       <WindowCard />
       <KeypadCard />
-      <FeedbackCard />
       <PermissionsCard />
       <Card title="About">
         <div className="flex flex-col gap-2 text-sm text-fg">

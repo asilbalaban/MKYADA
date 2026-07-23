@@ -1,42 +1,4 @@
-//! Live system variables for feedback: CPU %, RAM, microphone mute.
-//!
-//! A background thread samples every 2 s and emits `vars:changed` to the
-//! frontend, which shows a status strip and (optionally) mirrors mic state
-//! onto the keypad LED via the serial `led` command. No data leaves the
-//! machine — this feeds the UI, nothing else.
-
-use serde::Serialize;
-use std::time::Duration;
-use tauri::{AppHandle, Emitter};
-
-#[derive(Serialize, Clone)]
-pub struct SystemVars {
-    /// total CPU load, 0–100
-    pub cpu: f32,
-    /// bytes
-    pub mem_used: u64,
-    pub mem_total: u64,
-    /// None = unknown (no default input device / unsupported platform)
-    pub mic_muted: Option<bool>,
-}
-
-pub fn start(app: AppHandle) {
-    std::thread::spawn(move || {
-        let mut sys = sysinfo::System::new();
-        loop {
-            sys.refresh_cpu_usage();
-            sys.refresh_memory();
-            let vars = SystemVars {
-                cpu: sys.global_cpu_usage(),
-                mem_used: sys.used_memory(),
-                mem_total: sys.total_memory(),
-                mic_muted: mic_muted(),
-            };
-            let _ = app.emit("vars:changed", &vars);
-            std::thread::sleep(Duration::from_secs(2));
-        }
-    });
-}
+//! Microphone mute control for "mic" key assignments.
 
 /// Whether the default input device is muted. Raw CoreAudio FFI, same
 /// pattern as permissions.rs — no crate needed.

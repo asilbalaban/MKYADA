@@ -839,7 +839,6 @@ pub fn run() {
                 let _ = w.set_title(&format!("MKYADA v{}", env!("CARGO_PKG_VERSION")));
             }
             setup_tray(app)?;
-            vars::start(app.handle().clone());
             // macOS/Linux WebView2-overlay setup: harden click-through once the
             // overlay webview signals `overlay:ready`, and pre-create it hidden
             // at startup so it warm-inits undisturbed. (Windows draws the overlay

@@ -5,12 +5,10 @@ import App from "./App";
 import {
   initAlwaysOnTop,
   initAutostart,
-  initLedMicFeedback,
   initRunInBackground,
   initTheme,
 } from "./lib/settings";
 import { initLayout } from "./lib/layout";
-import { initVariables } from "./lib/variables";
 import "./index.css";
 
 const isOverlay = getCurrentWindow().label === "overlay";
@@ -32,8 +30,6 @@ if (isOverlay) {
   initAlwaysOnTop();
   initRunInBackground();
   initAutostart();
-  initLedMicFeedback();
-  initVariables();
 }
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(

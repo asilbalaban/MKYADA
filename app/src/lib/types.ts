@@ -225,7 +225,13 @@ export type Assignment = (
   | ({ kind: "webhook" } & WebhookRequest)
   // Stream Deck-style multi action: run several actions with one press
   | { kind: "sequence"; steps: SequenceStep[] }
-) & { behavior?: AssignmentBehavior; variants?: AssignmentVariants };
+) & {
+  behavior?: AssignmentBehavior;
+  variants?: AssignmentVariants;
+  /** User-chosen display name overriding the auto-generated one — shown in
+   * the app and on the Vision 6 screen (stored as the macro file's `name`). */
+  label?: string;
+};
 
 /** One step of a sequence; `delayMs` is an extra pause AFTER the step. */
 export interface SequenceStep {

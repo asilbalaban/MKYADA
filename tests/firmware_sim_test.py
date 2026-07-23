@@ -106,6 +106,7 @@ sys.modules["terminalio"] = terminalio
 vectorio = types.ModuleType("vectorio")
 vectorio.Rectangle = lambda **k: ("rect", k)
 vectorio.Circle = lambda **k: ("circ", k)
+vectorio.Polygon = lambda **k: ("poly", k)
 sys.modules["vectorio"] = vectorio
 
 

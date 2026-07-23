@@ -160,10 +160,10 @@ class Oled:
         l.anchored_position = (x, y)
         return l
 
-    def _bold(self, g, s, x, y, scale=1):
+    def _bold(self, g, s, x, y, scale=1, font=None):
         cx = x + scale // 2
         for dx in (-1, 0, 1):
-            g.append(self._txt(s, cx + dx, y, scale=scale))
+            g.append(self._txt(s, cx + dx, y, scale=scale, font=font))
 
     def _top_bar(self, g, title):
         g.append(_rect(0, 0, self.W, 13))
@@ -263,9 +263,16 @@ class Oled:
         g = displayio.Group()
         n = layer_count + 1
         if pos < layer_count:
-            self._bold(g, layer_names[pos].upper(), self.CX, 22, scale=5)
+            # spleen caps at scale 6 are ~10% smaller than the old terminalio
+            # scale-5 letter, and y=26 leaves about the same air above the
+            # letter as between it and the position dots below
+            if self.ui_font is not terminalio.FONT:
+                self._bold(g, layer_names[pos].upper(), self.CX, 26, scale=6,
+                           font=self.ui_font)
+            else:
+                self._bold(g, layer_names[pos].upper(), self.CX, 25, scale=5)
         else:
-            g.append(self._txt("SETTINGS", self.CX, 24, scale=2))
+            g.append(self._txt(tr("settings"), self.CX, 24, scale=2))
         gap = 14 if n <= 8 else 12
         x0 = self.CX - (n - 1) * gap // 2
         for i in range(n):
@@ -332,22 +339,39 @@ class Oled:
             g.append(self._txt(line2, self.CX, 42, font=self.ui_font))
         self.paint(g)
 
+    MENU_VIS = 3  # rows that fit between the top and bottom bars
+
     def show_menu(self, title, items, sel, marked=None, action=None):
-        """Generic list menu (Settings, Font). marked = index tagged with >."""
+        """Generic list menu (Settings, Font). marked = index tagged with >.
+        Longer lists scroll: the selection stays visible and small arrows on
+        the right show there are items above/below."""
         if not self.display:
             return
         g = displayio.Group()
         self._top_bar(g, title)
-        for i, name in enumerate(items):
-            y = 22 + i * 12
+        n = len(items)
+        top = sel - self.MENU_VIS + 1 if sel >= self.MENU_VIS else 0
+        # keep the arrow strip clear of the selection rectangle
+        rw = self.W - 8 if n > self.MENU_VIS else self.W
+        for row in range(min(self.MENU_VIS, n)):
+            i = top + row
+            y = 20 + row * 12
             if i == sel:
-                g.append(_rect(0, y - 6, self.W, 12))
+                g.append(_rect(0, y - 6, rw, 12))
                 c = 0x000000
             else:
                 c = 0xFFFFFF
-            text = name if marked is None else (
-                "%s %s" % (">" if i == marked else " ", name))
+            text = items[i] if marked is None else (
+                "%s %s" % (">" if i == marked else " ", items[i]))
             g.append(self._txt(text, self.CX, y, color=c))
+        if top > 0:
+            g.append(vectorio.Polygon(pixel_shader=WHITE,
+                                      points=[(3, 0), (6, 4), (0, 4)],
+                                      x=self.W - 7, y=15))
+        if top + self.MENU_VIS < n:
+            g.append(vectorio.Polygon(pixel_shader=WHITE,
+                                      points=[(0, 0), (6, 0), (3, 4)],
+                                      x=self.W - 7, y=45))
         self._bottom_bar(g, action=action or tr("select"))
         self.paint(g)
 

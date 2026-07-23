@@ -7,6 +7,7 @@ import {
   compileAssignment,
   compileSequenceParts,
   compileVariantParts,
+  describeAssignment,
   migrateMacro,
   parseAssignment,
   sequencePartFileName,
@@ -109,6 +110,19 @@ describe("assignment round-trip", () => {
     const file = compileAssignment({ kind: "keystroke", key: "a", behavior: { on_repress: "stop" } })!;
     expect(file.settings?.on_repress).toBeUndefined();
     expect(file.settings?.hold_repeat).toBeUndefined();
+  });
+
+  it("a user label overrides the auto name and survives the round-trip", () => {
+    const file = compileAssignment({ kind: "media", usage: "volume_up", label: "Ses +" })!;
+    expect(file.name).toBe("Ses +");
+    const back = parseAssignment(file);
+    expect(back.label).toBe("Ses +");
+    expect(describeAssignment(back)).toBe("Ses +");
+  });
+
+  it("auto-generated names parse back without a label", () => {
+    const file = compileAssignment({ kind: "media", usage: "volume_up" })!;
+    expect(parseAssignment(file).label).toBeUndefined();
   });
 });
 

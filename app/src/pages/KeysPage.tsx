@@ -27,7 +27,7 @@ import { serializeForDevice } from "../lib/recorder-model";
 import { keysCache, slotKey } from "../lib/keys-cache";
 import { stashRecorderEdit } from "../lib/recorder-handoff";
 import { undoRedoFromEvent, useHistory } from "../lib/history";
-import { Button, Card, EmptyState, Spinner } from "../components/ui";
+import { Button, Card, EmptyState, Input, Spinner } from "../components/ui";
 import { isWriteCancelled, useWriteGate, writeCancelledError } from "../components/WriteProgress";
 import { useToast } from "../components/toast";
 import { Keypad } from "../components/Keypad";
@@ -524,6 +524,29 @@ export function KeysPage() {
               onChange={draftHistory.set}
               fwVersion={hello?.fw}
             />
+            {(draft ?? current) && (draft ?? current)!.kind !== "none" && (
+              <label className="flex flex-col gap-1 text-sm">
+                <span className="text-xs font-medium text-fg-muted">
+                  Display name
+                  {isVision ? " — shown on the keypad's screen" : ""}
+                </span>
+                <Input
+                  value={(draft ?? current)!.label ?? ""}
+                  placeholder={
+                    compileAssignment({ ...(draft ?? current)!, label: undefined })?.name ??
+                    "Automatic"
+                  }
+                  maxLength={40}
+                  onChange={(e) => {
+                    const base = draft ?? current!;
+                    draftHistory.set({ ...base, label: e.target.value || undefined });
+                  }}
+                />
+                <span className="text-[11px] text-fg-faint">
+                  Leave empty to use the automatic name.
+                </span>
+              </label>
+            )}
             <div className="flex justify-end gap-2">
               <Button onClick={() => setDraft(null)} disabled={!draft}>
                 Revert
