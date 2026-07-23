@@ -160,15 +160,24 @@ fn quiesce(mgr: &DeviceManager) {
     let _ = serial::send(mgr, &json!({"t": "stop"}));
 }
 
-/// Run a mutating fs op, first stopping playback, and retry the whole thing
-/// on the transient errors a still-winding-down macro leaves behind.
+/// Retry an fs op on the transient errors a still-winding-down macro leaves
+/// behind. `stop_playback` sends a `stop` before each attempt — correct for
+/// MUTATING ops (a playing macro locks the filesystem), but it must be FALSE
+/// for reads: the app reads a key's macro on every key press (to run any
+/// host-side action), and stopping playback there would abort the very macro
+/// the press just started — silently killing every standalone key while the
+/// app is connected. Reads still retry (e.g. on a screen model's transient
+/// "oom"); they just never stop playback to do it.
 fn with_recovery<T>(
     mgr: &DeviceManager,
+    stop_playback: bool,
     mut op: impl FnMut(&DeviceManager) -> Result<T, String>,
 ) -> Result<T, String> {
     let mut last = String::new();
     for attempt in 0..FS_ATTEMPTS {
-        quiesce(mgr);
+        if stop_playback {
+            quiesce(mgr);
+        }
         if attempt > 0 {
             std::thread::sleep(RETRY_BACKOFF);
         }
@@ -191,7 +200,7 @@ pub fn write_file(
     mut progress: impl FnMut(usize, usize),
 ) -> Result<(), String> {
     let path = rel(path)?;
-    with_recovery(mgr, |mgr| write_once(mgr, path, bytes, &mut progress))
+    with_recovery(mgr, true, |mgr| write_once(mgr, path, bytes, &mut progress))
 }
 
 fn write_once(
@@ -237,7 +246,7 @@ pub fn read_file(mgr: &DeviceManager, path: &str) -> Result<Vec<u8>, String> {
     // recorded macro can momentarily exhaust the fragmented heap ("oom"),
     // and the device recovers on the next attempt. Without this the read
     // fails and the app would show the key as unassigned.
-    with_recovery(mgr, |mgr| read_once(mgr, path))
+    with_recovery(mgr, false, |mgr| read_once(mgr, path))
 }
 
 fn read_once(mgr: &DeviceManager, path: &str) -> Result<Vec<u8>, String> {
@@ -267,7 +276,7 @@ fn read_once(mgr: &DeviceManager, path: &str) -> Result<Vec<u8>, String> {
 
 pub fn delete_file(mgr: &DeviceManager, path: &str) -> Result<(), String> {
     let path = rel(path)?;
-    with_recovery(mgr, |mgr| {
+    with_recovery(mgr, true, |mgr| {
         let op = Op::begin(mgr)?;
         op.send(&json!({"t": "fs_delete", "path": path}))?;
         op.expect_ok("fs_delete").map(|_| ())
