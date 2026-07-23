@@ -128,6 +128,8 @@ export interface MacroFile {
     | "combo"
     | "text"
     | "media"
+    | "scroll"
+    | "menu"
     | "recorded"
     | "launch"
     | "command"
@@ -138,6 +140,10 @@ export interface MacroFile {
   combo?: { mods: string[]; key: string };
   text?: string;
   media?: string;
+  /** scroll kind: direction + how many wheel ticks + modifiers held (HID) */
+  scroll?: { dir: ScrollDir; amount?: number; mods?: string[] };
+  /** menu kind: which on-device menu action a key drives (Vision 6) */
+  menu?: MenuAction;
   /** launch kind: app path, file path or URL — performed by the desktop app */
   target?: string;
   /** command kind: shell command line — performed by the desktop app */
@@ -203,6 +209,15 @@ export interface WebhookRequest {
  */
 export type MicMode = "toggle" | "mute" | "unmute" | "push_to_talk";
 
+/** Mouse-wheel scroll direction. up/down use the vertical wheel; left/right
+ * use horizontal pan (AC Pan) — both are hardware HID on the keypad. */
+export type ScrollDir = "up" | "down" | "left" | "right";
+
+/** A device-menu navigation action a normal key can drive on the Vision 6:
+ * the same effect as turning the encoder (left/right) or the CONFIRM / BACK
+ * buttons. Handled on the device itself, so it only means anything there. */
+export type MenuAction = "left" | "right" | "confirm" | "back";
+
 /** Per-key behavior options shared by every assignment kind. */
 export interface AssignmentBehavior {
   on_repress?: "stop" | "restart";
@@ -215,6 +230,11 @@ export type Assignment = (
   | { kind: "combo"; mods: string[]; key: string }
   | { kind: "text"; text: string }
   | { kind: "media"; usage: string }
+  // mouse-wheel scroll, optionally with modifiers held (e.g. Alt+wheel to
+  // zoom in Illustrator, Ctrl+wheel to zoom a browser) — hardware HID
+  | { kind: "scroll"; dir: ScrollDir; amount?: number; mods?: string[] }
+  // drive the Vision 6's own on-screen menu from a normal key (device-only)
+  | { kind: "menu"; action: MenuAction }
   | { kind: "recorded"; name: string; macro: MacroFile }
   // performed by the desktop app (not HID): open an app/file/URL, run a
   // command, play a sound effect

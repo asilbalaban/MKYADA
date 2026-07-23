@@ -88,6 +88,7 @@ Every event has `delay` — milliseconds to wait **before** executing it.
 { "delay": 8,   "type": "button",   "action": "down", "button": "left", "x": 960, "y": 540 }
 { "delay": 60,  "type": "button",   "action": "up",   "button": "left", "x": 960, "y": 540 }
 { "delay": 10,  "type": "scroll",   "dy": -1 }
+{ "delay": 10,  "type": "scroll",   "dy": 0, "dx": 2 }
 { "delay": 15,  "type": "consumer", "usage": "volume_up" }
 { "delay": 500, "type": "wait" }
 ```
@@ -95,8 +96,15 @@ Every event has `delay` — milliseconds to wait **before** executing it.
 - `key`: `key` is a pynput-style label (`"a"`, `"ctrl_l"`, `"f5"`, `"enter"`, …); `vk` is the optional Windows virtual-key code. Resolution order: modifier tables → `vk` → name → character (see `firmware/mkyada/hidmap.py`).
 - **Labels are positional (US physical keys)**, because HID keycodes are positional too — the OS renders them through the active keyboard layout. Recording the "." key on a Turkish-Q keyboard stores `"/"` (its US position) and still types "." on playback. The app *displays* labels through your real layout, so you never see the raw US name.
 - `button`: `left` | `right` | `middle`. Optional `x`/`y` moves the pointer first.
+- `scroll`: `dy` is vertical wheel ticks (+up / −down); `dx` is horizontal pan
+  ticks (+right / −left, via the AC Pan channel added to the mouse descriptor
+  in firmware ≥ 0.8.0). Each unit is one detent-sized report.
 - `consumer` usages: `play_pause`, `next_track`, `prev_track`, `stop`, `mute`, `volume_up`, `volume_down`, `brightness_up`, `brightness_down`.
 - `wait`: pure delay, no action.
+
+**`kind: "menu"`** (screen models) has no HID events. `"menu"` is one of
+`left` / `right` / `confirm` / `back`, and the firmware feeds it to the
+on-screen menu so a normal key acts like the encoder / CONFIRM / BACK.
 
 ## Stream layout — v4 (firmware ≥ 0.5.0, proto ≥ 4)
 

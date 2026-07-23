@@ -644,6 +644,17 @@ class App:
             self.proto.send({"t": "err", "re": "play", "code": "bad_format", "msg": path})
             return
 
+        # A "menu" macro drives the on-screen menu instead of the HID engine:
+        # a normal key acts like the encoder / CONFIRM / BACK. No-op without a
+        # display (core6 has no UI to steer), but harmless.
+        if data.get("kind") == "menu":
+            if f:
+                f.close()
+            self.proto.send({"t": "play_start", "file": path})
+            self.ui_call("inject", data.get("menu"))
+            self.proto.send({"t": "play_done", "file": path, "stopped": False})
+            return
+
         # key logic: standalone presses pick tap/double/hold themselves; the
         # chosen variant is announced so the app can run host-side variants
         # (launch/command/sound compile to empty events on the device).

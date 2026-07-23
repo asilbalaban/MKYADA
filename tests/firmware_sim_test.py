@@ -208,10 +208,25 @@ eng.play([{"delay": 0, "type": "move", "x": 960, "y": 540},
          screen={"width": 1920, "height": 1080})
 mouse = [r for r in sent_reports if r[1] == 0x02]
 cons = [r for r in sent_reports if r[0] == 0x0C]
-xy = struct.unpack("<BHHb", mouse[0][2]) if mouse else None
+# report is now buttons + X + Y + wheel + pan (7 bytes; see boot.py descriptor)
+check("mouse report is 7 bytes", all(len(r[2]) == 7 for r in mouse), str(mouse[:1]))
+xy = struct.unpack("<BHHbb", mouse[0][2]) if mouse else None
 check("abs move scaled", xy and abs(xy[1] - 16383) < 40 and abs(xy[2] - 16391) < 60, str(xy))
 check("left click down bit", any(r[2][0] & 0x01 for r in mouse))
 check("consumer volume_up", any(struct.unpack('<H', r[2])[0] == 0xE9 for r in cons), str(cons))
+
+# scroll: vertical uses the wheel byte, horizontal the pan byte
+sent_reports.clear()
+eng.play([{"delay": 0, "type": "scroll", "dy": 3}], screen=None)
+vmouse = [struct.unpack("<BHHbb", r[2]) for r in sent_reports if r[1] == 0x02]
+check("vertical scroll wheel +1 steps", sum(1 for m in vmouse if m[3] == 1) == 3, str(vmouse))
+check("vertical scroll no pan", all(m[4] == 0 for m in vmouse), str(vmouse))
+
+sent_reports.clear()
+eng.play([{"delay": 0, "type": "scroll", "dy": 0, "dx": -2}], screen=None)
+hmouse = [struct.unpack("<BHHbb", r[2]) for r in sent_reports if r[1] == 0x02]
+check("horizontal scroll pan -1 steps", sum(1 for m in hmouse if m[4] == -1) == 2, str(hmouse))
+check("horizontal scroll no wheel", all(m[3] == 0 for m in hmouse), str(hmouse))
 
 # stop mid-play
 calls = {"n": 0}
@@ -845,6 +860,24 @@ check("select mode keeps navigation", vplays == [] and ui.sel_key == 1,
 ui._labels[1] = [("x", "")] * 6
 ui.invalidate_labels("/macros/key3-b.json")
 check("invalidate drops layer b", 1 not in ui._labels)
+
+# menu-nav injected by a macro key drives the UI like the encoder/buttons
+ui.state = uimod.S_SELECT
+ui.sel_mode = True   # plain navigation grid
+ui.sel_key = 0
+ui.inject("right")
+check("inject right moves selection", ui.sel_key == 1, "sel=%d" % ui.sel_key)
+ui.inject("left")
+check("inject left moves selection", ui.sel_key == 0, "sel=%d" % ui.sel_key)
+ui.inject("confirm")
+check("inject confirm opens speed editor", ui.state == uimod.S_SPEED)
+ui.inject("back")
+check("inject back leaves speed editor", ui.state != uimod.S_SPEED)
+prev_state = ui.state
+ui.state = uimod.S_HOST
+ui.inject("right")  # ignored while app owns the screen
+check("inject ignored in host mode", ui.state == uimod.S_HOST)
+ui.state = prev_state
 
 voutbox.clear()
 vapp.handle_msg({"t": "host_enter"})

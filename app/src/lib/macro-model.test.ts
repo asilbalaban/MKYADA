@@ -8,6 +8,7 @@ import {
   compileSequenceParts,
   compileVariantParts,
   describeAssignment,
+  kindRequiresHost,
   migrateMacro,
   parseAssignment,
   sequencePartFileName,
@@ -56,6 +57,13 @@ const CASES: [string, Assignment][] = [
   ["combo", { kind: "combo", mods: ["CTRL", "SHIFT"], key: "s" }],
   ["text", { kind: "text", text: "Hello, World! 123" }],
   ["media", { kind: "media", usage: "play_pause" }],
+  ["scroll up", { kind: "scroll", dir: "up", amount: 3 }],
+  ["scroll down", { kind: "scroll", dir: "down", amount: 5 }],
+  ["scroll left", { kind: "scroll", dir: "left", amount: 3 }],
+  ["scroll right", { kind: "scroll", dir: "right", amount: 2 }],
+  ["scroll with modifiers (zoom)", { kind: "scroll", dir: "up", amount: 1, mods: ["ALT"] }],
+  ["menu confirm", { kind: "menu", action: "confirm" }],
+  ["menu left", { kind: "menu", action: "left" }],
   ["recorded", { kind: "recorded", name: "demo", macro: recordedMacro }],
   ["launch", { kind: "launch", target: "https://example.com" }],
   ["command", { kind: "command", command: "echo hi" }],
@@ -110,6 +118,38 @@ describe("assignment round-trip", () => {
     const file = compileAssignment({ kind: "keystroke", key: "a", behavior: { on_repress: "stop" } })!;
     expect(file.settings?.on_repress).toBeUndefined();
     expect(file.settings?.hold_repeat).toBeUndefined();
+  });
+
+  it("vertical scroll compiles to a wheel tick", () => {
+    const f = compileAssignment({ kind: "scroll", dir: "up", amount: 4 })!;
+    expect(f.events).toEqual([{ delay: 0, type: "scroll", dy: 4 }]);
+    const down = compileAssignment({ kind: "scroll", dir: "down", amount: 4 })!;
+    expect(down.events).toEqual([{ delay: 0, type: "scroll", dy: -4 }]);
+  });
+
+  it("horizontal scroll compiles to a pan tick (dx)", () => {
+    const right = compileAssignment({ kind: "scroll", dir: "right", amount: 2 })!;
+    expect(right.events).toEqual([{ delay: 0, type: "scroll", dy: 0, dx: 2 }]);
+    const left = compileAssignment({ kind: "scroll", dir: "left", amount: 2 })!;
+    expect(left.events).toEqual([{ delay: 0, type: "scroll", dy: 0, dx: -2 }]);
+  });
+
+  it("scroll with a modifier wraps the tick in mod down/up (Alt+wheel zoom)", () => {
+    const f = compileAssignment({ kind: "scroll", dir: "up", amount: 1, mods: ["ALT"] })!;
+    expect(f.events).toEqual([
+      { delay: 0, type: "key", action: "down", key: "alt_l" },
+      { delay: 10, type: "scroll", dy: 1 },
+      { delay: 10, type: "key", action: "up", key: "alt_l" },
+    ]);
+  });
+
+  it("menu assignment is device-only with no HID events", () => {
+    const f = compileAssignment({ kind: "menu", action: "confirm" })!;
+    expect(f.kind).toBe("menu");
+    expect(f.menu).toBe("confirm");
+    expect(f.events).toEqual([]);
+    expect(kindRequiresHost("menu")).toBe(false);
+    expect(kindRequiresHost("scroll")).toBe(false);
   });
 
   it("a user label overrides the auto name and survives the round-trip", () => {

@@ -88,9 +88,15 @@ class Engine:
         self._kbd_report()
 
     # --- mouse ---
-    def _mouse_report(self, wheel=0):
+    def _mouse_report(self, wheel=0, pan=0):
+        # Report layout matches boot.py ABS_MOUSE_DESCRIPTOR:
+        # buttons(1) X(2) Y(2) wheel(1, vertical) pan(1, AC Pan / horizontal).
+        # Older firmware built a 6-byte report (no pan); the display models
+        # ship this 7-byte one. usb_hid rejects a wrong length, so the
+        # descriptor and in_report_lengths in boot.py must stay in lockstep.
         self.mouse.send_report(struct.pack(
-            "<BHHb", self.buttons & 0x07, self.mx & 0x7FFF, self.my & 0x7FFF, wheel))
+            "<BHHbb", self.buttons & 0x07, self.mx & 0x7FFF, self.my & 0x7FFF,
+            wheel, pan))
 
     def move(self, x, y):
         self.mx = max(0, min(32767, int(x * 32767 / self.sw)))
@@ -107,12 +113,19 @@ class Engine:
             self.buttons &= ~bit & 0xFF
         self._mouse_report()
 
-    def scroll(self, dy):
-        step = 1 if dy > 0 else -1
+    def scroll(self, dy, dx=0):
+        """Vertical (dy) and/or horizontal (dx) wheel ticks. Each unit is one
+        detent-sized report, sent a few ms apart so hosts register every step
+        (a single big report gets coalesced into one notch by some apps)."""
+        vstep = 1 if dy > 0 else -1
         for _ in range(min(abs(int(dy)), 10)):
-            self._mouse_report(wheel=step)
+            self._mouse_report(wheel=vstep)
             time.sleep(0.01)
-        self._mouse_report(0)
+        hstep = 1 if dx > 0 else -1
+        for _ in range(min(abs(int(dx)), 10)):
+            self._mouse_report(pan=hstep)
+            time.sleep(0.01)
+        self._mouse_report(0, 0)
 
     # --- consumer (media keys) ---
     def consumer_tap(self, usage_name):
@@ -189,7 +202,7 @@ class Engine:
                     self.button(ev.get("button", "left"), ev.get("action") == "down",
                                 ev.get("x"), ev.get("y"))
                 elif t == "scroll":
-                    self.scroll(ev.get("dy", 0))
+                    self.scroll(ev.get("dy", 0), ev.get("dx", 0))
                 elif t == "consumer":
                     self.consumer_tap(ev.get("usage", ""))
                 # "wait" and unknown types: delay already applied above
