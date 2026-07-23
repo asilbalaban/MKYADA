@@ -2,9 +2,11 @@
 #
 # Presents the RP2040-Zero to the host as:
 #   HID keyboard (stock, report ID 1)
-#   HID absolute-position mouse (custom, report ID 2) — same report layout as the
-#     Raspberry Pi prototype gadget that was proven to work inside games:
+#   HID absolute-position mouse (custom, report ID 2) — same absolute layout as
+#     the Raspberry Pi prototype gadget proven to work inside games, plus a
+#     horizontal-scroll byte:
 #     buttons(1B) + X(16-bit abs 0..32767) + Y(16-bit abs) + wheel(8-bit rel)
+#       + pan(8-bit rel, AC Pan — horizontal scroll)
 #   HID consumer control (stock, report ID 3) — media keys
 #   CDC serial: console (debug/REPL) + data (app protocol)
 #   Mass storage: CIRCUITPY drive enabled by default; `"usb_drive": false` in
@@ -64,7 +66,14 @@ ABS_MOUSE_DESCRIPTOR = bytes((
     0x75, 0x10,        #     Report Size (16)
     0x95, 0x02,        #     Report Count (2)
     0x81, 0x02,        #     Input (Data, Variable, Absolute)
-    0x09, 0x38,        #     Usage (Wheel)
+    0x09, 0x38,        #     Usage (Wheel) — vertical
+    0x15, 0x81,        #     Logical Minimum (-127)
+    0x25, 0x7F,        #     Logical Maximum (127)
+    0x75, 0x08,        #     Report Size (8)
+    0x95, 0x01,        #     Report Count (1)
+    0x81, 0x06,        #     Input (Data, Variable, Relative)
+    0x05, 0x0C,        #     Usage Page (Consumer)
+    0x0A, 0x38, 0x02,  #     Usage (AC Pan) — horizontal scroll
     0x15, 0x81,        #     Logical Minimum (-127)
     0x25, 0x7F,        #     Logical Maximum (127)
     0x75, 0x08,        #     Report Size (8)
@@ -79,7 +88,7 @@ abs_mouse = usb_hid.Device(
     usage_page=0x01,
     usage=0x02,
     report_ids=(2,),
-    in_report_lengths=(6,),
+    in_report_lengths=(7,),  # buttons + X + Y + wheel + pan (see engine.py)
     out_report_lengths=(0,),
 )
 

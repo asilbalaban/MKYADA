@@ -7,8 +7,10 @@ import type {
   DeviceConfig,
   MacroEvent,
   MacroFile,
+  MenuAction,
   MicMode,
   ModuleSlot,
+  ScrollDir,
   SequenceStep,
   WebhookRequest,
 } from "./types";
@@ -148,7 +150,7 @@ export function effectiveLayers(cfg: {
 // are pre-compiled to sibling "part" files it plays over serial (still
 // hardware HID), host steps it performs itself.
 
-const HID_KINDS = new Set(["keystroke", "combo", "text", "media", "recorded"]);
+const HID_KINDS = new Set(["keystroke", "combo", "text", "media", "scroll", "recorded"]);
 
 export function stepIsHid(step: SequenceStep): boolean {
   return HID_KINDS.has(step.a.kind);
@@ -249,6 +251,33 @@ function comboEvents(mods: string[], key: string): MacroEvent[] {
   return events;
 }
 
+export const SCROLL_DEFAULT_AMOUNT = 3;
+
+/** HID events for a scroll: hold any modifiers, send one wheel/pan tick event
+ * (the firmware repeats it `amount` steps), then release the modifiers in
+ * reverse. up/down drive the vertical wheel (dy); left/right the horizontal
+ * pan (dx). */
+function scrollEvents(dir: ScrollDir, amount: number, mods: string[]): MacroEvent[] {
+  const events: MacroEvent[] = [];
+  for (const m of mods) {
+    events.push({ delay: events.length ? 10 : 0, type: "key", action: "down", key: MOD_TO_LABEL[m] ?? m.toLowerCase() });
+  }
+  const n = Math.max(1, Math.min(20, Math.round(amount)));
+  const tick: MacroEvent =
+    dir === "up"
+      ? { delay: mods.length ? 10 : 0, type: "scroll", dy: n }
+      : dir === "down"
+        ? { delay: mods.length ? 10 : 0, type: "scroll", dy: -n }
+        : dir === "right"
+          ? { delay: mods.length ? 10 : 0, type: "scroll", dy: 0, dx: n }
+          : { delay: mods.length ? 10 : 0, type: "scroll", dy: 0, dx: -n };
+  events.push(tick);
+  for (const m of [...mods].reverse()) {
+    events.push({ delay: 10, type: "key", action: "up", key: MOD_TO_LABEL[m] ?? m.toLowerCase() });
+  }
+  return events;
+}
+
 function textEvents(text: string): MacroEvent[] {
   const events: MacroEvent[] = [];
   for (const ch of text) {
@@ -273,6 +302,23 @@ function textEvents(text: string): MacroEvent[] {
   }
   if (events.length) events[0] = { ...events[0], delay: 0 };
   return events;
+}
+
+const SCROLL_ARROW: Record<ScrollDir, string> = { up: "↑", down: "↓", left: "←", right: "→" };
+const MENU_LABEL: Record<MenuAction, string> = {
+  left: "Menu ←",
+  right: "Menu →",
+  confirm: "Menu confirm",
+  back: "Menu back",
+};
+
+function scrollName(dir: ScrollDir, mods: string[]): string {
+  const pre = mods.length ? `${mods.join("+")}+` : "";
+  return `${pre}Scroll ${dir}`;
+}
+
+function menuName(action: MenuAction): string {
+  return MENU_LABEL[action];
 }
 
 /** True when the assignment has everything it needs to be saved. */
@@ -336,6 +382,21 @@ export function compileAssignment(a: Assignment, name?: string): MacroFile | nul
           media: a.usage,
           events: [{ delay: 0, type: "consumer", usage: a.usage }],
         };
+      case "scroll": {
+        const amount = a.amount ?? SCROLL_DEFAULT_AMOUNT;
+        const mods = a.mods ?? [];
+        return {
+          ...base,
+          name: name ?? scrollName(a.dir, mods),
+          kind: "scroll",
+          scroll: { dir: a.dir, amount, ...(mods.length ? { mods } : {}) },
+          events: scrollEvents(a.dir, amount, mods),
+        };
+      }
+      case "menu":
+        // device-only: empty events; the firmware routes a "menu" macro to
+        // the on-screen UI instead of the HID engine
+        return { ...base, name: name ?? menuName(a.action), kind: "menu", menu: a.action, events: [] };
       case "recorded":
         return { ...migrateMacro(a.macro), name: name ?? a.name };
       // launch/command can't be expressed as HID: stored as no-op files
@@ -476,6 +537,16 @@ function parseAssignmentBase(m: MacroFile): Assignment {
       return { kind: "text", text: m.text ?? "", ...behavior };
     case "media":
       return { kind: "media", usage: m.media ?? "", ...behavior };
+    case "scroll":
+      return {
+        kind: "scroll",
+        dir: m.scroll?.dir ?? "up",
+        ...(m.scroll?.amount ? { amount: m.scroll.amount } : {}),
+        ...(m.scroll?.mods?.length ? { mods: m.scroll.mods } : {}),
+        ...behavior,
+      };
+    case "menu":
+      return { kind: "menu", action: m.menu ?? "confirm", ...behavior };
     case "launch":
       return { kind: "launch", target: m.target ?? "", ...behavior };
     case "command":
@@ -549,6 +620,13 @@ export function describeAssignment(a: Assignment): string {
       return `Type "${a.text.length > 18 ? a.text.slice(0, 18) + "…" : a.text}"`;
     case "media":
       return a.usage.replace(/_/g, " ");
+    case "scroll": {
+      const pre = a.mods?.length ? `${a.mods.map(modifierDisplay).join("+")} ` : "";
+      const n = a.amount && a.amount !== SCROLL_DEFAULT_AMOUNT ? ` ×${a.amount}` : "";
+      return `${pre}Scroll ${SCROLL_ARROW[a.dir]}${n}`;
+    }
+    case "menu":
+      return MENU_LABEL[a.action];
     case "recorded":
       return `▶ ${a.name}`;
     case "launch": {

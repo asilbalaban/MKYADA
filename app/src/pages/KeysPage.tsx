@@ -533,6 +533,9 @@ export function KeysPage() {
             <AssignmentEditor
               value={draft ?? current ?? { kind: "none" }}
               onChange={draftHistory.set}
+              // device-menu nav only makes sense on a screen model, and only
+              // for a physical key (module slots already ARE the menu controls)
+              allowMenu={isVision && typeof selected === "number"}
               fwVersion={hello?.fw}
             />
             {(draft ?? current) && (draft ?? current)!.kind !== "none" && (

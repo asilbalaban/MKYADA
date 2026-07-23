@@ -3,7 +3,7 @@
 
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { ArrowDown, ArrowUp, FolderOpen, Keyboard, Mic, Play, Plus, Send, Trash2, Volume2 } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, FolderOpen, Keyboard, Mic, Play, Plus, Send, Trash2, Volume2 } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { SOUND_EXTENSIONS, playSound } from "../lib/sound";
 import { readTextFile } from "../lib/fs";
@@ -14,6 +14,7 @@ import {
   MIC_MODE_LABELS,
   MODIFIERS,
   MODIFIER_CODE_TO_KEY,
+  SCROLL_DEFAULT_AMOUNT,
   compileAssignment,
   describeAssignment,
   keyFromEvent,
@@ -33,6 +34,8 @@ const KINDS: { value: Assignment["kind"]; label: string }[] = [
   { value: "combo", label: "Key combination" },
   { value: "text", label: "Type text" },
   { value: "media", label: "Media key" },
+  { value: "scroll", label: "Mouse scroll / zoom" },
+  { value: "menu", label: "Device menu (screen models)" },
   { value: "recorded", label: "Recorded macro (JSON)" },
   { value: "launch", label: "Open app / file / URL" },
   { value: "command", label: "Run terminal command" },
@@ -43,6 +46,13 @@ const KINDS: { value: Assignment["kind"]; label: string }[] = [
 ];
 
 const HTTP_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"] as const;
+
+const SCROLL_DIRS = [
+  { dir: "up" as const, label: "Up", icon: <ArrowUp size={14} aria-hidden /> },
+  { dir: "down" as const, label: "Down", icon: <ArrowDown size={14} aria-hidden /> },
+  { dir: "left" as const, label: "Left", icon: <ArrowLeft size={14} aria-hidden /> },
+  { dir: "right" as const, label: "Right", icon: <ArrowRight size={14} aria-hidden /> },
+];
 
 /**
  * "Press the key you want" capture control — replaces the 60-option dropdown.
@@ -114,6 +124,7 @@ export function AssignmentEditor({
   value,
   onChange,
   nested = false,
+  allowMenu = false,
   fwVersion,
 }: {
   value: Assignment;
@@ -121,12 +132,20 @@ export function AssignmentEditor({
   /** Rendering a sequence step or key-logic variant: no nesting, no
    * behavior options, no key logic of its own. */
   nested?: boolean;
+  /** Offer the device-menu action (only meaningful on a screen model, and
+   * never inside a sequence step). */
+  allowMenu?: boolean;
   /** Connected keypad's firmware version — used to warn when key logic
    * needs a firmware update (variants shipped with 0.3.0). */
   fwVersion?: string;
 }) {
   const [importError, setImportError] = useState("");
-  const kinds = nested ? KINDS.filter((k) => k.value !== "sequence") : KINDS;
+  const kinds = KINDS.filter(
+    (k) =>
+      (k.value !== "sequence" || !nested) &&
+      // menu nav is device-only and pointless inside a sequence
+      (k.value !== "menu" || (allowMenu && !nested)),
+  );
   const hasVariants = !!(value.variants?.double || value.variants?.hold);
 
   async function importMacro() {
@@ -161,6 +180,8 @@ export function AssignmentEditor({
               else if (kind === "combo") onChange({ kind: "combo", mods: [], key: "" });
               else if (kind === "text") onChange({ kind: "text", text: "" });
               else if (kind === "media") onChange({ kind: "media", usage: "play_pause" });
+              else if (kind === "scroll") onChange({ kind: "scroll", dir: "up" });
+              else if (kind === "menu") onChange({ kind: "menu", action: "confirm" });
               else if (kind === "launch") onChange({ kind: "launch", target: "" });
               else if (kind === "command") onChange({ kind: "command", command: "" });
               else if (kind === "sound") onChange({ kind: "sound", file: "" });
@@ -263,6 +284,90 @@ export function AssignmentEditor({
               </option>
             ))}
           </Select>
+        </Field>
+      )}
+
+      {value.kind === "scroll" && (
+        <>
+          <Field label="Direction">
+            <div className="flex gap-2">
+              {SCROLL_DIRS.map((d) => (
+                <Button
+                  key={d.dir}
+                  variant={value.dir === d.dir ? "primary" : "default"}
+                  onClick={() => onChange({ ...value, dir: d.dir })}
+                >
+                  {d.icon} {d.label}
+                </Button>
+              ))}
+            </div>
+          </Field>
+          <Field label="Amount (wheel ticks per press)">
+            <div className="flex items-center gap-2">
+              <Input
+                type="number"
+                min={1}
+                max={20}
+                className="w-20"
+                value={value.amount ?? SCROLL_DEFAULT_AMOUNT}
+                onChange={(e) =>
+                  onChange({
+                    ...value,
+                    amount: Math.max(1, Math.min(20, Number(e.target.value) || SCROLL_DEFAULT_AMOUNT)),
+                  })
+                }
+              />
+              <span className="text-xs text-fg-faint">1–20 notches</span>
+            </div>
+          </Field>
+          <Field label="Hold modifiers (optional — e.g. Alt to zoom in Illustrator)">
+            <div className="flex gap-2">
+              {MODIFIERS.map((m) => {
+                const on = (value.mods ?? []).includes(m);
+                return (
+                  <Button
+                    key={m}
+                    variant={on ? "primary" : "default"}
+                    title={m === "WIN" ? "Windows key / macOS Command" : undefined}
+                    onClick={() =>
+                      onChange({
+                        ...value,
+                        mods: on
+                          ? (value.mods ?? []).filter((x) => x !== m)
+                          : [...(value.mods ?? []), m],
+                      })
+                    }
+                  >
+                    {modifierDisplay(m)}
+                  </Button>
+                );
+              })}
+            </div>
+          </Field>
+          {(value.dir === "left" || value.dir === "right") && (
+            <p className="text-xs text-fg-faint">
+              Horizontal scroll uses the mouse's pan channel — most apps that
+              support side-scrolling (timelines, wide canvases) pick it up.
+            </p>
+          )}
+        </>
+      )}
+
+      {value.kind === "menu" && (
+        <Field label="Device menu action">
+          <Select
+            value={value.action}
+            onChange={(e) => onChange({ ...value, action: e.target.value as typeof value.action })}
+          >
+            <option value="left">Scroll menu ← (encoder left)</option>
+            <option value="right">Scroll menu → (encoder right)</option>
+            <option value="confirm">Confirm (encoder press)</option>
+            <option value="back">Back</option>
+          </Select>
+          <p className="text-xs text-fg-faint mt-1">
+            Lets a normal key drive the on-screen menu, just like the wheel and
+            the CONFIRM / BACK buttons. Only does something on a screen model.
+          </p>
         </Field>
       )}
 

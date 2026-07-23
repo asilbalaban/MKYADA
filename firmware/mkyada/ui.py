@@ -444,9 +444,26 @@ class Ui:
         d = self._enc_delta()
         ev = self.nav.events.get()
         press = ev.key_number if (ev and ev.pressed) else None
+        self._dispatch(now, d, press)
+
+    def inject(self, action):
+        """A macro key mapped to a device-menu action drives the UI as if the
+        encoder or CONFIRM/BACK were used (menu left/right/confirm/back)."""
+        if self.state in (S_HOST, S_PLAYING):
+            return  # menu nav is meaningless while playing / app-owned
+        now = time.monotonic()
+        if action == "left":
+            self._dispatch(now, -1, None)
+        elif action == "right":
+            self._dispatch(now, 1, None)
+        elif action == "confirm":
+            self._dispatch(now, 0, K_CONFIRM)
+        elif action == "back":
+            self._dispatch(now, 0, K_BACK)
+
+    def _dispatch(self, now, d, press):
         if d or press is not None:
             self.activity_at = now
-
         if self.state == S_HOME:
             self._st_home(now, d, press)
         elif self.state == S_SELECT:
