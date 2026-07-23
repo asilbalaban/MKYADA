@@ -13,7 +13,7 @@ import {
 import { OverlayView } from "./components/OverlayView";
 import { DeviceProvider, useDevice } from "./lib/device";
 import { ProfilesProvider } from "./lib/profiles";
-import { deviceName, onDevnamesChanged } from "./lib/devnames";
+import { deviceName, displayName, onDevnamesChanged } from "./lib/devnames";
 import { useLayoutVersion } from "./lib/layout";
 import { NavContext, Page } from "./lib/nav";
 import { ipc } from "./lib/ipc";
@@ -21,7 +21,6 @@ import type { UpdateInfo } from "./lib/types";
 import { Badge, Button } from "./components/ui";
 import { ToastProvider } from "./components/toast";
 import { ConfirmProvider } from "./components/dialog";
-import { LedFeedback } from "./components/SystemStatus";
 import { WriteGateProvider } from "./components/WriteProgress";
 import { PermissionsBanner } from "./components/Permissions";
 import { DevicesPage } from "./pages/DevicesPage";
@@ -130,10 +129,11 @@ function Shell() {
                 ) : status === "busy" ? (
                   <Badge tone="amber">● Busy — macro playing</Badge>
                 ) : (
-                  <Badge tone="green">
-                    ● {nickname.trim() || `${hello.key_count}-key keypad`} connected
-                  </Badge>
+                  <Badge tone="green">● connected</Badge>
                 )}
+                <span className="text-xs font-medium text-fg truncate max-w-full pl-0.5">
+                  {displayName(nickname, hello.uid)}
+                </span>
                 {hello.layer_key && (
                   <Badge tone="blue">Layer {layer.toUpperCase()}</Badge>
                 )}
@@ -199,7 +199,6 @@ export default function App() {
         <ToastProvider>
           <ConfirmProvider>
             <WriteGateProvider>
-              <LedFeedback />
               <Shell />
             </WriteGateProvider>
           </ConfirmProvider>

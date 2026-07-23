@@ -19,7 +19,17 @@ export const ipc = {
   driveList: (drive: string, path: string) => invoke<string[]>("drive_list", { drive, path }),
   driveEject: (drive: string) => invoke<void>("drive_eject", { drive }),
   checkUpdate: () => invoke<UpdateInfo>("check_update"),
+  /** Boards in RPI-RP2 bootloader mode (BOOT held while plugging in). */
+  listBootloaderDrives: () => invoke<BootloaderDrive[]>("list_bootloader_drives"),
+  /** Copy the bundled CircuitPython UF2 onto a bootloader drive. The drive
+   * vanishing right after (board reboots into CircuitPython) is expected. */
+  provisionFlashUf2: (mount: string) => invoke<void>("provision_flash_uf2", { mount }),
 };
+
+export interface BootloaderDrive {
+  path: string;
+  boardId: string;
+}
 
 export function onDeviceMsg(cb: (msg: Record<string, unknown>) => void): Promise<UnlistenFn> {
   return listen("device:msg", (e) => cb(e.payload as Record<string, unknown>));

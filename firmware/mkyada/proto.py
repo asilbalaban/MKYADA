@@ -45,6 +45,12 @@ class Proto:
                         msgs.append(msg)
                 except ValueError:
                     pass
+                except MemoryError:
+                    # a big fs_write line didn't fit the heap right now —
+                    # drop it (the sender times out and retries); the keypad
+                    # itself must never die on serial traffic
+                    import gc
+                    gc.collect()
         if len(self.buf) > self.MAX_LINE:  # garbage guard
             self.buf = bytearray()
         return msgs

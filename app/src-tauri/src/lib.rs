@@ -9,6 +9,7 @@ mod recorder;
 mod updater;
 mod vars;
 
+use device::bootloader;
 use device::drive::{self, DriveInfo};
 use device::serial::{self, DeviceInfo, DeviceManager};
 use device::serialfs;
@@ -176,11 +177,23 @@ async fn drive_write(
 /// large macros take seconds and the UI shows a progress bar (issue #10).
 /// Mounted-drive writes are a single fast fs call; no progress to report.
 fn write_to_device(app: &AppHandle, drive: &str, rel: &str, content: &str) -> Result<(), String> {
+    write_to_device_bytes(app, drive, rel, content.as_bytes())
+}
+
+/// Byte-level variant for content that isn't guaranteed UTF-8 (BDF fonts,
+/// vendored libraries). The serial path is binary-safe already (base64);
+/// drive writes route through drive::write_file_bytes.
+fn write_to_device_bytes(
+    app: &AppHandle,
+    drive: &str,
+    rel: &str,
+    content: &[u8],
+) -> Result<(), String> {
     // a cancel request belongs to the previous transfer, not this one
     serialfs::clear_cancel();
     if serialfs::is_serial(drive) {
         let mgr = app.state::<DeviceManager>();
-        serialfs::write_file(&mgr, rel, content.as_bytes(), |written, total| {
+        serialfs::write_file(&mgr, rel, content, |written, total| {
             let _ = app.emit(
                 "drive:progress",
                 serde_json::json!({ "file": rel, "written": written, "total": total }),
@@ -200,9 +213,9 @@ fn drive_write_recovering(
     app: &AppHandle,
     drive: &str,
     rel: &str,
-    content: &str,
+    content: &[u8],
 ) -> Result<(), String> {
-    let err = match drive::write_file(drive, rel, content) {
+    let err = match drive::write_file_bytes(drive, rel, content) {
         Ok(()) => return Ok(()),
         // The board was busy servicing playback so the USB write timed out
         // (os error 121). Stop any macro and retry — the drive-path analog of
@@ -217,7 +230,7 @@ fn drive_write_recovering(
                     return Err(serialfs::CANCELLED.to_string());
                 }
                 std::thread::sleep(Duration::from_millis(300));
-                match drive::write_file(drive, rel, content) {
+                match drive::write_file_bytes(drive, rel, content) {
                     Ok(()) => return Ok(()),
                     // still busy, or the stalled write left the volume
                     // read-only — keep trying, then fall through to the reset
@@ -268,7 +281,7 @@ fn drive_write_recovering(
             None => Some(drive.to_string()),
         };
         let Some(target) = target else { continue };
-        match drive::write_file(&target, rel, content) {
+        match drive::write_file_bytes(&target, rel, content) {
             Ok(()) => return Ok(()),
             // mid-mount or still read-only — keep polling until the deadline
             Err(e) => last = e,
@@ -567,9 +580,31 @@ fn firmware_bundled_version(app: AppHandle) -> Result<String, String> {
         .map_err(|e| e.to_string())
 }
 
+/// Every file under `dir`, as forward-slash paths rooted at `prefix`
+/// (e.g. "lib/adafruit_display_text/label.py"). Recursive; dotfiles
+/// (.DS_Store and friends) are left behind on purpose.
+fn walk_files(dir: &std::path::Path, prefix: &str) -> Result<Vec<String>, String> {
+    let mut out = Vec::new();
+    let entries = std::fs::read_dir(dir).map_err(|e| format!("{prefix}: {e}"))?;
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if name.starts_with('.') {
+            continue;
+        }
+        let rel = format!("{prefix}/{name}");
+        if entry.path().is_dir() {
+            out.extend(walk_files(&entry.path(), &rel)?);
+        } else {
+            out.push(rel);
+        }
+    }
+    Ok(out)
+}
+
 /// Copy the bundled firmware onto the device — via its drive, or over
-/// serial when the drive is hidden. Never touches the user's config.json,
-/// macros/ or lib/ — only code + modules + VERSION. Uses the same read-only
+/// serial when the drive is hidden. Never touches the user's config.json or
+/// macros/ — only code + modules + vendored lib/ + fonts/ + VERSION (and
+/// settings.toml when the bundle ships one). Uses the same read-only
 /// recovery as drive_write, so it's async off the main thread.
 #[tauri::command]
 async fn firmware_update(app: AppHandle, drive: String) -> Result<Vec<String>, String> {
@@ -584,6 +619,13 @@ async fn firmware_update(app: AppHandle, drive: String) -> Result<Vec<String>, S
             write_to_device(&app, &drive, name, &content)?;
             written.push(name.to_string());
         }
+        // CircuitPython reads settings.toml at boot; optional in the bundle.
+        if src.join("settings.toml").is_file() {
+            let content = std::fs::read_to_string(src.join("settings.toml"))
+                .map_err(|e| format!("settings.toml: {e}"))?;
+            write_to_device(&app, &drive, "settings.toml", &content)?;
+            written.push("settings.toml".to_string());
+        }
         let modules = std::fs::read_dir(src.join("mkyada")).map_err(|e| e.to_string())?;
         for entry in modules.flatten() {
             let file = entry.file_name().to_string_lossy().into_owned();
@@ -594,7 +636,43 @@ async fn firmware_update(app: AppHandle, drive: String) -> Result<Vec<String>, S
             write_to_device(&app, &drive, &format!("mkyada/{file}"), &content)?;
             written.push(format!("mkyada/{file}"));
         }
+        // Vendored CircuitPython libraries and fonts ship with the firmware
+        // and must match the code that imports them — install every file,
+        // preserving the directory layout. BDF fonts aren't guaranteed to be
+        // valid UTF-8, so these go through the bytes path.
+        for dir in ["lib", "fonts"] {
+            for rel in walk_files(&src.join(dir), dir)? {
+                let content = std::fs::read(src.join(&rel)).map_err(|e| format!("{rel}: {e}"))?;
+                write_to_device_bytes(&app, &drive, &rel, &content)
+                    .map_err(|e| format!("{rel}: {e}"))?;
+                written.push(rel);
+            }
+        }
         Ok(written)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// UF2 bootloader drives currently mounted (a blank or BOOTSEL-held RP2040)
+/// — the targets for provisioning a factory-fresh board.
+#[tauri::command]
+fn list_bootloader_drives() -> Vec<bootloader::BootDriveInfo> {
+    bootloader::list_drives()
+}
+
+/// Flash the bundled CircuitPython UF2 onto a bootloader drive. The board
+/// reboots the moment the copy lands (see device::bootloader), so this runs
+/// off the main thread and treats the drive vanishing mid-flush as success.
+#[tauri::command]
+async fn provision_flash_uf2(app: AppHandle, mount: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let dir = app
+            .path()
+            .resolve("circuitpython", tauri::path::BaseDirectory::Resource)
+            .map_err(|e| e.to_string())?;
+        let uf2 = bootloader::bundled_uf2(&dir)?;
+        bootloader::flash_uf2(&uf2, &mount)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -761,7 +839,6 @@ pub fn run() {
                 let _ = w.set_title(&format!("MKYADA v{}", env!("CARGO_PKG_VERSION")));
             }
             setup_tray(app)?;
-            vars::start(app.handle().clone());
             // macOS/Linux WebView2-overlay setup: harden click-through once the
             // overlay webview signals `overlay:ready`, and pre-create it hidden
             // at startup so it warm-inits undisturbed. (Windows draws the overlay
@@ -899,6 +976,8 @@ pub fn run() {
             app_restart,
             firmware_bundled_version,
             firmware_update,
+            list_bootloader_drives,
+            provision_flash_uf2,
             overlay_show,
             overlay_hide,
             window_set_pin,

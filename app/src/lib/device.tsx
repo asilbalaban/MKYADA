@@ -88,7 +88,10 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
         setReloading(false);
       }
       if (msg.t === "layer") setLayer(String((msg as { layer?: string }).layer ?? "a"));
-      if (msg.t === "btn") {
+      // Key presses carry a numeric `key`; Vision 6 nav buttons reuse t:"btn"
+      // with a `slot` instead (and t:"enc" for the wheel) — those only go
+      // through the generic fan-out above.
+      if (msg.t === "btn" && typeof (msg as { key?: unknown }).key === "number") {
         setLayer(String((msg as unknown as BtnEvent).layer ?? "a"));
         btnSubs.current.forEach((cb) => cb(msg as unknown as BtnEvent));
       }

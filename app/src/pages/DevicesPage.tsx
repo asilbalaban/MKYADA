@@ -4,9 +4,11 @@
 
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { RotateCcw, Usb } from "lucide-react";
+import { CirclePlus, RotateCcw, Usb } from "lucide-react";
 import { ipc } from "../lib/ipc";
 import { isSerialDrive, useDevice } from "../lib/device";
+import { useNav } from "../lib/nav";
+import { MODEL_META, deviceModel } from "../lib/types";
 import {
   RememberedDevice,
   displayName,
@@ -15,17 +17,21 @@ import {
   writeNameToDevice,
 } from "../lib/devnames";
 import { Badge, Button, Card, EmptyState, Field, Input } from "../components/ui";
+import { ProductImage } from "../components/ProductImage";
+import { ProvisionWizard } from "../components/ProvisionWizard";
 import { useToast } from "../components/toast";
 import { useConfirm } from "../components/dialog";
 
 export function DevicesPage({ onConnected }: { onConnected: () => void }) {
   const { scanning, devices, scan, connect, port, hello, drive, disconnect, send } = useDevice();
+  const nav = useNav();
   const toast = useToast();
   const confirm = useConfirm();
   const [remembered, setRemembered] = useState<Record<string, RememberedDevice>>({});
   const [nickname, setNickname] = useState("");
   const [bundledFw, setBundledFw] = useState("");
   const [updating, setUpdating] = useState(false);
+  const [provisioning, setProvisioning] = useState(false);
 
   async function refreshRemembered() {
     setRemembered(await rememberedDevices());
@@ -137,11 +143,14 @@ export function DevicesPage({ onConnected }: { onConnected: () => void }) {
         {port && hello ? (
           <div className="flex flex-col gap-3">
             <div className="flex items-center gap-3">
-              <span className="w-3 h-3 rounded-full bg-success animate-pulse" />
-              <span className="text-lg font-semibold text-fg">
-                {displayName(remembered[hello.uid]?.name, hello.uid)}
-              </span>
-              <Badge tone="green">USB · connected</Badge>
+              <ProductImage model={deviceModel(hello)} className="w-16 h-16" />
+              <div className="flex items-center gap-3">
+                <span className="w-3 h-3 rounded-full bg-success animate-pulse" />
+                <span className="text-lg font-semibold text-fg">
+                  {displayName(remembered[hello.uid]?.name, hello.uid)}
+                </span>
+                <Badge tone="green">USB · connected</Badge>
+              </div>
             </div>
             <div className="flex items-end gap-2">
               <Field label="Nickname (e.g. Klavye 1)">
@@ -154,6 +163,8 @@ export function DevicesPage({ onConnected }: { onConnected: () => void }) {
               <Button onClick={() => void saveNickname()}>Save name</Button>
             </div>
             <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-sm text-fg-muted">
+              <span>Model</span>
+              <span className="text-fg">{MODEL_META[deviceModel(hello)].label}</span>
               <span>Firmware</span>
               <span className="text-fg">
                 v{hello.fw}
@@ -220,12 +231,14 @@ export function DevicesPage({ onConnected }: { onConnected: () => void }) {
               >
                 <div className="flex items-center gap-3">
                   <span className="w-2.5 h-2.5 rounded-full bg-accent" />
+                  <ProductImage model={deviceModel(d.hello)} className="w-9 h-9" />
                   <div className="flex flex-col">
                     <span className="text-sm font-semibold text-fg">
                       {displayName(remembered[d.hello.uid]?.name, d.hello.uid)}
                     </span>
                     <span className="text-xs text-fg-faint">
-                      USB · fw v{d.hello.fw} · {d.hello.key_count} keys · {d.port}
+                      {MODEL_META[deviceModel(d.hello)].label} · fw v{d.hello.fw} ·{" "}
+                      {d.hello.key_count} keys · {d.port}
                     </span>
                   </div>
                 </div>
@@ -241,6 +254,32 @@ export function DevicesPage({ onConnected }: { onConnected: () => void }) {
               </li>
             ))}
           </ul>
+        )}
+      </Card>
+
+      <Card
+        title="Set up a new board"
+        actions={
+          !provisioning && (
+            <Button onClick={() => setProvisioning(true)}>
+              <CirclePlus size={14} aria-hidden /> Set up a new board
+            </Button>
+          )
+        }
+      >
+        {provisioning ? (
+          <ProvisionWizard
+            onDone={() => {
+              setProvisioning(false);
+              nav("setup");
+            }}
+            onCancel={() => setProvisioning(false)}
+          />
+        ) : (
+          <p className="text-fg-muted text-sm">
+            Got a blank RP2040-Zero? This flashes CircuitPython and the MKYADA firmware onto it —
+            no tools needed.
+          </p>
         )}
       </Card>
 

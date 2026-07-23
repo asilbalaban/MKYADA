@@ -106,37 +106,6 @@ export function useRunInBackground(): boolean {
   );
 }
 
-// ---------------------------------------------------------- LED feedback ---
-// Mirror mic-mute state onto the keypad's status LED (solid red while the
-// default microphone is muted). Sent over serial; the firmware drops the
-// override the moment the app disconnects.
-
-let ledMicFeedback = false;
-const lmfListeners = new Set<() => void>();
-
-export function initLedMicFeedback() {
-  void getSetting("ledMicFeedback", false).then((stored) => {
-    ledMicFeedback = stored;
-    lmfListeners.forEach((l) => l());
-  });
-}
-
-export function setLedMicFeedback(on: boolean) {
-  ledMicFeedback = on;
-  void setSetting("ledMicFeedback", on);
-  lmfListeners.forEach((l) => l());
-}
-
-export function useLedMicFeedback(): boolean {
-  return useSyncExternalStore(
-    (cb) => {
-      lmfListeners.add(cb);
-      return () => lmfListeners.delete(cb);
-    },
-    () => ledMicFeedback,
-  );
-}
-
 let autostart = false;
 const asListeners = new Set<() => void>();
 
