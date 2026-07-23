@@ -242,6 +242,7 @@ class Ui:
         path = self.app.macro_path_for(key0 + 1, l)
         tmp = path + ".part"
         speed = tenths / 10.0
+        gc.collect()  # a big recorded macro gets rewritten below; start clean
         try:
             f = open(path, "rb")
         except OSError:
@@ -313,10 +314,16 @@ class Ui:
         l = self.app.layer
         self.oled.load_grid_font(self.font_idx, self._glyphs_for(l))
         self._labels.clear()  # re-split with the real font metrics
+        # Boot straight into the last active layer's macro grid, not the layer
+        # picker: the common case is "use the keypad", and the picker still
+        # sits one BACK away. Avoids the boot-time picker feeling stuck while
+        # the first layer's labels load.
         self.home_pos = l
-        self.state = S_HOME
+        self.sel_key = 0
+        self.sel_mode = False
+        self.state = S_SELECT
         self.activity_at = time.monotonic()
-        self._draw_home()
+        self._draw_grid()
 
     def _glyphs_for(self, l):
         pairs = self.labels(l)

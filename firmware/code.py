@@ -73,9 +73,12 @@ MACRO_FORMATS = ("mkyada-macro", "asil-macro")
 LAYER_NAMES = "abcdefgh"
 # Raw bytes per fs_chunk line (base64 inflates 4/3, must stay under MAX_LINE).
 # Bigger chunks mean fewer ack round-trips; but on vision6 the display stack
-# fragments the heap, so large contiguous line allocations can MemoryError —
-# halve the chunk there and trade a little transfer speed for stability.
-FS_CHUNK = 4096 if MODELS[MODEL]["display"] else 8192
+# fragments the heap, so each chunk's transient base64 + JSON buffers (~1.4x
+# the raw size, several copies live at once) can MemoryError on a contiguous
+# allocation. 1KB keeps the whole per-chunk peak tiny, which is what lets the
+# app read a big recorded (mouse-path) macro back off a screen model at all;
+# the extra ack round-trips are ~ms on CDC. Core 6 has the whole heap free.
+FS_CHUNK = 1024 if MODELS[MODEL]["display"] else 8192
 FS_ACK_TIMEOUT_S = 3.0
 
 DEFAULT_CONFIG = {
@@ -382,6 +385,7 @@ class App:
                 pass
 
     def fs_list(self, msg):
+        gc.collect()
         path = "/" + str(msg.get("path", "")).strip("/")
         entries = []
         try:
@@ -400,6 +404,7 @@ class App:
         path = self.fs_path(msg)
         if not path:
             return self.fs_err("fs_read", "bad_path", msg.get("path"))
+        gc.collect()  # compact the heap before the transfer's transient buffers
         try:
             f = open(path, "rb")
         except OSError as e:
@@ -412,13 +417,24 @@ class App:
                 data = b2a_base64(chunk).decode().strip() if chunk else ""
                 self.proto.send({"t": "fs_chunk", "path": path, "seq": seq,
                                  "data": data, "eof": eof})
+                # free this chunk's buffers before the next read so the heap
+                # stays compact — a big recorded macro is many chunks and the
+                # display stack leaves little contiguous room on vision6
+                chunk = data = None
+                gc.collect()
                 if eof:
                     break
                 if not self.wait_fs_ack():
                     break  # app went away mid-read
                 seq += 1
+        except MemoryError:
+            # never let a read take the keypad down (which would repaint the
+            # console onto the OLED) — tell the app so it can retry
+            gc.collect()
+            self.fs_err("fs_read", "oom", "out of memory")
         finally:
             f.close()
+            gc.collect()
 
     def wait_fs_ack(self):
         """Flow control for fs_read: one chunk in flight at a time."""

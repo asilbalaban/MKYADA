@@ -619,6 +619,27 @@ def fs_section():
     app.handle_msg({"t": "fs_read", "path": fs_rel + "/nope.json"})
     check("fs_read missing -> not_found", outbox[-1].get("code") == "not_found", str(outbox[-1:]))
 
+    # a MemoryError mid-read reports oom instead of propagating (which would
+    # crash the loop and repaint the console onto the OLED)
+    outbox.clear()
+    _orig_send = app.proto.send
+    _calls = {"n": 0}
+
+    def _boom(obj):
+        if obj.get("t") == "fs_chunk":
+            _calls["n"] += 1
+            raise MemoryError("simulated")
+        _orig_send(obj)
+
+    app.proto.send = _boom
+    app.wait_fs_ack = lambda: True
+    app.handle_msg({"t": "fs_read", "path": fs_rel + "/macros/key1.json"})
+    app.proto.send = _orig_send
+    del app.wait_fs_ack
+    check("fs_read oom -> err not crash",
+          _calls["n"] == 1 and outbox and outbox[-1].get("code") == "oom",
+          str(outbox[-1:]))
+
     # list + delete
     outbox.clear()
     app.handle_msg({"t": "fs_list", "path": fs_rel + "/macros"})
@@ -799,6 +820,11 @@ ui.invalidate_labels()
 check("slot found on layer a", bool(ui.slots(0)["enc-cw"]))
 check("slot layer b falls back to a", ui.slots(1)["enc-cw"] == vapp.slot_path("enc-cw", 0))
 check("slot unassigned is None", ui.slots(0)["btn-back"] is None)
+
+# boot goes straight to the active layer's grid, not the layer picker
+ui.oled.load_grid_font = lambda *a, **k: None
+ui.start()
+check("boot lands on grid not home", ui.state == uimod.S_SELECT)
 
 vplays = []
 vapp.play_file = lambda path, trigger=None, **k: vplays.append(path)

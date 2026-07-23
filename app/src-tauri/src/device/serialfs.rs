@@ -147,6 +147,8 @@ fn is_transient(e: &str) -> bool {
     e.contains("os error 121") // Windows serial write stalled (device busy)
         || e.contains("did not answer in time") // our reply timeout
         || e.contains("busy playing a macro") // firmware's explicit busy reply
+        || e.contains("oom") // screen model briefly out of contiguous heap —
+        // it gc's and the retry lands (a big recorded macro read on vision6)
 }
 
 /// Stop any macro playing so the filesystem is actually free. Sending `stop`
@@ -231,6 +233,14 @@ fn write_once(
 
 pub fn read_file(mgr: &DeviceManager, path: &str) -> Result<Vec<u8>, String> {
     let path = rel(path)?;
+    // Retry the whole read on transient errors: on a screen model a big
+    // recorded macro can momentarily exhaust the fragmented heap ("oom"),
+    // and the device recovers on the next attempt. Without this the read
+    // fails and the app would show the key as unassigned.
+    with_recovery(mgr, |mgr| read_once(mgr, path))
+}
+
+fn read_once(mgr: &DeviceManager, path: &str) -> Result<Vec<u8>, String> {
     let op = Op::begin(mgr)?;
     op.send(&json!({"t": "fs_read", "path": path}))?;
     let mut out = Vec::new();

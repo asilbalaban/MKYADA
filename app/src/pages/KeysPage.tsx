@@ -140,13 +140,18 @@ export function KeysPage() {
     setAssignments(new Map());
     setPending(new Set(slots.map((s) => slotKey(s.k, s.l))));
     setLoadTotal(slots.length);
+    setStatus("");
     const snapshot = new Map<string, Assignment>();
+    const failed: string[] = [];
     for (const s of slots) {
       let a: Assignment | undefined;
       try {
         a = parseAssignment(parseDeviceMacro(await ipc.driveRead(drive.path, s.file)));
       } catch {
-        // unreadable slot — treat as unassigned
+        // The file is in the listing but couldn't be read/parsed. It is NOT
+        // unassigned — say so instead of silently showing a blank key (a
+        // large recorded macro on a screen model used to fail here).
+        failed.push(slotTitle(s.k));
       }
       if (seq !== reloadSeq.current) return;
       const loaded = a;
@@ -159,6 +164,12 @@ export function KeysPage() {
         next.delete(slotKey(s.k, s.l));
         return next;
       });
+    }
+    if (seq !== reloadSeq.current) return;
+    if (failed.length) {
+      setStatus(
+        `Couldn't read the saved macro for ${failed.join(", ")} — it's still on the keypad. Try Refresh.`,
+      );
     }
     keysCache.set(drive.path, { config, assignments: snapshot });
   }, [drive]);
