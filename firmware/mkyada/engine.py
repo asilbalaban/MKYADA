@@ -88,15 +88,19 @@ class Engine:
         self._kbd_report()
 
     # --- mouse ---
-    def _mouse_report(self, wheel=0, pan=0):
-        # Report layout matches boot.py ABS_MOUSE_DESCRIPTOR:
-        # buttons(1) X(2) Y(2) wheel(1, vertical) pan(1, AC Pan / horizontal).
-        # Older firmware built a 6-byte report (no pan); the display models
-        # ship this 7-byte one. usb_hid rejects a wrong length, so the
-        # descriptor and in_report_lengths in boot.py must stay in lockstep.
+    # Two reports on the mouse interface (boot.py ABS_MOUSE_DESCRIPTOR):
+    # pointer (id 2) carries buttons + absolute X/Y, scroll (id 4) carries
+    # the relative wheel/pan bytes ONLY. Absolute X/Y in a scroll report
+    # would re-assert the last known position and teleport the cursor to
+    # wherever the previous macro left it (screen center after boot).
+    # usb_hid rejects a wrong length, so these packs and boot.py's
+    # in_report_lengths must stay in lockstep.
+    def _mouse_report(self):
         self.mouse.send_report(struct.pack(
-            "<BHHbb", self.buttons & 0x07, self.mx & 0x7FFF, self.my & 0x7FFF,
-            wheel, pan))
+            "<BHH", self.buttons & 0x07, self.mx & 0x7FFF, self.my & 0x7FFF), 2)
+
+    def _wheel_report(self, wheel=0, pan=0):
+        self.mouse.send_report(struct.pack("<bb", wheel, pan), 4)
 
     def move(self, x, y):
         self.mx = max(0, min(32767, int(x * 32767 / self.sw)))
@@ -113,19 +117,41 @@ class Engine:
             self.buttons &= ~bit & 0xFF
         self._mouse_report()
 
+    SCROLL_MAX_TICKS = 20  # per event/burst; matches the app's amount clamp
+
     def scroll(self, dy, dx=0):
         """Vertical (dy) and/or horizontal (dx) wheel ticks. Each unit is one
         detent-sized report, sent a few ms apart so hosts register every step
-        (a single big report gets coalesced into one notch by some apps)."""
+        (a single big report gets coalesced into one notch by some apps).
+        The cursor never moves: scroll reports carry no X/Y."""
         vstep = 1 if dy > 0 else -1
-        for _ in range(min(abs(int(dy)), 10)):
-            self._mouse_report(wheel=vstep)
-            time.sleep(0.01)
+        for _ in range(min(abs(int(dy)), self.SCROLL_MAX_TICKS)):
+            self._wheel_report(wheel=vstep)
+            time.sleep(0.008)
         hstep = 1 if dx > 0 else -1
-        for _ in range(min(abs(int(dx)), 10)):
-            self._mouse_report(pan=hstep)
-            time.sleep(0.01)
-        self._mouse_report(0, 0)
+        for _ in range(min(abs(int(dx)), self.SCROLL_MAX_TICKS)):
+            self._wheel_report(pan=hstep)
+            time.sleep(0.008)
+
+    def wheel_burst(self, dy=0, dx=0, mod_names=None):
+        """One serial-commanded scroll burst ({"t":"scroll"}, proto v6):
+        optional modifiers held around the ticks (Ctrl+wheel = zoom). The
+        app drives profile wheel slots through this — no file playback, so
+        a spin feels like a real wheel, and it decides the acceleration."""
+        from mkyada.hidmap import MOD_NAME
+        added = 0
+        for m in mod_names or ():
+            added |= MOD_NAME.get(str(m).lower(), 0)
+        if added:
+            self.mods |= added
+            self._kbd_report()
+            time.sleep(0.01)  # let the host see the modifier before the ticks
+        try:
+            self.scroll(int(dy or 0), int(dx or 0))
+        finally:
+            if added:
+                self.mods &= ~added & 0xFF
+                self._kbd_report()
 
     # --- consumer (media keys) ---
     def consumer_tap(self, usage_name):
@@ -139,9 +165,14 @@ class Engine:
     def release_all(self):
         self.mods = 0
         self.keys = []
-        self.buttons = 0
         self._kbd_report()
-        self._mouse_report()
+        # Only touch the mouse when there is a button to release: the pointer
+        # report is absolute, so sending it "just in case" teleports the
+        # cursor to the last macro position (screen center after boot) even
+        # for keyboard-only macros.
+        if self.buttons:
+            self.buttons = 0
+            self._mouse_report()
 
     # --- direct combo (serial "keys" command / tiny bindings) ---
     def tap_combo(self, mod_names, key_label, hold_ms=30):

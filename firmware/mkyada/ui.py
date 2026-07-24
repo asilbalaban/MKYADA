@@ -407,9 +407,30 @@ class Ui:
         return "".join(a + b for a, b in pairs)
 
     def on_label(self):
-        """The app pushed (or cleared) its profile label for the band."""
-        if self.state == S_SELECT and self.app.config["show_profile"]:
+        """The app pushed (or cleared) its profile label / key names."""
+        if self.state == S_HOST:
+            self._draw_host()
+        elif self.state == S_SELECT and self.app.config["show_profile"]:
             self._draw_grid()
+
+    def _draw_host(self):
+        """Host-mode screen: the active profile's six key names as a grid
+        (pushed by the app in the "label" message, proto v6) so the user
+        sees what the keys do — not just that an app owns them. Falls back
+        to the plain "Connected to app" text when the app sent no names."""
+        keys = self.app.host_keys
+        if not keys:
+            self.oled.show_host()
+            return
+        labels = []
+        chars = set()
+        for i in range(6):
+            name = keys[i] if i < len(keys) and keys[i] else "K%d" % (i + 1)
+            pair = self._split_name(name)
+            labels.append(pair)
+            chars |= set(pair[0]) | set(pair[1])
+        self.oled.ensure_glyphs("".join(chars))
+        self.oled.show_grid(labels, None, False, band=self._band())
 
     def on_layer(self):
         if self.state in (S_HOME, S_SELECT):
@@ -438,7 +459,7 @@ class Ui:
             if self.state != S_HOST:
                 self.prev_state = S_SELECT
                 self.state = S_HOST
-                self.oled.show_host()
+                self._draw_host()
         elif self.state == S_HOST:
             self.state = S_SELECT
             self._drain_inputs()

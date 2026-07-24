@@ -1,4 +1,16 @@
-# MKYADA serial protocol (v5)
+# MKYADA serial protocol (v6)
+
+v6 (firmware 0.10.0) adds:
+- `{"t":"scroll"}` — direct wheel ticks with optional modifiers. The app
+  drives profile wheel slots through this instead of per-detent `play`
+  round-trips, and applies its own acceleration (Settings → Wheel
+  acceleration), so a spin feels like a real mouse wheel.
+- `label.keys` — the profile's six key names; the Vision 6 host-mode screen
+  shows them as a grid instead of the bare "Connected to app" text.
+- The mouse HID interface is split into two reports (pointer id 2: buttons +
+  absolute X/Y; scroll id 4: wheel + pan). Scrolling no longer re-asserts
+  the last absolute position, which used to teleport the cursor to screen
+  center. Needs a power-cycle after a firmware update (boot.py re-runs).
 
 v5 adds `hold: true` on `play`: for a plain single-key macro the device
 presses the HID key and **keeps it down until `stop`** (or until the app goes
@@ -80,7 +92,8 @@ STANDALONE ──(host_enter)──► HOST ──(host_leave | CDC disconnect |
 | `{"t":"fs_read","path":"macros/key1.json"}` | v3. Stream the file back as `fs_chunk` messages; the host must answer each non-final chunk with `{"t":"fs_ack"}` (one chunk in flight) |
 | `{"t":"fs_write","path":"macros/key1.json","seq":0,"data":"<base64>","eof":false}` | v3. Chunked upload (≤3 KB raw per chunk); every chunk is acknowledged with `ok`. Written to `<path>.part`, renamed into place on `eof` — a dropped transfer never corrupts the target. Needs a writable filesystem, i.e. `usb_drive: false` (otherwise `err readonly`) |
 | `{"t":"fs_delete","path":"macros/key1.json"}` | v3. Delete a file; replies `ok` |
-| `{"t":"label","text":"Photoshop"}` | fw 0.9.0, Vision 6. Name of the app's active profile (or any short text, ≤24 chars) for the grid band shown when config `show_profile` is on. Empty text clears it; the device also drops it on app disconnect. Replies `ok` |
+| `{"t":"label","text":"Photoshop","keys":["Zoom in","Zoom out","Undo","","",""]}` | fw 0.9.0, Vision 6. Name of the app's active profile (≤24 chars) for the grid band shown when config `show_profile` is on. Since v6 the optional `keys` (6 strings, ≤24 chars each) are the profile's key names — the host-mode screen draws them as a grid. Empty text / absent keys clear; the device also drops both on app disconnect. Replies `ok` |
+| `{"t":"scroll","dy":4,"dx":0,"mods":["ctrl_l"]}` | v6. Direct wheel ticks: `dy` vertical, `dx` horizontal (sign = direction, ≤20 per burst), optional `mods` held around the burst (Ctrl+wheel = zoom). No file, no `play_start`/`play_done` — the profile-wheel fast path. Replies `ok`, or `err hid` if the USB stack rejects the report |
 | `{"t":"pin_detect","on":true}` | fw 0.7.0. Key-wiring wizard: normal key handling is suspended, every non-reserved edge GPIO is watched and edges stream back as `pin` messages. Auto-disarms after 120 s, on app disconnect, or on `reload`. `{"on":false}` restores the keys |
 
 ## Device → Host

@@ -67,7 +67,9 @@ gc.collect()  # the display stack litters the heap; start the app compacted
 
 DEBOUNCE_S = 0.02
 PING_TIMEOUT_S = 5.0
-PROTO_VERSION = 5  # v5: "play" accepts hold:true (key held until "stop");
+PROTO_VERSION = 6  # v6: direct "scroll" command (app-accelerated wheel) and
+                   # "label" carries the profile's key names (host-mode grid);
+                   # v5: "play" accepts hold:true (key held until "stop");
                    # v4: streamed JSONL macro files (full-rate playback);
                    # v3: fs_* file management over serial (hidden-drive mode)
 MACRO_FORMATS = ("mkyada-macro", "asil-macro")
@@ -171,6 +173,7 @@ class App:
         self.pin_watch = None  # ("names", Buttons) while pin-detect mode is on
         self.pin_watch_until = 0.0
         self.host_label = None  # app-pushed profile/app label for the band
+        self.host_keys = None  # app-pushed profile key names (host-mode grid)
         self.ui = None  # vision6 menu module (encoder + OLED state machine)
         if OLED and Ui:
             try:
@@ -350,14 +353,38 @@ class App:
                 self.stop_pin_watch()
             self.proto.send({"t": "ok", "re": "pin_detect"})
         elif t == "label":
-            # the app's active profile / foreground-app label for the grid
-            # band (config show_profile). Empty text clears; cleared
-            # automatically when the app disconnects.
+            # the app's active profile: its name for the grid band (config
+            # show_profile) and, since proto v6, its six key names — shown
+            # as a grid on the host-mode screen instead of the bare
+            # "Connected to app" text. Empty text / absent keys clear;
+            # cleared automatically when the app disconnects.
             text = str(msg.get("text") or "")[:24] or None
+            keys = msg.get("keys")
+            if isinstance(keys, list) and keys:
+                keys = [str(k or "")[:24] for k in keys[:6]]
+                if not any(keys):
+                    keys = None
+            else:
+                keys = None
             self.proto.send({"t": "ok", "re": "label"})
-            if text != self.host_label:
+            if text != self.host_label or keys != self.host_keys:
                 self.host_label = text
+                self.host_keys = keys
                 self.ui_call("on_label")
+        elif t == "scroll":
+            # direct wheel ticks (proto v6): the app drives profile wheel
+            # slots through this with host-side acceleration — no file, no
+            # play_start/done round-trip, so a spin feels like a real wheel
+            try:
+                self.engine.wheel_burst(msg.get("dy"), msg.get("dx"),
+                                        msg.get("mods"))
+            except (ValueError, TypeError) as e:
+                # garbage numbers, or the USB stack rejected the report
+                # (boot.py descriptor older than engine.py — power-cycle)
+                self.proto.send({"t": "err", "re": "scroll", "code": "hid",
+                                 "msg": str(e)})
+            else:
+                self.proto.send({"t": "ok", "re": "scroll"})
         elif t == "led":
             # app feedback color (e.g. mic muted -> red); "off" restores the
             # normal LED grammar. Cleared automatically on app disconnect.
@@ -917,8 +944,9 @@ class App:
             if self.led.override and not self.proto.connected:
                 self.led.clear_override()
             # ...and neither must its profile label on the band
-            if self.host_label and not self.proto.connected:
+            if (self.host_label or self.host_keys) and not self.proto.connected:
                 self.host_label = None
+                self.host_keys = None
                 self.ui_call("on_label")
             # a half-received upload must not leak its file handle either
             if self.upload and not self.proto.connected:

@@ -32,6 +32,7 @@ import type {
   Assignment,
   DriveInfo,
   ForegroundInfo,
+  Hello,
   ModuleSlot,
   Profile,
   SequenceStep,
@@ -45,14 +46,17 @@ import {
   compileSequenceParts,
   compileVariantParts,
   macroFileName,
+  MOD_TO_LABEL,
   parseDeviceMacro,
   profileKeySlot,
   profileMacroFileName,
+  SCROLL_DEFAULT_AMOUNT,
   sequenceIsPureHid,
   sequencePartFileName,
   stepIsHid,
   variantPartFileName,
 } from "./macro-model";
+import { getWheelAccel } from "./settings";
 import { serializeForDevice } from "./recorder-model";
 
 /** Perform a computer-side key action (Stream Deck style): open an
@@ -126,6 +130,8 @@ export function ProfilesProvider({ children }: { children: ReactNode }) {
   const { port, drive, hello, send, onBtn, onMsg } = useDevice();
   const driveRef = useRef<DriveInfo | null>(null);
   driveRef.current = drive;
+  const helloRef = useRef<Hello | null>(null);
+  helloRef.current = hello;
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [foreground, setForeground] = useState<ForegroundInfo>({ exe: "", title: "" });
   const [enabled, setEnabledState] = useState(true);
@@ -160,11 +166,23 @@ export function ProfilesProvider({ children }: { children: ReactNode }) {
   }, [enabled, paused, port, profiles, foreground]);
 
   // keep the keypad's grid band (config show_profile) naming the active
-  // profile; empty text clears it. Old firmware ignores the message, and the
-  // device drops the label by itself when the app disconnects.
+  // profile; empty text clears it. Since proto v6 the message also carries
+  // the profile's six key names — the host-mode screen shows them as a grid
+  // instead of the bare "Connected to app" text. Old firmware ignores the
+  // message, and the device drops everything on app disconnect.
   useEffect(() => {
     if (!port) return;
-    void send({ t: "label", text: activeProfile?.name ?? "" }).catch(() => {});
+    const keys = activeProfile
+      ? [1, 2, 3, 4, 5, 6].map((n) => {
+          const a = activeProfile.keys[String(n)];
+          return (a && a.kind !== "none" && compileAssignment(a)?.name) || "";
+        })
+      : undefined;
+    void send({
+      t: "label",
+      text: activeProfile?.name ?? "",
+      ...(keys?.some(Boolean) ? { keys } : {}),
+    }).catch(() => {});
   }, [port, activeProfile, send]);
 
   // hold host mode while a profile is active; release it otherwise.
@@ -496,6 +514,9 @@ export function ProfilesProvider({ children }: { children: ReactNode }) {
   // issue #19 made it a standalone slot too.
   const encPending = useRef(new Map<ModuleSlot, number>());
   const encPumping = useRef(false);
+  // wheel acceleration state: last event time + direction (a direction
+  // change or a slow turn resets the multiplier)
+  const encAccel = useRef({ t: 0, slot: "" });
 
   const handleEncoder = useCallback(
     (dir: "enc-cw" | "enc-ccw", detents: number) => {
@@ -512,6 +533,29 @@ export function ProfilesProvider({ children }: { children: ReactNode }) {
       }
       if (a.kind === "sequence" && !sequenceIsPureHid(a.steps)) {
         return void runSequence(dir, a.steps, mainFile);
+      }
+      // Scroll/zoom rides the direct serial scroll (proto v6): no per-detent
+      // file playback round-trips, so a spin feels like a real wheel — and a
+      // fast spin multiplies the step (same tiers as the device's own
+      // speed-editor acceleration; Settings → Wheel acceleration).
+      if (a.kind === "scroll" && (helloRef.current?.proto ?? 0) >= 6) {
+        const now = performance.now();
+        const st = encAccel.current;
+        const dt = now - st.t;
+        const same = st.slot === dir;
+        st.t = now;
+        st.slot = dir;
+        let per = 1;
+        if (getWheelAccel() && same) per = detents > 1 || dt < 40 ? 3 : dt < 90 ? 2 : 1;
+        const n = Math.max(
+          1,
+          Math.min(20, Math.round((a.amount ?? SCROLL_DEFAULT_AMOUNT) * detents * per)),
+        );
+        const mods = (a.mods ?? []).map((m) => MOD_TO_LABEL[m] ?? m.toLowerCase());
+        const dy = a.dir === "up" ? n : a.dir === "down" ? -n : 0;
+        const dx = a.dir === "right" ? n : a.dir === "left" ? -n : 0;
+        void send({ t: "scroll", dy, dx, ...(mods.length ? { mods } : {}) }).catch(() => {});
+        return;
       }
       // HID kinds (scroll/zoom, keystroke, …): one play per detent, like the
       // firmware's own standalone encoder slots. The firmware drops play

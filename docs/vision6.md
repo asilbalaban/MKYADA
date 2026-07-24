@@ -61,8 +61,12 @@ and the OLED fonts (`fonts/`).
   band toggles live in `config.json` (rewritten on-device, like the app
   does) so the app always shows the same values. All survive power cycles
   and firmware updates.
-- **Connected to app** — shown while the desktop app holds host mode; key,
-  encoder and button events stream to the app.
+- **Host mode** (a per-app profile is active) — key, encoder and button
+  events stream to the app. Since fw 0.10.0 the screen shows the active
+  profile's six key names as a grid (the app pushes them over serial), with
+  the band on top if enabled — so you can see what the keys do, not just
+  that an app owns them. Falls back to a plain "Connected to app" note on
+  older apps.
 
 ## Custom wheel / button assignments
 

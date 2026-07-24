@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { getVersion } from "@tauri-apps/api/app";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { AppWindow, HardDrive, Layers, Monitor, Moon, Pin, Power, Rocket, Sun } from "lucide-react";
+import { AppWindow, Gauge, HardDrive, Layers, Monitor, Moon, Pin, Power, Rocket, Sun } from "lucide-react";
 import { ipc } from "../lib/ipc";
 import { keysCache } from "../lib/keys-cache";
 import { useDevice } from "../lib/device";
@@ -11,11 +11,13 @@ import {
   setAutostart,
   setRunInBackground,
   setThemePref,
+  setWheelAccel,
   ThemePref,
   useAlwaysOnTop,
   useAutostart,
   useRunInBackground,
   useThemePref,
+  useWheelAccel,
 } from "../lib/settings";
 import { Badge, Button, Card } from "../components/ui";
 import { PermissionsCard } from "../components/Permissions";
@@ -133,6 +135,7 @@ function KeypadCard() {
   const vision = deviceModel(hello) === "vision6";
   // firmware < 0.9.0 has no grid band (config show_layer / show_profile)
   const bandSupported = hello?.show_layer !== undefined;
+  const wheelAccel = useWheelAccel();
   const [bandBusy, setBandBusy] = useState<"show_layer" | "show_profile" | null>(null);
 
   /** Flip a band toggle in the keypad's config.json and reload the firmware. */
@@ -291,6 +294,26 @@ function KeypadCard() {
             </div>
           </>
         )}
+
+        <div className="flex items-center justify-between gap-4">
+          <div className="flex flex-col gap-0.5 text-sm">
+            <span className="text-fg font-medium">Wheel acceleration</span>
+            <span className="text-xs text-fg-faint">
+              Profile wheel actions (scroll, zoom): spinning the wheel fast multiplies
+              the step, like a real mouse wheel — a quick flick zooms right in. Off =
+              exactly one step per detent, however fast the spin.
+            </span>
+          </div>
+          <Button
+            variant={wheelAccel ? "primary" : "default"}
+            role="switch"
+            aria-checked={wheelAccel}
+            onClick={() => setWheelAccel(!wheelAccel)}
+          >
+            <Gauge size={14} aria-hidden />
+            {wheelAccel ? "On" : "Off"}
+          </Button>
+        </div>
       </div>
     </Card>
   );

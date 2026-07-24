@@ -2,11 +2,13 @@
 #
 # Presents the RP2040-Zero to the host as:
 #   HID keyboard (stock, report ID 1)
-#   HID absolute-position mouse (custom, report ID 2) — same absolute layout as
-#     the Raspberry Pi prototype gadget proven to work inside games, plus a
-#     horizontal-scroll byte:
-#     buttons(1B) + X(16-bit abs 0..32767) + Y(16-bit abs) + wheel(8-bit rel)
-#       + pan(8-bit rel, AC Pan — horizontal scroll)
+#   HID absolute-position mouse (custom) — two reports on one interface:
+#     report 2 (pointer): buttons(1B) + X(16-bit abs 0..32767) + Y(16-bit abs)
+#     report 4 (scroll): wheel(8-bit rel, vertical) + pan(8-bit rel, AC Pan)
+#     Split on purpose: X/Y are absolute, so a wheel tick riding the same
+#     report would re-assert the last known position and teleport the cursor
+#     (a scroll-only macro used to jump the mouse to screen center). A
+#     dedicated scroll report leaves the cursor where the user has it.
 #   HID consumer control (stock, report ID 3) — media keys
 #   CDC serial: console (debug/REPL) + data (app protocol)
 #   Mass storage: CIRCUITPY drive enabled by default; `"usb_drive": false` in
@@ -44,7 +46,7 @@ ABS_MOUSE_DESCRIPTOR = bytes((
     0x05, 0x01,        # Usage Page (Generic Desktop)
     0x09, 0x02,        # Usage (Mouse)
     0xA1, 0x01,        # Collection (Application)
-    0x85, 0x02,        #   Report ID (2)
+    0x85, 0x02,        #   Report ID (2) — pointer
     0x09, 0x01,        #   Usage (Pointer)
     0xA1, 0x00,        #   Collection (Physical)
     0x05, 0x09,        #     Usage Page (Buttons)
@@ -66,6 +68,10 @@ ABS_MOUSE_DESCRIPTOR = bytes((
     0x75, 0x10,        #     Report Size (16)
     0x95, 0x02,        #     Report Count (2)
     0x81, 0x02,        #     Input (Data, Variable, Absolute)
+    0xC0,              #   End Collection
+    0x85, 0x04,        #   Report ID (4) — scroll (no X/Y: cursor stays put)
+    0x09, 0x01,        #   Usage (Pointer)
+    0xA1, 0x00,        #   Collection (Physical)
     0x09, 0x38,        #     Usage (Wheel) — vertical
     0x15, 0x81,        #     Logical Minimum (-127)
     0x25, 0x7F,        #     Logical Maximum (127)
@@ -87,9 +93,9 @@ abs_mouse = usb_hid.Device(
     report_descriptor=ABS_MOUSE_DESCRIPTOR,
     usage_page=0x01,
     usage=0x02,
-    report_ids=(2,),
-    in_report_lengths=(7,),  # buttons + X + Y + wheel + pan (see engine.py)
-    out_report_lengths=(0,),
+    report_ids=(2, 4),
+    in_report_lengths=(5, 2),  # pointer / scroll (see engine.py)
+    out_report_lengths=(0, 0),
 )
 
 def usb_drive_wanted():

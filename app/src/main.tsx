@@ -7,6 +7,7 @@ import {
   initAutostart,
   initRunInBackground,
   initTheme,
+  initWheelAccel,
 } from "./lib/settings";
 import { initLayout } from "./lib/layout";
 import "./index.css";
@@ -30,6 +31,7 @@ if (isOverlay) {
   initAlwaysOnTop();
   initRunInBackground();
   initAutostart();
+  initWheelAccel();
 }
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(

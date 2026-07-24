@@ -137,6 +137,42 @@ export function useAutostart(): boolean {
   );
 }
 
+// ---------------------------------------------------- wheel acceleration ---
+// Vision 6 profile wheel: spinning fast multiplies the scroll/zoom step
+// (like the device's own speed-editor acceleration). Off = one step per
+// detent, however fast the spin.
+
+let wheelAccel = true;
+const waListeners = new Set<() => void>();
+
+export function initWheelAccel() {
+  void getSetting("wheelAccel", true).then((stored) => {
+    wheelAccel = stored;
+    waListeners.forEach((l) => l());
+  });
+}
+
+/** Non-hook read for dispatch code (profiles.tsx encoder handler). */
+export function getWheelAccel(): boolean {
+  return wheelAccel;
+}
+
+export function setWheelAccel(on: boolean) {
+  wheelAccel = on;
+  void setSetting("wheelAccel", on);
+  waListeners.forEach((l) => l());
+}
+
+export function useWheelAccel(): boolean {
+  return useSyncExternalStore(
+    (cb) => {
+      waListeners.add(cb);
+      return () => waListeners.delete(cb);
+    },
+    () => wheelAccel,
+  );
+}
+
 /** Call once at boot — re-applies the stored preference to the window. */
 export function initAlwaysOnTop() {
   void getSetting("alwaysOnTop", false).then((stored) => {

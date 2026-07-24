@@ -32,7 +32,7 @@ export const MEDIA_USAGES = [
 
 export const MODIFIERS = ["CTRL", "SHIFT", "ALT", "WIN"] as const;
 
-const MOD_TO_LABEL: Record<string, string> = {
+export const MOD_TO_LABEL: Record<string, string> = {
   CTRL: "ctrl_l",
   SHIFT: "shift_l",
   ALT: "alt_l",

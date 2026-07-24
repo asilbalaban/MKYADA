@@ -17,7 +17,9 @@ class FakeHidDevice:
     def __init__(self, usage_page, usage):
         self.usage_page, self.usage = usage_page, usage
 
-    def send_report(self, buf):
+    def send_report(self, buf, report_id=None):
+        # mouse is a two-report device (pointer id 2 / scroll id 4); the
+        # tests tell them apart by length, matching boot.py's lengths
         sent_reports.append((self.usage_page, self.usage, bytes(buf)))
 
 
@@ -208,25 +210,48 @@ eng.play([{"delay": 0, "type": "move", "x": 960, "y": 540},
          screen={"width": 1920, "height": 1080})
 mouse = [r for r in sent_reports if r[1] == 0x02]
 cons = [r for r in sent_reports if r[0] == 0x0C]
-# report is now buttons + X + Y + wheel + pan (7 bytes; see boot.py descriptor)
-check("mouse report is 7 bytes", all(len(r[2]) == 7 for r in mouse), str(mouse[:1]))
-xy = struct.unpack("<BHHbb", mouse[0][2]) if mouse else None
+# pointer report is buttons + X + Y (5 bytes, report id 2; boot.py descriptor)
+check("mouse pointer report is 5 bytes", all(len(r[2]) == 5 for r in mouse), str(mouse[:1]))
+xy = struct.unpack("<BHH", mouse[0][2]) if mouse else None
 check("abs move scaled", xy and abs(xy[1] - 16383) < 40 and abs(xy[2] - 16391) < 60, str(xy))
 check("left click down bit", any(r[2][0] & 0x01 for r in mouse))
 check("consumer volume_up", any(struct.unpack('<H', r[2])[0] == 0xE9 for r in cons), str(cons))
 
-# scroll: vertical uses the wheel byte, horizontal the pan byte
+# scroll: its own 2-byte report (wheel + pan) so the cursor never moves
 sent_reports.clear()
 eng.play([{"delay": 0, "type": "scroll", "dy": 3}], screen=None)
-vmouse = [struct.unpack("<BHHbb", r[2]) for r in sent_reports if r[1] == 0x02]
-check("vertical scroll wheel +1 steps", sum(1 for m in vmouse if m[3] == 1) == 3, str(vmouse))
-check("vertical scroll no pan", all(m[4] == 0 for m in vmouse), str(vmouse))
+wheel = [struct.unpack("<bb", r[2]) for r in sent_reports
+         if r[1] == 0x02 and len(r[2]) == 2]
+check("vertical scroll wheel +1 steps", sum(1 for m in wheel if m[0] == 1) == 3, str(wheel))
+check("vertical scroll no pan", all(m[1] == 0 for m in wheel), str(wheel))
+check("scroll sends no pointer report",
+      not any(r[1] == 0x02 and len(r[2]) == 5 for r in sent_reports),
+      str(sent_reports))
 
 sent_reports.clear()
 eng.play([{"delay": 0, "type": "scroll", "dy": 0, "dx": -2}], screen=None)
-hmouse = [struct.unpack("<BHHbb", r[2]) for r in sent_reports if r[1] == 0x02]
-check("horizontal scroll pan -1 steps", sum(1 for m in hmouse if m[4] == -1) == 2, str(hmouse))
-check("horizontal scroll no wheel", all(m[3] == 0 for m in hmouse), str(hmouse))
+hwheel = [struct.unpack("<bb", r[2]) for r in sent_reports
+          if r[1] == 0x02 and len(r[2]) == 2]
+check("horizontal scroll pan -1 steps", sum(1 for m in hwheel if m[1] == -1) == 2, str(hwheel))
+check("horizontal scroll no wheel", all(m[0] == 0 for m in hwheel), str(hwheel))
+
+# keyboard-only macros must not touch the mouse at all — the pointer report
+# is absolute, so a stray one teleports the cursor (the old release_all bug)
+sent_reports.clear()
+eng.play([{"delay": 0, "type": "key", "action": "down", "key": "a"},
+          {"delay": 0, "type": "key", "action": "up", "key": "a"}], screen=None)
+check("kbd-only macro sends no mouse report",
+      not any(r[1] == 0x02 for r in sent_reports), str(sent_reports))
+
+# wheel_burst (serial "scroll", proto v6): modifiers held around the ticks
+sent_reports.clear()
+eng.wheel_burst(2, 0, ["ctrl"])
+burst_kbd = [r[2] for r in sent_reports if r[1] == 0x06]
+burst_wheel = [struct.unpack("<bb", r[2]) for r in sent_reports
+               if r[1] == 0x02 and len(r[2]) == 2]
+check("wheel_burst holds ctrl", burst_kbd and burst_kbd[0][0] == 0x01, str(burst_kbd))
+check("wheel_burst releases ctrl", burst_kbd[-1][0] == 0x00, str(burst_kbd))
+check("wheel_burst ticks", [m[0] for m in burst_wheel] == [1, 1], str(burst_wheel))
 
 # stop mid-play
 calls = {"n": 0}
@@ -558,17 +583,22 @@ check("pretty JSON still plays",
 
 # a HID report the USB stack rejects (boot.py descriptor older than
 # engine.py after a partial update) fails the key soft: err "hid" + LED
-# blink, never the fatal handler's crash-loop
+# blink, never the fatal handler's crash-loop. The macro must actually
+# touch the mouse: keyboard-only macros no longer send pointer reports.
 outbox.clear()
 
 
-def _reject(buf):
+def _reject(buf, report_id=None):
     raise ValueError("report length must be 6")
 
 
+fmm = tempfile.NamedTemporaryFile("w", suffix=".json", delete=False)
+json.dump({"format": "mkyada-macro", "version": 2,
+           "events": [{"delay": 0, "type": "move", "x": 10, "y": 10}]}, fmm)
+fmm.close()
 _orig_mouse_send = app.engine.mouse.send_report
 app.engine.mouse.send_report = _reject
-app.play_file(fpp.name)
+app.play_file(fmm.name)
 check("hid mismatch -> err not crash",
       any(m.get("t") == "err" and m.get("code") == "hid" for m in outbox)
       and any(m.get("t") == "play_done" and m.get("stopped") for m in outbox),
@@ -651,7 +681,7 @@ app.proto.send = _orig_send
 app.proto.ser = None
 
 # --- serial "led" op (proto v2): app feedback override --------------------
-check("hello reports proto v5", app.hello()["proto"] == 5, str(app.hello()["proto"]))
+check("hello reports proto v6", app.hello()["proto"] == 6, str(app.hello()["proto"]))
 check("hello reports usb_drive", app.hello()["usb_drive"] is True, str(app.hello()))
 app.proto.ser = FakeSerial([])
 app.handle_msg({"t": "led", "mode": "solid", "rgb": [255, 0, 0]})
@@ -675,6 +705,34 @@ app.handle_msg({"t": "label", "text": ""})
 check("label empty clears", app.host_label is None, str(app.host_label))
 app.handle_msg({"t": "label"})
 check("label missing text clears", app.host_label is None, str(app.host_label))
+
+# proto v6: the label can carry the profile's key names (host-mode grid)
+app.handle_msg({"t": "label", "text": "PS", "keys": ["Zoom in", "Zoom out",
+                "", "Undo", "Redo", "Save", "extra7"]})
+check("label keys stored (capped at 6)",
+      app.host_keys == ["Zoom in", "Zoom out", "", "Undo", "Redo", "Save"],
+      str(app.host_keys))
+app.handle_msg({"t": "label", "text": "PS", "keys": ["", "", "", "", "", ""]})
+check("label all-empty keys -> None", app.host_keys is None, str(app.host_keys))
+app.handle_msg({"t": "label", "text": "PS", "keys": "garbage"})
+check("label garbage keys tolerated", app.host_keys is None, str(app.host_keys))
+app.handle_msg({"t": "label", "text": ""})
+check("label clear drops keys too", app.host_label is None and app.host_keys is None)
+
+# --- serial "scroll" op (proto v6): app-accelerated wheel -----------------
+sent_reports.clear()
+outbox.clear()
+app.handle_msg({"t": "scroll", "dy": 4, "mods": ["CTRL"]})
+check("scroll acked", outbox[-1] == {"t": "ok", "re": "scroll"}, str(outbox[-1:]))
+s_wheel = [struct.unpack("<bb", r[2]) for r in sent_reports
+           if r[1] == 0x02 and len(r[2]) == 2]
+s_kbd = [r[2] for r in sent_reports if r[1] == 0x06]
+check("scroll ticks sent", sum(1 for m in s_wheel if m[0] == 1) == 4, str(s_wheel))
+check("scroll holds+releases ctrl",
+      s_kbd and s_kbd[0][0] == 0x01 and s_kbd[-1][0] == 0x00, str(s_kbd))
+outbox.clear()
+app.handle_msg({"t": "scroll", "dy": "garbage"})
+check("scroll garbage -> err", outbox[-1].get("code") == "hid", str(outbox[-1:]))
 app.proto.send = _orig_send
 app.proto.ser = None
 
@@ -1006,6 +1064,22 @@ check("host nav slot event",
       str(voutbox))
 vapp.handle_msg({"t": "host_leave"})
 check("host exit restores grid", ui.state == uimod.S_SELECT)
+
+# host-mode grid (proto v6): the app pushes the profile's key names in the
+# label message; entering host mode (or a label change while in it) draws
+# them as a grid — headless here, so the point is state + no crash
+vapp.handle_msg({"t": "label", "text": "Photoshop",
+                 "keys": ["Zoom in", "Zoom out", "Undo", "", "", ""]})
+vapp.handle_msg({"t": "host_enter"})
+check("host grid state", ui.state == uimod.S_HOST)
+vapp.handle_msg({"t": "label", "text": "Photoshop",
+                 "keys": ["A", "B", "C", "D", "E", "F"]})  # on_label redraw
+check("host grid survives label update", ui.state == uimod.S_HOST)
+vapp.handle_msg({"t": "label", "text": ""})  # back to plain host screen
+check("host label cleared in host mode",
+      vapp.host_label is None and vapp.host_keys is None)
+vapp.handle_msg({"t": "host_leave"})
+check("host grid exit restores grid", ui.state == uimod.S_SELECT)
 
 # --- issue #19: btn-psh, slot key logic, per-context overrides ------------
 # btn-psh is a grid slot: tap plays its macro (resolved from a queued
