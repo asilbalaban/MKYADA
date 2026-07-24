@@ -115,6 +115,13 @@ def usb_drive_wanted():
     return CFG.get("usb_drive") is not False
 
 
+# Auto-reload is a development convenience and a field hazard: a multi-file
+# copy onto a visible CIRCUITPY drive reloads the board once per file, so it
+# repeatedly runs half-updated trees (observed as a crash-loop brick during
+# app-driven updates). The firmware reboots via an explicit {"t":"reset"}
+# from the app instead; manual installs end with an unplug/replug anyway.
+supervisor.runtime.autoreload = False
+
 supervisor.set_usb_identification(manufacturer="MKYADA", product=PRODUCT)
 try:
     # No supervisor scribbles on the Vision 6 OLED or serial titles; the

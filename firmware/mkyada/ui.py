@@ -513,6 +513,7 @@ class Ui:
             ev = self.nav.events.get()
             if ev and ev.key_number == key and not ev.pressed:
                 break
+            self.app.pump()  # serial keeps draining while the gesture holds
             self.app.led.tick()
             time.sleep(0.002)
         if not has_double:
@@ -522,6 +523,7 @@ class Ui:
             ev = self.nav.events.get()
             if ev and ev.key_number == key and ev.pressed:
                 return "double"
+            self.app.pump()
             self.app.led.tick()
             time.sleep(0.002)
         return "tap"

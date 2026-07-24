@@ -39,6 +39,11 @@ jobs:
         run: |
           npm ci
           npm run build
+      # The same script every release build runs — catch a broken firmware
+      # bundle here, not on the tag. --require-mpy also proves the pinned
+      # mpy-cross/neopixel downloads still resolve.
+      - name: Firmware dist builds (vendored libs + .mpy)
+        run: node scripts/build-firmware-dist.mjs --require-mpy
       - name: No dev/screenshot scaffolding in dist
         working-directory: app
         run: |

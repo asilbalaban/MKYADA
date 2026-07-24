@@ -46,6 +46,19 @@ export function onWriteProgress(cb: (p: WriteProgress) => void): Promise<Unliste
   return listen("drive:progress", (e) => cb(e.payload as WriteProgress));
 }
 
+/** Per-file progress of a firmware update (proto v7 locked update mode). */
+export interface FirmwareProgress {
+  file: string;
+  index: number;
+  files: number;
+  done: number;
+  total: number;
+}
+
+export function onFirmwareProgress(cb: (p: FirmwareProgress) => void): Promise<UnlistenFn> {
+  return listen("firmware:progress", (e) => cb(e.payload as FirmwareProgress));
+}
+
 export function onDeviceDisconnected(cb: (port: string) => void): Promise<UnlistenFn> {
   return listen("device:disconnected", (e) => cb(e.payload as string));
 }

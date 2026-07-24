@@ -1,4 +1,34 @@
-# MKYADA serial protocol (v6)
+# MKYADA serial protocol (v7)
+
+v7 (firmware 0.11.0) is the update-safety release:
+- **Locked update mode** — `{"t":"update_begin","bytes":N}` suspends keys,
+  menus and playback, shows a progress screen on the Vision 6, and accepts
+  only transfer traffic (`fs_*`, `update_*`, `get_config`, `reset`,
+  `bootloader`) until `{"t":"update_end"}` (ok + hard reset) or
+  `{"t":"update_abort"}` (unlock, back to normal). Anything else is refused
+  with `{"t":"err","code":"updating"}`. If the app goes silent for 30 s
+  mid-update (or disconnects), the device unlocks itself.
+- **CRC-verified transfers** — the final `fs_write` chunk may carry
+  `"crc": <CRC32 of the whole file>`; the device verifies before the atomic
+  rename and answers `{"t":"err","code":"crc"}` on mismatch (the `.part` is
+  discarded — a corrupted transfer can never replace a good file). The eof
+  `ok` and the final `fs_chunk` of `fs_read` always carry the device-computed
+  `"crc"` so either side can verify.
+- **`{"t":"bootloader"}`** — reboots into the UF2 bootloader
+  (`microcontroller.RunMode.UF2`), so CircuitPython itself can be reflashed
+  on a sealed unit without the physical BOOT button.
+- **Rescue console** — if the main firmware fails to import or construct,
+  `code.py` answers `identify` itself with
+  `{"t":"hello","mode":"rescue","err":"<repr of the failure>",...}` and
+  serves `fs_*` / `reset` / `bootloader` using builtins only, so the app can
+  always rewrite the firmware and reboot the board. LED blinks red.
+- Firmware-side hardening (no wire changes): auto-reload is disabled (file
+  copies onto the visible drive no longer reboot the board per file — the
+  app ends updates with an explicit `reset`), a hardware watchdog hard-resets
+  a hung firmware (config `"watchdog": false` opts out for bench debugging),
+  serial keeps draining during tap/double/hold gesture resolution, and
+  `usb_cdc` writes carry a timeout so a stalled host can never wedge the
+  keypad.
 
 v6 (firmware 0.10.0) adds:
 - `{"t":"scroll"}` — direct wheel ticks with optional modifiers. The app

@@ -24,6 +24,10 @@ jobs:
           # Linux packages planned next:
           # - platform: ubuntu-22.04
     runs-on: ${{ matrix.platform }}
+    env:
+      # release installers must ship precompiled .mpy firmware — a source-only
+      # bundle would reintroduce the on-device-compile MemoryError risk
+      MKYADA_REQUIRE_MPY: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

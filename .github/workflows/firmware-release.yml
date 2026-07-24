@@ -5,10 +5,6 @@ on:
     tags: ["v*"]
   workflow_dispatch:
 
-env:
-  # Pinned CircuitPython library versions bundled into the firmware zip
-  NEOPIXEL_REF: "6.4.2"
-
 jobs:
   bundle:
     runs-on: ubuntu-latest
@@ -16,17 +12,21 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
       # The firmware version is firmware/VERSION, decoupled from app releases —
       # the app compares its bundled firmware/VERSION with the device, so only
       # releases that actually change firmware/ should bump it. The zip is
       # named after the firmware version, not the release tag.
       - name: Read firmware version
         run: echo "FW_VERSION=$(cat firmware/VERSION | tr -d '[:space:]')" >> "$GITHUB_ENV"
-      - name: Fetch bundled libraries
-        run: |
-          mkdir -p firmware/lib
-          curl -sfL "https://raw.githubusercontent.com/adafruit/Adafruit_CircuitPython_NeoPixel/${NEOPIXEL_REF}/neopixel.py" \
-            -o firmware/lib/neopixel.py
+      # Builds firmware-dist/: vendors the pinned libraries (neopixel) and
+      # precompiles every module to .mpy with the mpy-cross matching the
+      # bundled CircuitPython — release firmware must never be compiled on
+      # the device (the source-compile MemoryError was a field brick).
+      - name: Build firmware dist (vendored libs + .mpy)
+        run: node scripts/build-firmware-dist.mjs --require-mpy
       # Ship runtime only. A firmware zip is flashed by copying it over the
       # CIRCUITPY drive, which overwrites whatever it contains — so it must
       # NOT carry user data (macros/, config.json) or a reflash would clobber
@@ -34,7 +34,7 @@ jobs:
       # built-in DEFAULT_CONFIG and the app writes config.json on onboarding.
       - name: Zip firmware (runtime only)
         run: |
-          cd firmware
+          cd firmware-dist
           zip -r "../mkyada-firmware-v${FW_VERSION}.zip" . \
             -x "*.pyc" "macros/*" "config.json"
       - name: Attach to release

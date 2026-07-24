@@ -232,6 +232,12 @@ pub fn read_file(drive: &str, rel: &str) -> Result<String, String> {
     fs::read_to_string(safe_join(drive, rel)?).map_err(|e| e.to_string())
 }
 
+/// Byte-level read — firmware-update verification reads files (fonts,
+/// compiled modules) that aren't guaranteed UTF-8.
+pub fn read_file_bytes(drive: &str, rel: &str) -> Result<Vec<u8>, String> {
+    fs::read(safe_join(drive, rel)?).map_err(|e| e.to_string())
+}
+
 pub fn delete_file(drive: &str, rel: &str) -> Result<(), String> {
     fs::remove_file(safe_join(drive, rel)?).map_err(|e| e.to_string())
 }

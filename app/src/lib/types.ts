@@ -24,7 +24,11 @@ export interface Hello {
   /** Vision 6 grid band: show the app-pushed profile label; absent on firmware < 0.9.0 */
   show_profile?: boolean;
   layer: string;
-  mode: "standalone" | "host";
+  /** "rescue": the main firmware failed to start and code.py's rescue
+   * console answered instead — only file repair + reset are available */
+  mode: "standalone" | "host" | "rescue";
+  /** rescue mode only: repr() of the error that killed the main firmware */
+  err?: string;
 }
 
 export interface DeviceInfo {

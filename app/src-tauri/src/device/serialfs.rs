@@ -133,6 +133,28 @@ fn fs_err(v: &Value) -> String {
     }
 }
 
+/// CRC32 (IEEE) — end-to-end integrity check for fs_write/fs_read since
+/// proto v7. Tiny table-driven implementation instead of a crate dep.
+fn crc32(bytes: &[u8]) -> u32 {
+    static TABLE: std::sync::OnceLock<[u32; 256]> = std::sync::OnceLock::new();
+    let table = TABLE.get_or_init(|| {
+        let mut t = [0u32; 256];
+        for (i, e) in t.iter_mut().enumerate() {
+            let mut c = i as u32;
+            for _ in 0..8 {
+                c = if c & 1 != 0 { 0xEDB8_8320 ^ (c >> 1) } else { c >> 1 };
+            }
+            *e = c;
+        }
+        t
+    });
+    let mut c = !0u32;
+    for &b in bytes {
+        c = table[((c ^ b as u32) & 0xFF) as usize] ^ (c >> 8);
+    }
+    !c
+}
+
 /// Same guarantee as drive::safe_join: no escaping the keypad's filesystem.
 fn rel(path: &str) -> Result<&str, String> {
     if path.split(['/', '\\']).any(|c| c == "..") {
@@ -149,6 +171,8 @@ fn is_transient(e: &str) -> bool {
         || e.contains("busy playing a macro") // firmware's explicit busy reply
         || e.contains("oom") // screen model briefly out of contiguous heap —
         // it gc's and the retry lands (a big recorded macro read on vision6)
+        || e.contains("crc") // a corrupted transfer (line noise, dropped
+        // bytes) — the .part was discarded, a clean retry usually lands
 }
 
 /// Stop any macro playing so the filesystem is actually free. Sending `stop`
@@ -225,15 +249,31 @@ fn write_once(
     // spirals. Safe pipelining needs firmware-side flow control; until then the
     // 9KB chunk (fewer round-trips) is the whole win.
     let mut written = 0;
+    let file_crc = crc32(bytes);
     for (seq, chunk) in chunks.into_iter().enumerate() {
         if cancel_requested() {
             return Err(CANCELLED.to_string());
         }
-        op.send(&json!({
+        let eof = seq == last;
+        let mut msg = json!({
             "t": "fs_write", "path": path, "seq": seq,
-            "data": B64.encode(chunk), "eof": seq == last,
-        }))?;
-        op.expect_ok("fs_write")?;
+            "data": B64.encode(chunk), "eof": eof,
+        });
+        if eof {
+            // proto v7: the firmware verifies the whole file's CRC32 before
+            // the atomic rename — a corrupted transfer never lands. Older
+            // firmware ignores the extra field.
+            msg["crc"] = json!(file_crc);
+        }
+        op.send(&msg)?;
+        let reply = op.expect_ok("fs_write")?;
+        if eof {
+            if let Some(dev) = reply.get("crc").and_then(Value::as_u64) {
+                if dev != u64::from(file_crc) {
+                    return Err("crc mismatch".to_string());
+                }
+            }
+        }
         written += chunk.len();
         progress(written, total);
     }

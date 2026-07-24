@@ -606,62 +606,173 @@ fn walk_files(dir: &std::path::Path, prefix: &str) -> Result<Vec<String>, String
 /// macros/ — only code + modules + vendored lib/ + fonts/ + VERSION (and
 /// settings.toml when the bundle ships one). Uses the same read-only
 /// recovery as drive_write, so it's async off the main thread.
+///
+/// Safety rails (the update path must never be able to brick a board):
+/// - the keypad is locked into update mode first (proto v7 update_begin:
+///   keys/menus dead, progress on its screen, only file traffic accepted);
+///   older firmware ignores the command and updates like before
+/// - every file is verified after landing (serial: per-file CRC32 handshake;
+///   drive: byte-for-byte read-back) — a corrupted file fails the update
+///   instead of shipping
+/// - `firmware:progress` events drive the app's blocking progress modal
+/// - VERSION still goes last, so a half-finished update self-heals by
+///   simply running again
+/// - on failure the lock is released (update_abort) and the device keeps
+///   running its old firmware
 #[tauri::command]
 async fn firmware_update(app: AppHandle, drive: String) -> Result<Vec<String>, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let src = app
-            .path()
-            .resolve("firmware", tauri::path::BaseDirectory::Resource)
-            .map_err(|e| e.to_string())?;
-        let mut written = Vec::new();
-        for name in ["boot.py", "code.py"] {
-            let content = std::fs::read_to_string(src.join(name)).map_err(|e| e.to_string())?;
-            write_to_device(&app, &drive, name, &content)?;
-            written.push(name.to_string());
-        }
-        // CircuitPython reads settings.toml at boot; optional in the bundle.
-        if src.join("settings.toml").is_file() {
-            let content = std::fs::read_to_string(src.join("settings.toml"))
-                .map_err(|e| format!("settings.toml: {e}"))?;
-            write_to_device(&app, &drive, "settings.toml", &content)?;
-            written.push("settings.toml".to_string());
-        }
-        let modules = std::fs::read_dir(src.join("mkyada")).map_err(|e| e.to_string())?;
-        for entry in modules.flatten() {
-            let file = entry.file_name().to_string_lossy().into_owned();
-            if !file.ends_with(".py") {
-                continue;
-            }
-            let content = std::fs::read_to_string(entry.path()).map_err(|e| e.to_string())?;
-            write_to_device(&app, &drive, &format!("mkyada/{file}"), &content)?;
-            written.push(format!("mkyada/{file}"));
-        }
-        // Vendored CircuitPython libraries and fonts ship with the firmware
-        // and must match the code that imports them — install every file,
-        // preserving the directory layout. BDF fonts aren't guaranteed to be
-        // valid UTF-8, so these go through the bytes path.
-        for dir in ["lib", "fonts"] {
-            for rel in walk_files(&src.join(dir), dir)? {
-                let content = std::fs::read(src.join(&rel)).map_err(|e| format!("{rel}: {e}"))?;
-                write_to_device_bytes(&app, &drive, &rel, &content)
-                    .map_err(|e| format!("{rel}: {e}"))?;
-                written.push(rel);
-            }
-        }
-        // VERSION goes LAST: if the transfer dies midway the device keeps
-        // reporting its old version, so the "update available" banner comes
-        // back and the update can simply be run again. Writing it first
-        // would leave a half-updated tree that already claims to be current
-        // — invisible until something breaks (seen in the field as a
-        // boot.py/engine.py HID descriptor mismatch crash-looping the
-        // device on every key press).
-        let content = std::fs::read_to_string(src.join("VERSION")).map_err(|e| e.to_string())?;
-        write_to_device(&app, &drive, "VERSION", &content)?;
-        written.push("VERSION".to_string());
-        Ok(written)
+        emit_status(&app, "transfer");
+        let r = firmware_update_run(&app, &drive);
+        emit_result_status(&app, &r);
+        r
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+fn firmware_update_run(app: &AppHandle, drive: &str) -> Result<Vec<String>, String> {
+    let src = app
+        .path()
+        .resolve("firmware", tauri::path::BaseDirectory::Resource)
+        .map_err(|e| e.to_string())?;
+    // Build the whole manifest up front: update_begin announces the byte
+    // total (the device's own progress bar) and the UI needs file counts.
+    let mut files: Vec<(String, Vec<u8>)> = Vec::new();
+    for name in ["boot.py", "code.py"] {
+        files.push((
+            name.to_string(),
+            std::fs::read(src.join(name)).map_err(|e| format!("{name}: {e}"))?,
+        ));
+    }
+    // CircuitPython reads settings.toml at boot; optional in the bundle.
+    if src.join("settings.toml").is_file() {
+        files.push((
+            "settings.toml".to_string(),
+            std::fs::read(src.join("settings.toml")).map_err(|e| format!("settings.toml: {e}"))?,
+        ));
+    }
+    // Firmware modules: release bundles ship precompiled .mpy (no on-device
+    // compile — the RP2040 heap can't always compile the big modules from
+    // source), dev builds ship .py. Take whichever the bundle has.
+    let modules = std::fs::read_dir(src.join("mkyada")).map_err(|e| e.to_string())?;
+    for entry in modules.flatten() {
+        let file = entry.file_name().to_string_lossy().into_owned();
+        if !(file.ends_with(".py") || file.ends_with(".mpy")) {
+            continue;
+        }
+        let content = std::fs::read(entry.path()).map_err(|e| format!("{file}: {e}"))?;
+        files.push((format!("mkyada/{file}"), content));
+    }
+    // Vendored CircuitPython libraries and fonts ship with the firmware
+    // and must match the code that imports them — install every file,
+    // preserving the directory layout. BDF fonts aren't guaranteed to be
+    // valid UTF-8, so everything rides the bytes path.
+    for dir in ["lib", "fonts"] {
+        for rel in walk_files(&src.join(dir), dir)? {
+            let content = std::fs::read(src.join(&rel)).map_err(|e| format!("{rel}: {e}"))?;
+            files.push((rel, content));
+        }
+    }
+    // VERSION goes LAST: if the transfer dies midway the device keeps
+    // reporting its old version, so the "update available" banner comes
+    // back and the update can simply be run again. Writing it first
+    // would leave a half-updated tree that already claims to be current
+    // — invisible until something breaks (seen in the field as a
+    // boot.py/engine.py HID descriptor mismatch crash-looping the
+    // device on every key press).
+    let version = std::fs::read(src.join("VERSION")).map_err(|e| e.to_string())?;
+    files.push(("VERSION".to_string(), version));
+
+    let total_bytes: usize = files.iter().map(|(_, c)| c.len()).sum();
+    let total_files = files.len();
+    // Lock the keypad (best-effort: pre-v7 firmware answers err/nothing and
+    // simply updates unlocked, exactly like before).
+    let mgr = app.state::<DeviceManager>();
+    let _ = serial::send(
+        &mgr,
+        &serde_json::json!({"t": "update_begin", "bytes": total_bytes}),
+    );
+    drop(mgr);
+    let result = firmware_write_all(app, drive, &files, total_bytes, total_files);
+    if result.is_err() {
+        // release the lock so the keypad goes back to being a keypad
+        let mgr = app.state::<DeviceManager>();
+        let _ = serial::send(&mgr, &serde_json::json!({"t": "update_abort"}));
+    }
+    result
+}
+
+fn firmware_write_all(
+    app: &AppHandle,
+    drive: &str,
+    files: &[(String, Vec<u8>)],
+    total_bytes: usize,
+    total_files: usize,
+) -> Result<Vec<String>, String> {
+    let mut written = Vec::new();
+    let mut done_bytes = 0usize;
+    for (i, (rel, content)) in files.iter().enumerate() {
+        let _ = app.emit(
+            "firmware:progress",
+            serde_json::json!({
+                "file": rel, "index": i, "files": total_files,
+                "done": done_bytes, "total": total_bytes,
+            }),
+        );
+        firmware_write_verified(app, drive, rel, content).map_err(|e| format!("{rel}: {e}"))?;
+        // A module that changed shape between source and compiled form must
+        // not leave its stale twin behind — CircuitPython would happily
+        // import the leftover instead of the file we just wrote.
+        if let Some(twin) = twin_path(rel) {
+            let _ = if serialfs::is_serial(drive) {
+                serialfs::delete_file(&app.state::<DeviceManager>(), &twin)
+            } else {
+                drive::delete_file(drive, &twin)
+            };
+        }
+        done_bytes += content.len();
+        written.push(rel.clone());
+    }
+    let _ = app.emit(
+        "firmware:progress",
+        serde_json::json!({
+            "file": "", "index": total_files, "files": total_files,
+            "done": total_bytes, "total": total_bytes,
+        }),
+    );
+    Ok(written)
+}
+
+/// The other-extension sibling of a firmware module ("mkyada/ui.mpy" ->
+/// "mkyada/ui.py"), for python files under mkyada/ and lib/ only.
+fn twin_path(rel: &str) -> Option<String> {
+    if !(rel.starts_with("mkyada/") || rel.starts_with("lib/")) {
+        return None;
+    }
+    rel.strip_suffix(".py")
+        .map(|s| format!("{s}.mpy"))
+        .or_else(|| rel.strip_suffix(".mpy").map(|s| format!("{s}.py")))
+}
+
+/// Write one firmware file and prove it landed intact. The serial path
+/// CRC32-verifies inside write_file (proto v7); the drive path gets a
+/// byte-for-byte read-back — USB mass storage has no end-to-end ack and a
+/// silently truncated module is exactly how boards used to brick.
+fn firmware_write_verified(
+    app: &AppHandle,
+    drive: &str,
+    rel: &str,
+    content: &[u8],
+) -> Result<(), String> {
+    write_to_device_bytes(app, drive, rel, content)?;
+    if !serialfs::is_serial(drive) {
+        let back = drive::read_file_bytes(drive, rel)?;
+        if back != content {
+            return Err("verification read-back does not match".to_string());
+        }
+    }
+    Ok(())
 }
 
 /// UF2 bootloader drives currently mounted (a blank or BOOTSEL-held RP2040)

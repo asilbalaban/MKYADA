@@ -127,7 +127,7 @@ function matches(p: Profile, fg: ForegroundInfo): boolean {
 }
 
 export function ProfilesProvider({ children }: { children: ReactNode }) {
-  const { port, drive, hello, send, onBtn, onMsg } = useDevice();
+  const { port, drive, hello, send, onBtn, onMsg, updating } = useDevice();
   const driveRef = useRef<DriveInfo | null>(null);
   driveRef.current = drive;
   const helloRef = useRef<Hello | null>(null);
@@ -171,7 +171,7 @@ export function ProfilesProvider({ children }: { children: ReactNode }) {
   // instead of the bare "Connected to app" text. Old firmware ignores the
   // message, and the device drops everything on app disconnect.
   useEffect(() => {
-    if (!port) return;
+    if (!port || updating) return; // a firmware update owns the link
     const keys = activeProfile
       ? [1, 2, 3, 4, 5, 6].map((n) => {
           const a = activeProfile.keys[String(n)];
@@ -183,20 +183,22 @@ export function ProfilesProvider({ children }: { children: ReactNode }) {
       text: activeProfile?.name ?? "",
       ...(keys?.some(Boolean) ? { keys } : {}),
     }).catch(() => {});
-  }, [port, activeProfile, send]);
+  }, [port, activeProfile, send, updating]);
 
   // hold host mode while a profile is active; release it otherwise.
   // host_enter doubles as the watchdog ping and re-asserts host mode in case
   // another page (setup/keys test) issued a host_leave meanwhile.
+  // Suspended during a firmware update — the keypad is locked in update mode
+  // and every non-transfer command would just bounce with "updating".
   useEffect(() => {
-    if (!port || !activeProfile) return;
+    if (!port || !activeProfile || updating) return;
     void send({ t: "host_enter" });
     const tick = setInterval(() => void send({ t: "host_enter" }), 2000);
     return () => {
       clearInterval(tick);
-      void send({ t: "host_leave" });
+      void send({ t: "host_leave" }).catch(() => {});
     };
-  }, [port, activeProfile, send]);
+  }, [port, activeProfile, send, updating]);
 
   // ---- mixed-sequence orchestration -------------------------------------
   // Pure-HID sequences are one macro file the keypad plays by itself. Mixed

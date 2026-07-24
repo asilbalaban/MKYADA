@@ -15,6 +15,15 @@ class Proto:
     def __init__(self):
         self.ser = usb_cdc.data
         self.buf = bytearray()
+        if self.ser:
+            try:
+                # A host that stops reading (hung app, closed port with data
+                # in flight) must never block the keypad: without a timeout,
+                # write() can wait forever on a full CDC TX buffer — with the
+                # watchdog armed that would hard-reset a healthy board.
+                self.ser.write_timeout = 0.2
+            except Exception:
+                pass
 
     @property
     def connected(self):

@@ -34,6 +34,10 @@ interface DeviceState {
   /** active layer letter ("a", "b", …) as reported live by the device */
   layer: string;
   status: DeviceStatus;
+  /** A firmware update is running: every other device interaction (profile
+   * pings, label pushes, macro saves) must stand down until it finishes. */
+  updating: boolean;
+  setUpdating: (v: boolean) => void;
   scan: () => Promise<DeviceInfo[]>;
   connect: (info: DeviceInfo) => Promise<void>;
   disconnect: () => Promise<void>;
@@ -72,6 +76,7 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
   const [transferCount, setTransferCount] = useState(0);
   const [stalled, setStalled] = useState(false);
   const [reloading, setReloading] = useState(false);
+  const [updating, setUpdating] = useState(false);
   const stallTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reloadTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -162,6 +167,15 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
     setPort(info.port);
     setHello(info.hello);
     void rememberDevice(info.hello.uid, { fw: info.hello.fw });
+    if (info.hello.mode === "rescue") {
+      // Rescue console: the main firmware is down. Repair goes over the
+      // drive when one is mounted (host owns the filesystem then), or over
+      // the rescue console's own fs_* commands when the drive is hidden.
+      const drives = await ipc.listDrives().catch(() => []);
+      const match = drives.find((d) => d.uid.toLowerCase() === info.hello.uid.toLowerCase());
+      setDrive(match ?? serialDrive(info.hello.uid));
+      return;
+    }
     if (info.hello.usb_drive === false) {
       // The keypad hides its USB drive on purpose — files travel over
       // serial. The `serial:<uid>` sentinel routes every drive_* command
@@ -307,6 +321,8 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
         drive,
         layer,
         status,
+        updating,
+        setUpdating,
         scan,
         connect,
         disconnect,

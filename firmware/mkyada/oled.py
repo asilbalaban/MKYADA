@@ -256,6 +256,31 @@ class Oled:
         except Exception:
             pass
 
+    def show_update(self, frac, restarting=False):
+        """Locked firmware-update screen: brand, progress bar, percentage.
+        Deliberately styled like the boot screen — same visual language for
+        'the keypad is busy with itself, hands off'."""
+        if not self.display:
+            return
+        g = displayio.Group()
+        g.append(self._txt("MKYADA", self.CX, 18, scale=2))
+        msg = tr("restarting") if restarting else tr("updating")
+        g.append(self._txt(msg, self.CX, 38, font=self.ui_font))
+        bw = self.W - 24
+        bmp = displayio.Bitmap(bw, 5, 2)
+        pal = displayio.Palette(2)
+        pal[0] = 0x000000
+        pal[1] = 0xFFFFFF
+        w = int(min(1.0, max(0.0, frac)) * bw)
+        for x in range(w):
+            for y in range(5):
+                bmp[x, y] = 1
+        g.append(displayio.TileGrid(bmp, pixel_shader=pal,
+                                    x=(self.W - bw) // 2, y=48))
+        g.append(self._txt("%d%%" % int(frac * 100), self.CX, 60,
+                           font=self.ui_font))
+        self.paint(g)
+
     def show_home(self, pos, layer_count, layer_names):
         """Layer letters + SETTINGS. pos == layer_count means SETTINGS."""
         if not self.display:

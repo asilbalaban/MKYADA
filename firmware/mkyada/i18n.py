@@ -37,6 +37,8 @@ STRINGS = {
         "usb_on": "USB drive is on",
         "read_only": "read-only - use the app",
         "save_fail": "could not save",
+        "updating": "updating - do not unplug",
+        "restarting": "restarting...",
     },
     "tr": {
         "loading": "yukleniyor",
@@ -64,6 +66,8 @@ STRINGS = {
         "usb_on": "USB disk acik",
         "read_only": "salt okunur - uygulamayi kullan",
         "save_fail": "kaydedilemedi",
+        "updating": "guncelleniyor - fisi cekmeyin",
+        "restarting": "yeniden baslatiliyor...",
     },
 }
 

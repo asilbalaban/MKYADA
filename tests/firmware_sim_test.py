@@ -52,8 +52,16 @@ digitalio.Direction = types.SimpleNamespace(INPUT="in")
 digitalio.Pull = types.SimpleNamespace(UP="up")
 sys.modules["digitalio"] = digitalio
 
+class _ResetCalled(SystemExit):
+    pass
+
+
 microcontroller = types.ModuleType("microcontroller")
 microcontroller.cpu = types.SimpleNamespace(uid=bytes(range(8)))
+microcontroller.reset = lambda: (_ for _ in ()).throw(_ResetCalled())
+microcontroller.RunMode = types.SimpleNamespace(UF2="uf2", BOOTLOADER="btl")
+microcontroller.next_reset_to = []
+microcontroller.on_next_reset = lambda mode: microcontroller.next_reset_to.append(mode)
 sys.modules["microcontroller"] = microcontroller
 
 
@@ -305,11 +313,12 @@ msgs = p.poll()
 check("proto parses two lines", [m["t"] for m in msgs] == ["ping", "identify"], str(msgs))
 check("proto keeps partial", bytes(p.buf) == b"partial", str(bytes(p.buf)))
 
-# 4. App logic (import code.py body without running the loop)
-with open(os.path.join(FFW, "code.py")) as f:
-    src = f.read().replace("App().run()", "")
+# 4. App logic (exec mkyada/app.py's body; nothing runs at module level —
+# code.py's bootstrap is what calls main())
+with open(os.path.join(FFW, "mkyada", "app.py")) as f:
+    src = f.read()
 code_mod = types.ModuleType("fwmain")
-exec(compile(src, "code.py", "exec"), code_mod.__dict__)
+exec(compile(src, "app.py", "exec"), code_mod.__dict__)
 
 app = code_mod.App()
 check("default key_count", app.config["key_count"] == 6)
@@ -681,7 +690,7 @@ app.proto.send = _orig_send
 app.proto.ser = None
 
 # --- serial "led" op (proto v2): app feedback override --------------------
-check("hello reports proto v6", app.hello()["proto"] == 6, str(app.hello()["proto"]))
+check("hello reports proto v7", app.hello()["proto"] == 7, str(app.hello()["proto"]))
 check("hello reports usb_drive", app.hello()["usb_drive"] is True, str(app.hello()))
 app.proto.ser = FakeSerial([])
 app.handle_msg({"t": "led", "mode": "solid", "rgb": [255, 0, 0]})
@@ -923,7 +932,7 @@ app.proto.ser = None
 _b.open = _cfg_open({"model": "vision6", "layer_key": 3, "layer_count": 1,
                      "key_count": 12})
 vis_mod = types.ModuleType("fwvis")
-exec(compile(src, "code.py", "exec"), vis_mod.__dict__)
+exec(compile(src, "app.py", "exec"), vis_mod.__dict__)
 vapp = vis_mod.App()
 _b.open = _real_open
 import mkyada.ui as uimod  # noqa: E402
@@ -1331,6 +1340,133 @@ for fname in fixture_files:
         released = (not kbd) or kbd[-1][2] == bytes(8)
         check("fixture plays: " + fname, released,
               "keyboard left pressed" if kbd else "")
+
+# 6. proto v7 safety net: locked update mode, CRC-verified writes, and the
+# code.py rescue console that keeps a board repairable after a broken update.
+import binascii  # noqa: E402
+import tempfile as _tf  # noqa: E402
+
+fs_dir = _tf.mkdtemp()
+app.fs_path = lambda msg: os.path.join(fs_dir, str(msg.get("path", "")).lstrip("/"))
+outbox = []
+app.proto.send = lambda obj: outbox.append(obj)
+app.proto.ser = FakeSerial([])
+
+# CRC-verified fs_write: good CRC lands the file...
+payload = b'{"format":"mkyada-macro","events":[]}'
+b64 = binascii.b2a_base64(payload).decode().strip()
+crc = binascii.crc32(payload) & 0xFFFFFFFF
+app.handle_msg({"t": "fs_write", "path": "m.json", "seq": 0, "data": b64,
+                "eof": True, "crc": crc})
+check("crc write ok", outbox[-1].get("eof") and outbox[-1].get("crc") == crc,
+      str(outbox[-1]))
+with open(os.path.join(fs_dir, "m.json"), "rb") as f:
+    check("crc write content", f.read() == payload)
+
+# ...a bad CRC discards it instead of replacing the good file
+outbox.clear()
+app.handle_msg({"t": "fs_write", "path": "m.json", "seq": 0, "data": b64,
+                "eof": True, "crc": (crc ^ 1)})
+check("crc mismatch rejected", outbox[-1].get("code") == "crc", str(outbox[-1]))
+with open(os.path.join(fs_dir, "m.json"), "rb") as f:
+    check("crc mismatch keeps old file", f.read() == payload)
+check("crc mismatch leaves no .part",
+      not os.path.exists(os.path.join(fs_dir, "m.json.part")))
+
+# locked update mode: only transfer traffic runs, keys are dead, the lock
+# auto-expires if the app dies mid-update
+outbox.clear()
+app.handle_msg({"t": "update_begin", "bytes": len(payload)})
+check("update locks", app.updating is True)
+check("update_begin ok", any(m.get("re") == "update_begin" for m in outbox))
+outbox.clear()
+app.handle_msg({"t": "play", "file": "macros/key1.json"})
+check("play refused while updating", outbox[-1].get("code") == "updating",
+      str(outbox[-1]))
+played_upd = []
+app.play_file = lambda *a, **k: played_upd.append(a)
+app.on_edge(0, True)
+check("keys dead while updating", played_upd == [])
+del app.play_file
+outbox.clear()
+app.handle_msg({"t": "fs_write", "path": "m2.bin", "seq": 0, "data": b64,
+                "eof": True, "crc": crc})
+check("update progress counted", app.update_done == len(payload),
+      str(app.update_done))
+app.update_deadline = 0  # simulate the app going silent past the deadline
+app.updating and app.end_update()
+check("abandoned update unlocks", app.updating is False)
+
+# update_end hard-resets the board
+outbox.clear()
+app.handle_msg({"t": "update_begin", "bytes": 1})
+try:
+    app.handle_msg({"t": "update_end"})
+    check("update_end resets", False, "no reset")
+except _ResetCalled:
+    check("update_end resets", True)
+app.updating = False
+
+# bootloader command: UF2 on next reset, then reset
+outbox.clear()
+microcontroller.next_reset_to.clear()
+try:
+    app.handle_msg({"t": "bootloader"})
+    check("bootloader resets", False, "no reset")
+except _ResetCalled:
+    check("bootloader resets", True)
+check("bootloader arms uf2", microcontroller.next_reset_to == ["uf2"],
+      str(microcontroller.next_reset_to))
+app.proto.ser = None
+
+# rescue console: main firmware import fails -> code.py must still answer
+# identify/fs_list and reset on command
+class RescueSerial:
+    def __init__(self, script):
+        self.inbuf = b"".join(json.dumps(m).encode() + b"\n" for m in script)
+        self.out = []
+        self.connected = True
+        self.write_timeout = None
+
+    @property
+    def in_waiting(self):
+        return len(self.inbuf)
+
+    def read(self, n):
+        out, self.inbuf = self.inbuf[:n], self.inbuf[n:]
+        return out
+
+    def write(self, data):
+        self.out.append(data)
+        return len(data)
+
+
+resc_ser = RescueSerial([{"t": "identify"}, {"t": "ping"},
+                         {"t": "fs_list", "path": "/"}, {"t": "reset"}])
+usb_cdc.data = resc_ser
+supervisor_stub = types.ModuleType("supervisor")
+supervisor_stub.runtime = types.SimpleNamespace(autoreload=True)
+sys.modules["supervisor"] = supervisor_stub
+sys.modules["mkyada.app"] = None  # poison: forces the bootstrap's ImportError
+with open(os.path.join(FFW, "code.py")) as f:
+    rescue_src = f.read()
+resc_mod = types.ModuleType("fwrescue")
+try:
+    exec(compile(rescue_src, "code.py", "exec"), resc_mod.__dict__)
+    check("rescue reset exits", False, "rescue loop never reset")
+except _ResetCalled:
+    check("rescue reset exits", True)
+resc_msgs = [json.loads(l) for l in b"".join(resc_ser.out).splitlines()]
+resc_hello = next((m for m in resc_msgs if m.get("t") == "hello"), None)
+check("rescue hello", resc_hello is not None, str(resc_msgs))
+check("rescue hello mode", resc_hello and resc_hello.get("mode") == "rescue")
+check("rescue hello err", resc_hello and "err" in resc_hello, str(resc_hello))
+check("rescue pong", any(m.get("t") == "pong" for m in resc_msgs))
+check("rescue fs_list", any(m.get("t") == "fs_list" for m in resc_msgs))
+check("rescue kills autoreload", supervisor_stub.runtime.autoreload is False)
+sys.modules.pop("mkyada.app", None)
+usb_cdc.data = None
+shutil.rmtree(fs_dir, ignore_errors=True)
 
 print()
 print("FAILED:" if failures else "ALL FIRMWARE SIM TESTS PASSED", failures or "")

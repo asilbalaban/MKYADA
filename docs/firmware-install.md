@@ -28,16 +28,20 @@ CIRCUITPY/
 ├── code.py
 ├── VERSION
 ├── config.json          # copy config.example.json and adjust
-├── mkyada/              # firmware modules
-├── lib/                 # adafruit_hid, neopixel + display libs (in the zip)
+├── mkyada/              # firmware modules (precompiled .mpy in release zips)
+├── lib/                 # neopixel + display libs (in the zip, .mpy)
 ├── fonts/               # OLED grid fonts (Vision 6; harmless on Core 6)
 └── macros/              # your macro JSON files
 ```
 
-If you are installing from the repo instead of a release zip, also copy
-`adafruit_hid` and `neopixel.mpy` from the
-[Adafruit CircuitPython bundle](https://circuitpython.org/libraries) into
-`CIRCUITPY/lib/`.
+Release zips ship the modules **precompiled to `.mpy`** — the RP2040 then
+imports them with a fraction of the RAM an on-device compile needs (compiling
+the big modules from source can `MemoryError` on the Vision 6). If you are
+installing from the repo instead of a release zip, build the same tree with
+`node scripts/build-firmware-dist.mjs` and copy `firmware-dist/` over — or
+copy the plain `.py` sources, which work but are less robust. When replacing
+`.py` files with `.mpy` (or the other way around) delete the old twin — two
+copies of the same module confuse the import path.
 
 **Unplug and replug the board** after the first copy — `boot.py` (USB device
 setup) only runs at power-on.
@@ -78,8 +82,27 @@ pull-ups are used; no resistors needed. See
 
 Vision 6 (OLED + encoder): see [vision6.md](vision6.md).
 
-## Recovery (hidden USB drive)
+## If something goes wrong (recovery)
 
-When `usb_drive: false` (finished-product mode), hold **key 1** while
-plugging the keypad in to bring the CIRCUITPY drive back for one session:
-**GP0** on Core 6, **GP29** (macro key 1) on Vision 6.
+The firmware is layered so that no software failure leaves a dead keypad —
+important for sealed/soldered builds where the BOOT button is unreachable:
+
+1. **A hung firmware** trips the hardware **watchdog** (8 s) and the board
+   hard-resets itself clean (`config.json "watchdog": false` disables it for
+   bench debugging).
+2. **A crashed firmware** (broken file after an interrupted update, missing
+   library) drops into the **rescue console**: the LED blinks red, the board
+   still answers `identify` over serial (`mode:"rescue"`), and the desktop
+   app shows a one-click **Repair firmware** that rewrites every firmware
+   file and reboots. Macros and config are untouched.
+3. **Hidden drive, no app?** Hold **key 1** while plugging in — the CIRCUITPY
+   drive comes back for that session and you can copy files by hand (**GP0**
+   on Core 6, **GP29** — macro key 1 — on Vision 6).
+4. **Reflashing CircuitPython itself** no longer needs the BOOT button: the
+   app (or any serial terminal) can send `{"t":"bootloader"}` and the board
+   reboots as the `RPI-RP2` UF2 drive.
+
+During app-driven updates the keypad locks itself (keys and menus off, a
+progress bar on the Vision 6 screen), every file is CRC-verified after
+landing, and `VERSION` is written last — an interrupted update simply shows
+the update banner again and can be re-run.
