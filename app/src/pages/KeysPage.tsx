@@ -10,7 +10,6 @@ import type { Assignment, DeviceConfig, ModuleSlot, SlotContext } from "../lib/t
 import { MODULE_SLOTS, MODULE_SLOT_LABELS, deviceModel, layerLabel } from "../lib/types";
 import {
   AUX_FILE_RE,
-  assignmentComplete,
   compileAssignment,
   compileSequenceParts,
   compileSlotAssignment,
@@ -28,11 +27,11 @@ import { serializeForDevice } from "../lib/recorder-model";
 import { keysCache, slotKey } from "../lib/keys-cache";
 import { stashRecorderEdit } from "../lib/recorder-handoff";
 import { undoRedoFromEvent, useHistory } from "../lib/history";
-import { Button, Card, EmptyState, Input, Spinner } from "../components/ui";
+import { Button, Card, EmptyState, Spinner } from "../components/ui";
 import { isWriteCancelled, useWriteGate, writeCancelledError } from "../components/WriteProgress";
 import { useToast } from "../components/toast";
 import { Keypad } from "../components/Keypad";
-import { AssignmentEditor } from "../components/AssignmentEditor";
+import { AssignmentPanel } from "../components/AssignmentPanel";
 
 /** What can hold a macro: a numbered key, or a Vision 6 module control. */
 type SlotId = number | ModuleSlot;
@@ -640,9 +639,15 @@ export function KeysPage() {
                 </Button>
               </div>
             )}
-            <AssignmentEditor
+            <AssignmentPanel
               value={draft ?? current ?? { kind: "none" }}
               onChange={draftHistory.set}
+              onSave={() => void saveDraft()}
+              onRevert={() => setDraft(null)}
+              dirty={draft !== null}
+              saving={saving}
+              saveLabel="Save to keypad"
+              labelOnScreen={isVision}
               // device-menu nav only exists on a screen model; on module
               // slots it drives the BUILT-IN navigation (issue #19)
               allowMenu={isVision}
@@ -654,42 +659,6 @@ export function KeysPage() {
               allowVariants={!isSlot || (selected as string).startsWith("btn-")}
               fwVersion={hello?.fw}
             />
-            {(draft ?? current) && !["none", "nothing"].includes((draft ?? current)!.kind) && (
-              <label className="flex flex-col gap-1 text-sm">
-                <span className="text-xs font-medium text-fg-muted">
-                  Display name
-                  {isVision ? " — shown on the keypad's screen" : ""}
-                </span>
-                <Input
-                  value={(draft ?? current)!.label ?? ""}
-                  placeholder={
-                    compileAssignment({ ...(draft ?? current)!, label: undefined })?.name ??
-                    "Automatic"
-                  }
-                  maxLength={40}
-                  onChange={(e) => {
-                    const base = draft ?? current!;
-                    draftHistory.set({ ...base, label: e.target.value || undefined });
-                  }}
-                />
-                <span className="text-[11px] text-fg-faint">
-                  Leave empty to use the automatic name.
-                </span>
-              </label>
-            )}
-            <div className="flex justify-end gap-2">
-              <Button onClick={() => setDraft(null)} disabled={!draft}>
-                Revert
-              </Button>
-              <Button
-                variant="primary"
-                onClick={() => void saveDraft()}
-                disabled={!draft || !assignmentComplete(draft)}
-                loading={saving}
-              >
-                Save to keypad
-              </Button>
-            </div>
           </div>
         )}
         {status && <p className="text-xs text-fg-faint mt-3">{status}</p>}
