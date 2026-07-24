@@ -387,6 +387,31 @@ describe("module-slot assignments (issue #19)", () => {
         kind: "none",
         variants: { double: { kind: "media", usage: "mute" } },
       }),
-    ).toBe("2×: mute");
+    ).toBe("Built-in · 2×: mute");
+  });
+
+  it('"nothing" compiles to a menu:none carrier and round-trips', () => {
+    const file = compileSlotAssignment({ kind: "nothing" });
+    expect(file).not.toBeNull();
+    expect(file!.kind).toBe("menu");
+    expect(file!.menu).toBe("none");
+    expect(file!.events).toEqual([]);
+    const back = parseAssignment(JSON.parse(JSON.stringify(file)) as MacroFile);
+    expect(back.kind).toBe("nothing");
+    expect(back.label).toBeUndefined();
+    expect(describeAssignment(back)).toBe("Do nothing");
+  });
+
+  it('"nothing" tap can still carry gestures', () => {
+    const file = compileSlotAssignment({
+      kind: "nothing",
+      variants: { hold: { kind: "menu", action: "back" } },
+    });
+    expect(file!.menu).toBe("none");
+    expect(file!.variants?.hold?.menu).toBe("back");
+    const back = parseAssignment(JSON.parse(JSON.stringify(file)) as MacroFile);
+    expect(back.kind).toBe("nothing");
+    expect(back.variants?.hold).toEqual({ kind: "menu", action: "back" });
+    expect(describeSlotAssignment(back)).toBe("Do nothing · Hold: Menu back");
   });
 });

@@ -50,16 +50,17 @@ function slotTitle(slot: SlotId): string {
   return typeof slot === "number" ? `Key ${slot}` : MODULE_SLOT_LABELS[slot];
 }
 
-/** Where a module-control assignment applies, and what the device does there
- * out of the box — shown so the default programming is visible and every
- * piece of it reads as customizable (issue #19). */
+/** Where a module-control assignment applies, and what the built-in menu
+ * action does there — a slot with no macro file IS the "Built-in menu
+ * action" choice, so every control always reads as explicitly set
+ * (issue #19). */
 const CTX_META: { id: SlotContext; label: string; hint: string }[] = [
   { id: "grid", label: "Key grid", hint: "the resting screen — per-layer" },
   { id: "home", label: "Layer screen", hint: "the layer picker — one setting for all layers" },
   { id: "menu", label: "Settings menu", hint: "settings and its sub-menus — one setting for all layers" },
 ];
 
-const SLOT_DEFAULTS: Record<SlotContext, Record<ModuleSlot, string>> = {
+const SLOT_BUILTINS: Record<SlotContext, Record<ModuleSlot, string>> = {
   grid: {
     "enc-cw": "moves the selection right",
     "enc-ccw": "moves the selection left",
@@ -510,7 +511,7 @@ export function KeysPage() {
                       {isLoading ? (
                         <Spinner size={12} className="text-fg-faint" />
                       ) : (
-                        (a ? describeSlotAssignment(a) : `Default: ${SLOT_DEFAULTS.grid[s]}`) +
+                        (a ? describeSlotAssignment(a) : `Built-in: ${SLOT_BUILTINS.grid[s]}`) +
                         (overrides.length
                           ? ` · +${overrides.map((c) => (c === "home" ? "layer screen" : "settings")).join(", ")}`
                           : "")
@@ -521,9 +522,10 @@ export function KeysPage() {
               })}
             </div>
             <p className="text-xs text-fg-faint mt-2">
-              This is the device's whole default programming — every control can be reassigned,
-              per context (key grid / layer screen / settings menu) and per gesture (tap, double
-              press, long press). Empty slots keep the built-in menu navigation.
+              Every control can be reassigned, per context (key grid / layer screen / settings
+              menu) and per gesture (tap, double press, long press). “Built-in” is the on-device
+              menu navigation — itself just one of the choices; pick “Do nothing” to turn a
+              control off entirely.
               {layers > 1 && " A layer without its own grid assignment falls back to Layer A's."}{" "}
               Keystroke/media/mouse assignments work standalone; open/command/sound/webhook ones
               run only while the MKYADA app is connected.
@@ -604,8 +606,8 @@ export function KeysPage() {
                   })}
                 </div>
                 <p className="text-xs text-fg-faint">
-                  {CTX_META.find((c) => c.id === ctx)!.hint}. Default here:{" "}
-                  {SLOT_DEFAULTS[ctx][selected as ModuleSlot]}.
+                  {CTX_META.find((c) => c.id === ctx)!.hint}. Built-in action here:{" "}
+                  {SLOT_BUILTINS[ctx][selected as ModuleSlot]}.
                 </p>
                 {!fwOk && (
                   <p className="text-xs text-warning">
@@ -649,7 +651,7 @@ export function KeysPage() {
               allowVariants={!isSlot || (selected as string).startsWith("btn-")}
               fwVersion={hello?.fw}
             />
-            {(draft ?? current) && (draft ?? current)!.kind !== "none" && (
+            {(draft ?? current) && !["none", "nothing"].includes((draft ?? current)!.kind) && (
               <label className="flex flex-col gap-1 text-sm">
                 <span className="text-xs font-medium text-fg-muted">
                   Display name

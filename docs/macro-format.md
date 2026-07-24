@@ -114,7 +114,9 @@ including any custom slot assignments, so a key can fully stand in for a
 broken wheel. `"default"` (fw ≥ 0.9.0, module-slot files only) means "this
 control's built-in action" — the carrier for slot files whose tap stays
 stock while `variants` customize double/long press; on a normal key it is
-a no-op.
+a no-op. `"none"` (fw ≥ 0.10.0) is the app's "Do nothing" choice: the
+firmware swallows the input entirely — on a module slot this overrides
+even the built-in navigation, turning the control off.
 
 ## Stream layout — v4 (firmware ≥ 0.5.0, proto ≥ 4)
 

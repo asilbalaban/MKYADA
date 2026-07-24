@@ -1130,6 +1130,29 @@ ui._dispatch(_t2.monotonic(), -1, None)
 check("menu-kind enc slot drives built-in nav",
       ui.sel_key == 2 and vplays == [], "sel=%d %s" % (ui.sel_key, vplays))
 
+# menu:"none" = the app's "Do nothing": the input is swallowed — no nav
+# move, no playback (an off switch that overrides the built-in action)
+with open(vapp.slot_path("enc-ccw", 0), "w") as f:
+    json.dump({"format": "mkyada-macro", "version": 2, "kind": "menu",
+               "menu": "none", "events": []}, f)
+ui.invalidate_labels()
+ui.state = uimod.S_SELECT
+ui.sel_mode = False
+ui.sel_key = 3
+vplays.clear()
+ui._dispatch(_t2.monotonic(), -1, None)
+check("menu-none enc slot swallows the input",
+      ui.sel_key == 3 and vplays == [], "sel=%d %s" % (ui.sel_key, vplays))
+with open(vapp.slot_path("btn-back", 0), "w") as f:
+    json.dump({"format": "mkyada-macro", "version": 2, "kind": "menu",
+               "menu": "none", "events": []}, f)
+ui.invalidate_labels()
+ui._dispatch(_t2.monotonic(), 0, uimod.K_BACK)
+check("menu-none BACK slot swallows the press",
+      ui.state == uimod.S_SELECT and vplays == [], "state=%d" % ui.state)
+os.remove(os.path.join(mac_dir, "btn-back.json"))
+ui.invalidate_labels()
+
 # per-context overrides: enc-cw@home plays on the layer picker; the other
 # direction of a half-assigned wheel is dead; unassigned BACK stays default
 vapp.slot_ctx_path = lambda s, c: os.path.join(mac_dir, "%s@%s.json" % (s, c))

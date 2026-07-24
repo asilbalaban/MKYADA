@@ -245,8 +245,10 @@ export type ScrollDir = "up" | "down" | "left" | "right";
  * the same effect as turning the encoder (left/right) or the CONFIRM / BACK
  * buttons. Handled on the device itself, so it only means anything there.
  * "default" (module slots only, firmware 0.9.0) keeps the control's built-in
- * action — the carrier for "tap stays stock, hold/double do something". */
-export type MenuAction = "left" | "right" | "confirm" | "back" | "default";
+ * action — the carrier for "tap stays stock, hold/double do something".
+ * "none" (firmware 0.10.0) is the wire carrier of the "nothing" assignment:
+ * the firmware swallows the input entirely. */
+export type MenuAction = "left" | "right" | "confirm" | "back" | "default" | "none";
 
 /** Per-key behavior options shared by every assignment kind. */
 export interface AssignmentBehavior {
@@ -256,6 +258,9 @@ export interface AssignmentBehavior {
 
 export type Assignment = (
   | { kind: "none" }
+  // turn the input off: it does nothing at all — on a module slot this
+  // overrides even the built-in menu action (stored as a menu:"none" carrier)
+  | { kind: "nothing" }
   | { kind: "keystroke"; key: string }
   | { kind: "combo"; mods: string[]; key: string }
   | { kind: "text"; text: string }

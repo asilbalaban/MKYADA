@@ -31,6 +31,7 @@ import { Badge, Button, Field, Input, Select } from "./ui";
 
 const KINDS: { value: Assignment["kind"]; label: string }[] = [
   { value: "none", label: "Not assigned" },
+  { value: "nothing", label: "Do nothing (turn this control off)" },
   { value: "keystroke", label: "Single key" },
   { value: "combo", label: "Key combination" },
   { value: "text", label: "Type text" },
@@ -152,12 +153,16 @@ export function AssignmentEditor({
 }) {
   const [importError, setImportError] = useState("");
   const kinds = KINDS.map((k) =>
-    k.value === "none" && slotMode ? { ...k, label: "Built-in menu action (default)" } : k,
+    k.value === "none" && slotMode ? { ...k, label: "Built-in menu action" } : k,
   ).filter(
     (k) =>
       (k.value !== "sequence" || !nested) &&
       // menu nav is device-only; callers opt in (never inside a sequence)
-      (k.value !== "menu" || allowMenu),
+      (k.value !== "menu" || allowMenu) &&
+      // a true off switch only matters where "none" means the built-in
+      // action (module slots) — on keys, "Not assigned" already is nothing
+      // (but keep it listed if the current value somehow carries it)
+      (k.value !== "nothing" || slotMode || value.kind === "nothing"),
   );
   const hasVariants = !!(value.variants?.double || value.variants?.hold);
 
@@ -189,6 +194,7 @@ export function AssignmentEditor({
             onChange={(e) => {
               const kind = e.target.value as Assignment["kind"];
               if (kind === "none") onChange({ kind: "none" });
+              else if (kind === "nothing") onChange({ kind: "nothing" });
               else if (kind === "keystroke") onChange({ kind: "keystroke", key: "" });
               else if (kind === "combo") onChange({ kind: "combo", mods: [], key: "" });
               else if (kind === "text") onChange({ kind: "text", text: "" });
@@ -211,7 +217,7 @@ export function AssignmentEditor({
               </option>
             ))}
           </Select>
-          {value.kind !== "none" && value.kind !== "sequence" && (
+          {value.kind !== "none" && value.kind !== "nothing" && value.kind !== "sequence" && (
             kindRequiresHost(value.kind) ? (
               <Badge tone="amber">needs the MKYADA app running on this computer</Badge>
             ) : (
@@ -220,6 +226,13 @@ export function AssignmentEditor({
           )}
         </div>
       </Field>
+
+      {value.kind === "nothing" && (
+        <p className="text-xs text-fg-faint">
+          This control is turned off — pressing or turning it does nothing at all, not even
+          the built-in menu navigation.
+        </p>
+      )}
 
       {value.kind === "keystroke" && (
         <Field label="Key">
@@ -513,7 +526,7 @@ export function AssignmentEditor({
         <SequenceEditor value={value.steps} onChange={(steps) => onChange({ ...value, steps })} />
       )}
 
-      {!nested && value.kind !== "none" && !kindRequiresHost(value.kind) && (
+      {!nested && value.kind !== "none" && value.kind !== "nothing" && !kindRequiresHost(value.kind) && (
         <div className="flex flex-wrap gap-3 border-t border-line pt-3">
           <Field label="Press again while playing">
             <Select

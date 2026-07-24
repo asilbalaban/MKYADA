@@ -322,6 +322,7 @@ const MENU_LABEL: Record<MenuAction, string> = {
   confirm: "Menu confirm",
   back: "Menu back",
   default: "Built-in action",
+  none: "Do nothing",
 };
 
 function scrollName(dir: ScrollDir, mods: string[]): string {
@@ -374,6 +375,10 @@ export function compileAssignment(a: Assignment, name?: string): MacroFile | nul
     switch (a.kind) {
       case "none":
         return null;
+      case "nothing":
+        // an off switch: a menu:"none" carrier the firmware swallows —
+        // on a module slot it overrides even the built-in menu action
+        return { ...base, name: name ?? "Do nothing", kind: "menu", menu: "none", events: [] };
       case "keystroke":
         return { ...base, name: name ?? a.key, kind: "keystroke", combo: { mods: [], key: a.key }, events: keyTap(a.key, 0) };
       case "combo":
@@ -541,11 +546,12 @@ export function compileSlotAssignment(a: Assignment): MacroFile | null {
   return compileAssignment(a);
 }
 
-/** Card text for a module slot: the tap action plus any double/hold extras
- * ("Built-in" tap is elided — the gestures are the interesting part). */
+/** Card text for a module slot: the tap action plus any double/hold extras.
+ * A "none" tap reads as the explicit "Built-in" choice — a slot never shows
+ * as unset or "default". */
 export function describeSlotAssignment(a: Assignment): string {
   const parts: string[] = [];
-  if (a.kind !== "none") parts.push(describeAssignment(a));
+  parts.push(a.kind === "none" ? "Built-in" : describeAssignment(a));
   const d = a.variants?.double;
   const h = a.variants?.hold;
   if (d && d.kind !== "none") parts.push(`2×: ${describeAssignment(d)}`);
@@ -556,8 +562,10 @@ export function describeSlotAssignment(a: Assignment): string {
 /** Parse a macro file back into an editable assignment via its kind metadata. */
 export function parseAssignment(m: MacroFile): Assignment {
   let a = parseAssignmentBase(m);
-  // a menu:"default" carrier (module slots) edits as "built-in tap" = none
+  // a menu:"default" carrier (module slots) edits as "built-in tap" = none;
+  // a menu:"none" carrier edits as the explicit off switch
   if (a.kind === "menu" && a.action === "default") a = { kind: "none" };
+  if (a.kind === "menu" && a.action === "none") a = { kind: "nothing" };
   if (m.variants && (m.variants.double || m.variants.hold)) {
     a.variants = {
       ...(m.variants.double ? { double: parseAssignmentBase(m.variants.double) } : {}),
@@ -665,6 +673,8 @@ export function describeAssignment(a: Assignment): string {
   switch (a.kind) {
     case "none":
       return "Not assigned";
+    case "nothing":
+      return "Do nothing";
     case "keystroke":
       return displayKey(a.key).toUpperCase();
     case "combo":

@@ -529,7 +529,8 @@ class Ui:
     def _run_node(self, node, meta, choice, now, default, dflt):
         """Fire one resolved slot gesture. A "menu"-kind assignment drives
         the BUILT-IN navigation (never another custom slot — no recursion);
-        its "default" action means whatever this input does out of the box."""
+        its "default" action means whatever this input does out of the box,
+        and "none" turns the control off — the input is swallowed."""
         if node[0] == "menu":
             act = node[1]
             if act == "left":
@@ -540,6 +541,8 @@ class Ui:
                 default(now, 0, K_CONFIRM)
             elif act == "back":
                 default(now, 0, K_BACK)
+            elif act == "none":
+                pass  # assigned "Do nothing" in the app
             else:
                 dflt()
         else:
