@@ -364,9 +364,13 @@ class App:
 
     def macro_path_for(self, key_no, layer_idx):
         if self.profile_id:
-            p = "/macros/%s_key%d.json" % (self.profile_id, key_no)
-            if self._file_exists(p):
-                return p  # overridden in this profile
+            # A profile is a full, independent config (issue #23): a new one is
+            # seeded as a copy of the standalone keys, so its files ARE the
+            # config. No fallback to the standalone macro — a key the user
+            # cleared has no profile file and must do nothing, not inherit the
+            # global assignment (that's what "not assigned in this profile"
+            # means). Module slots keep their fallback (see slot_path).
+            return "/macros/%s_key%d.json" % (self.profile_id, key_no)
         if layer_idx == 0:
             return "/macros/key%d.json" % key_no
         return "/macros/key%d-%s.json" % (key_no, LAYER_NAMES[layer_idx])

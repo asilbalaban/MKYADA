@@ -692,6 +692,22 @@ app.proto.ser = None
 # --- serial "led" op (proto v2): app feedback override --------------------
 check("hello reports proto v8", app.hello()["proto"] == 8, str(app.hello()["proto"]))
 check("hello reports usb_drive", app.hello()["usb_drive"] == app.config["usb_drive"], str(app.hello()))
+
+# profile path resolution (issue #23): a profile is a full independent config —
+# numbered keys resolve to the profile's file with NO fallback (a cleared key
+# does nothing), while module slots keep their standalone fallback.
+app.handle_msg({"t": "profile", "id": "p_test"})
+check("profile set via serial", app.profile_id == "p_test")
+check("profile key path no fallback", app.macro_path_for(1, 0) == "/macros/p_test_key1.json",
+      app.macro_path_for(1, 0))
+check("profile key path ignores layer", app.macro_path_for(2, 1) == "/macros/p_test_key2.json",
+      app.macro_path_for(2, 1))
+check("profile slot falls back to standalone", app.slot_path("enc-cw", 0) == "/macros/enc-cw.json",
+      app.slot_path("enc-cw", 0))
+app.handle_msg({"t": "profile", "id": None})
+check("profile cleared", app.profile_id is None)
+check("no profile -> standalone key path", app.macro_path_for(1, 0) == "/macros/key1.json",
+      app.macro_path_for(1, 0))
 app.proto.ser = FakeSerial([])
 app.handle_msg({"t": "led", "mode": "solid", "rgb": [255, 0, 0]})
 check("led solid override set", app.led.override == ("solid", (255, 0, 0)), str(app.led.override))

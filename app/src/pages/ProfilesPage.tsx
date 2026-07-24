@@ -5,7 +5,7 @@ import { useState } from "react";
 import { useDevice } from "../lib/device";
 import { useProfiles } from "../lib/profiles";
 import { ipc } from "../lib/ipc";
-import type { Assignment, MenuAction, ModuleSlot, Profile } from "../lib/types";
+import type { Assignment, ModuleSlot, Profile } from "../lib/types";
 import { MODULE_SLOTS, MODULE_SLOT_LABELS, deviceModel } from "../lib/types";
 import {
   defaultConfig,
@@ -13,28 +13,29 @@ import {
   macroFileName,
   parseAssignment,
   parseDeviceMacro,
-  slotFileName,
 } from "../lib/macro-model";
 import { AssignmentPanel } from "../components/AssignmentPanel";
 import { Crosshair } from "lucide-react";
 import { Badge, Button, Card, Field, Input } from "../components/ui";
 
-/** Each module control's built-in grid action, so a fresh profile shows the
- * device's default behavior (e.g. BACK → open the layer screen) instead of
- * "not assigned" — the user overrides only what differs (issue #23). */
-const SLOT_BUILTIN_ACTION: Record<ModuleSlot, MenuAction> = {
-  "enc-cw": "right",
-  "enc-ccw": "left",
-  "btn-back": "home",
-  "btn-confirm": "confirm",
-  "btn-psh": "confirm",
+/** What each module control does by default (grid context) — shown when a
+ * profile doesn't override it, mirroring the Keys page. Module controls keep
+ * their built-in behavior under a profile (the device falls back for slots),
+ * so a left-alone wheel/button navigates and speed-edits exactly as standalone. */
+const SLOT_BUILTINS: Record<ModuleSlot, string> = {
+  "enc-cw": "moves the selection right",
+  "enc-ccw": "moves the selection left",
+  "btn-back": "opens the layer screen",
+  "btn-confirm": "opens the selected key's speed editor",
+  "btn-psh": "speed editor / select mode",
 };
 
-/** Snapshot the device's current standalone assignments (numbered keys +
- * Vision 6 module controls, grid / layer A) so a new profile starts as a copy
- * of the default system instead of empty — otherwise its module controls are
- * dead while the profile holds host mode (issue #23). */
-async function readDefaultKeys(drivePath: string): Promise<Record<string, Assignment>> {
+/** Snapshot the device's standalone numbered-key assignments so a new profile
+ * starts as a full copy of the keypad's own setup (issue #23). The profile is
+ * then an independent config: a key it doesn't carry does nothing (no fallback
+ * to global), so the user clears the ones this app shouldn't have and keeps the
+ * rest as copied. Module controls aren't copied — they fall back to built-in. */
+async function copyGlobalKeys(drivePath: string): Promise<Record<string, Assignment>> {
   const out: Record<string, Assignment> = {};
   let config = defaultConfig();
   try {
@@ -43,26 +44,14 @@ async function readDefaultKeys(drivePath: string): Promise<Record<string, Assign
     // no config yet — defaults are fine
   }
   const existing = new Set(await ipc.driveList(drivePath, "macros").catch(() => [] as string[]));
-  const read = async (file: string): Promise<Assignment | null> => {
-    if (!existing.has(file.split("/").pop()!)) return null; // built-in / unassigned
-    try {
-      return parseAssignment(parseDeviceMacro(await ipc.driveRead(drivePath, file)));
-    } catch {
-      return null;
-    }
-  };
   for (let k = 1; k <= config.key_count; k++) {
     if (config.layer_key === k) continue;
-    const a = await read(macroFileName(k, 0));
-    if (a) out[String(k)] = a;
-  }
-  if (deviceModel(config) === "vision6") {
-    for (const s of MODULE_SLOTS) {
-      // a custom grid macro wins; otherwise carry the built-in menu action
-      out[s] = (await read(slotFileName(s, 0, "grid"))) ?? {
-        kind: "menu",
-        action: SLOT_BUILTIN_ACTION[s],
-      };
+    const file = macroFileName(k, 0);
+    if (!existing.has(file.split("/").pop()!)) continue; // globally unassigned
+    try {
+      out[String(k)] = parseAssignment(parseDeviceMacro(await ipc.driveRead(drivePath, file)));
+    } catch {
+      // unreadable — leave it out (unassigned in the profile)
     }
   }
   return out;
@@ -87,8 +76,9 @@ export function ProfilesPage() {
   async function addProfile() {
     const id = `p${Date.now().toString(36)}`;
     setAdding(true);
-    // start as a copy of the device's current default setup, not empty
-    const keys = drive ? await readDefaultKeys(drive.path).catch(() => ({})) : {};
+    // A new profile is a full copy of the keypad's own key setup; you then
+    // clear or change only what should differ for this app (issue #23).
+    const keys = drive ? await copyGlobalKeys(drive.path).catch(() => ({})) : {};
     const p: Profile = {
       id,
       name: foreground.exe ? foreground.exe.replace(/\.exe$/i, "") : "New profile",
@@ -113,9 +103,12 @@ export function ProfilesPage() {
 
   function saveKeyAssignment() {
     if (!selected || editKey === null || !draft) return;
-    const keys = { ...selected.keys };
-    if (draft.kind === "none") delete keys[String(editKey)];
-    else keys[String(editKey)] = draft;
+    // Always store the choice — including "none" (not assigned). saveProfiles
+    // compiles "none" to null and DELETES that key's copied file, so the key
+    // does nothing under this profile (there's no fallback to global). Just
+    // dropping it from the map would leave the copied file behind and it would
+    // keep firing (issue #23).
+    const keys = { ...selected.keys, [String(editKey)]: draft };
     updateSelected({ keys });
     setDraft(null);
   }
@@ -137,9 +130,10 @@ export function ProfilesPage() {
           )}
         </div>
         <p className="text-xs text-fg-faint mt-2">
-          When the foreground app matches a profile, the keypad's presses are routed through
-          this app and played back via the device (still hardware HID). Otherwise the device
-          uses its own on-board key assignments.
+          When the foreground app matches a profile, the keypad runs that profile's config —
+          natively, on the device, so the wheel, nav buttons and speed editor all keep working.
+          A new profile is a full copy of the keypad's own key setup; a key you clear does nothing
+          for this app (it doesn't fall back to the global assignment).
         </p>
       </Card>
 
@@ -154,8 +148,8 @@ export function ProfilesPage() {
         >
           {profiles.length === 0 ? (
             <p className="text-fg-faint text-xs">
-              No profiles. Focus the target app, then click “+ Add” — the new profile starts as a
-              copy of the keypad's current setup, ready to tweak.
+              No profiles. Focus the target app, then click “+ Add”. A new profile copies the
+              keypad's own key setup — clear the keys this app shouldn't have, change the rest.
             </p>
           ) : (
             <ul className="flex flex-col gap-1">
@@ -231,7 +225,7 @@ export function ProfilesPage() {
                       >
                         <span className="font-semibold text-fg">Key {n}</span>
                         <span className="text-xs text-fg-muted">
-                          {a ? describeAssignment(a) : "device default"}
+                          {a && a.kind !== "none" ? describeAssignment(a) : "not assigned"}
                         </span>
                       </button>
                     );
@@ -255,7 +249,9 @@ export function ProfilesPage() {
                           >
                             <span className="font-semibold text-fg">{MODULE_SLOT_LABELS[s]}</span>
                             <span className="text-xs text-fg-muted">
-                              {a ? describeAssignment(a) : "no action in this profile"}
+                              {a && a.kind !== "none"
+                                ? describeAssignment(a)
+                                : `Built-in: ${SLOT_BUILTINS[s]}`}
                             </span>
                           </button>
                         );
@@ -271,8 +267,8 @@ export function ProfilesPage() {
                     <div className="flex flex-col gap-3">
                       <p className="text-xs text-fg-faint">
                         {typeof editKey === "number"
-                          ? `Key ${editKey} — unassigned keys fall back to the device's own config.`
-                          : `${MODULE_SLOT_LABELS[editKey]} — only acts while this profile is active; e.g. set the wheel to zoom in Photoshop.`}
+                          ? `Key ${editKey} — set to “Not assigned”, it does nothing for this app (it does NOT fall back to the global key).`
+                          : `${MODULE_SLOT_LABELS[editKey]} — left on “Built-in” it keeps ${SLOT_BUILTINS[editKey]} while this profile is active; override it e.g. to zoom the wheel in Photoshop.`}
                       </p>
                       <AssignmentPanel
                         value={draft ?? selected.keys[String(editKey)] ?? { kind: "none" }}
@@ -283,6 +279,10 @@ export function ProfilesPage() {
                         // device-menu nav / on-screen name only exist on a screen model
                         allowMenu={isVision}
                         labelOnScreen={isVision}
+                        // module controls keep their built-in action when unset
+                        // (the device runs it natively), like the Keys page
+                        slotMode={typeof editKey !== "number"}
+                        builtinDesc={typeof editKey !== "number" ? SLOT_BUILTINS[editKey] : undefined}
                         // rotation has no press to double/hold on
                         allowVariants={typeof editKey === "number" || editKey.startsWith("btn-")}
                         fwVersion={hello?.fw}

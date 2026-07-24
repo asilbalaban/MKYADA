@@ -24,9 +24,6 @@ import { useDevice } from "./device";
 /** Holding a sound key this long stops all playing sounds instead of playing. */
 const SOUND_HOLD_STOP_MS = 400;
 
-/** Encoder detents queued per direction at most — a fast spin plays a
- *  bounded burst instead of a long zoom tail after the wheel stops. */
-const ENC_QUEUE_MAX = 8;
 import { ipc } from "./ipc";
 import type {
   Assignment,
@@ -46,17 +43,13 @@ import {
   compileSequenceParts,
   compileVariantParts,
   macroFileName,
-  MOD_TO_LABEL,
   parseDeviceMacro,
   profileKeySlot,
   profileMacroFileName,
-  SCROLL_DEFAULT_AMOUNT,
   sequenceIsPureHid,
   sequencePartFileName,
   stepIsHid,
-  variantPartFileName,
 } from "./macro-model";
-import { getWheelAccel } from "./settings";
 import { serializeForDevice } from "./recorder-model";
 
 /** Perform a computer-side key action (Stream Deck style): open an
@@ -185,18 +178,21 @@ export function ProfilesProvider({ children }: { children: ReactNode }) {
     }).catch(() => {});
   }, [port, activeProfile, send, updating]);
 
-  // hold host mode while a profile is active; release it otherwise.
-  // host_enter doubles as the watchdog ping and re-asserts host mode in case
-  // another page (setup/keys test) issued a host_leave meanwhile.
-  // Suspended during a firmware update — the keypad is locked in update mode
-  // and every non-transfer command would just bounce with "updating".
+  // Activate the profile on the device instead of holding host mode
+  // (issue #23): the firmware redirects its macro paths to this profile's
+  // files, so the whole on-device UI — grid, wheel, speed editor — runs the
+  // profile natively. Un-overridden keys/controls fall back to the standalone
+  // config on the device. The 2s re-assert re-arms it after a reconnect (the
+  // device clears the profile on disconnect); it's a no-op when unchanged.
+  // Suspended during a firmware update (the link is locked).
   useEffect(() => {
-    if (!port || !activeProfile || updating) return;
-    void send({ t: "host_enter" });
-    const tick = setInterval(() => void send({ t: "host_enter" }), 2000);
+    if (!port || updating) return;
+    const pid = activeProfile ? `p_${activeProfile.id}` : null;
+    void send({ t: "profile", id: pid });
+    const tick = setInterval(() => void send({ t: "profile", id: pid }), 2000);
     return () => {
       clearInterval(tick);
-      void send({ t: "host_leave" }).catch(() => {});
+      if (pid) void send({ t: "profile", id: null }).catch(() => {});
     };
   }, [port, activeProfile, send, updating]);
 
@@ -415,33 +411,17 @@ export function ProfilesProvider({ children }: { children: ReactNode }) {
         }
         const profile = activeRef.current;
         if (profile) {
+          // A profile is a full, independent config (issue #23): a key it
+          // doesn't assign does NOTHING — no fallback to the standalone macro.
+          // (Module slots the profile leaves alone keep their built-in nav;
+          // that's handled on the device via slot_path's fallback.)
           const a = profile.keys[String(slot)];
-          if (!a || a.kind === "none") return;
-          const mainFile = profileMacroFileName(profile.id, slot);
-          if (a.variants?.double || a.variants?.hold) {
-            // the device is in host mode and won't resolve variants itself —
-            // we time the gesture and play/perform the chosen action
-            return startKeyLogic(keyId, a, (choice) => {
-              const chosen = choice === "tap" ? a : a.variants?.[choice];
-              if (!chosen || chosen.kind === "none") return;
-              if (chosen.kind === "sound") {
-                void playSound(chosen.file).catch(() => {});
-              } else if (
-                chosen.kind === "launch" ||
-                chosen.kind === "command" ||
-                chosen.kind === "mic" ||
-                chosen.kind === "webhook"
-              ) {
-                runHostAction(chosen);
-              } else if (chosen.kind === "sequence" && !sequenceIsPureHid(chosen.steps)) {
-                void runSequence(keyId, chosen.steps, mainFile);
-              } else if (choice === "tap") {
-                void send({ t: "play", file: mainFile });
-              } else {
-                void send({ t: "play", file: variantPartFileName(mainFile, choice) });
-              }
-            });
-          }
+          if (!a || a.kind === "none") return; // not assigned in this profile
+          // The device runs this profile natively: it plays the HID, resolves
+          // variants and applies per-profile speed itself. The app only
+          // performs the computer-side kinds. Variant gestures are announced
+          // by the firmware as key_action (handled elsewhere).
+          if (a.variants?.double || a.variants?.hold) return;
           if (a.kind === "sound") return armSound(keyId, a.file, a.holdAction);
           if (a.kind === "launch" || a.kind === "command" || a.kind === "webhook") {
             return runHostAction(a);
@@ -456,23 +436,13 @@ export function ProfilesProvider({ children }: { children: ReactNode }) {
             return;
           }
           if (a.kind === "sequence" && !sequenceIsPureHid(a.steps)) {
-            return void runSequence(keyId, a.steps, mainFile);
+            return void runSequence(keyId, a.steps, profileMacroFileName(profile.id, slot));
           }
-          // single keys behave like a real keyboard in host mode too: the
-          // device holds the HID key down until our "stop" on the up edge
-          // (proto v5) and the OS typematic repeat types eeee… at the
-          // user's own keyboard rate
-          if (a.kind === "keystroke" && a.behavior?.hold_repeat !== false && protoRef.current >= 5) {
-            hidHoldKeys.current.add(keyId);
-            void send({ t: "play", file: mainFile, hold: true });
-            return;
-          }
-          // pure-HID sequences compiled into the profile macro file itself
-          void send({ t: "play", file: mainFile });
-          return;
+          return; // pure-HID override — the device plays it natively
         }
-        // nav-slot events only stream while a profile holds host mode, so
-        // the global (no-profile) fallback below is for numbered keys only
+        // No profile active — standalone computer-side actions for numbered
+        // keys: the device already played the HID, we perform the
+        // launch/command/sound/webhook/mic side from the file it ran.
         if (typeof slot !== "number") return;
         const d = driveRef.current;
         if (!d) return;
@@ -508,85 +478,29 @@ export function ProfilesProvider({ children }: { children: ReactNode }) {
     [onBtn, handleEdge],
   );
 
-  // ---- Vision 6 module controls under an active profile (issue #17) ------
-  // In host mode the firmware forwards the wheel as {"t":"enc",d,n} and the
-  // nav buttons as {"t":"btn",slot,down} instead of playing anything itself —
-  // perform the profile's slot assignments here (e.g. wheel = zoom in
-  // Photoshop). The encoder push ("psh") is assignable like the rest since
-  // issue #19 made it a standalone slot too.
-  const encPending = useRef(new Map<ModuleSlot, number>());
-  const encPumping = useRef(false);
-  // wheel acceleration state: last event time + direction (a direction
-  // change or a slow turn resets the multiplier)
-  const encAccel = useRef({ t: 0, slot: "" });
-
+  // ---- Vision 6 module controls under an active profile (issue #23) -------
+  // The device runs the profile natively now: the wheel and nav buttons do
+  // their built-in navigation (or the profile's own scroll/HID slot) on the
+  // device and stream {"t":"enc"} / {"t":"btn"} so the app can perform the
+  // computer-side kinds (e.g. wheel = a webhook). Nav buttons ride the same
+  // edge handler as numbered keys; only the wheel needs its own here.
   const handleEncoder = useCallback(
-    (dir: "enc-cw" | "enc-ccw", detents: number) => {
+    (dir: "enc-cw" | "enc-ccw", _detents: number) => {
       if (pausedRef.current) return;
       const profile = activeRef.current;
       const a = profile?.keys[dir];
       if (!profile || !a || a.kind === "none") return;
-      const mainFile = profileMacroFileName(profile.id, dir);
-      // host-performed kinds fire once per rotation event — a fast spin
-      // must not open an app or call a webhook once per detent
+      // computer-side kinds fire once per rotation event; scroll/other HID is
+      // played by the device natively, so there's nothing to do for those.
       if (a.kind === "sound") return void playSound(a.file).catch(() => {});
       if (a.kind === "launch" || a.kind === "command" || a.kind === "mic" || a.kind === "webhook") {
         return runHostAction(a);
       }
       if (a.kind === "sequence" && !sequenceIsPureHid(a.steps)) {
-        return void runSequence(dir, a.steps, mainFile);
+        return void runSequence(dir, a.steps, profileMacroFileName(profile.id, dir));
       }
-      // Scroll/zoom rides the direct serial scroll (proto v6): no per-detent
-      // file playback round-trips, so a spin feels like a real wheel — and a
-      // fast spin multiplies the step (same tiers as the device's own
-      // speed-editor acceleration; Settings → Wheel acceleration).
-      if (a.kind === "scroll" && (helloRef.current?.proto ?? 0) >= 6) {
-        const now = performance.now();
-        const st = encAccel.current;
-        const dt = now - st.t;
-        const same = st.slot === dir;
-        st.t = now;
-        st.slot = dir;
-        let per = 1;
-        if (getWheelAccel() && same) per = detents > 1 || dt < 40 ? 3 : dt < 90 ? 2 : 1;
-        const n = Math.max(
-          1,
-          Math.min(20, Math.round((a.amount ?? SCROLL_DEFAULT_AMOUNT) * detents * per)),
-        );
-        const mods = (a.mods ?? []).map((m) => MOD_TO_LABEL[m] ?? m.toLowerCase());
-        const dy = a.dir === "up" ? n : a.dir === "down" ? -n : 0;
-        const dx = a.dir === "right" ? n : a.dir === "left" ? -n : 0;
-        void send({ t: "scroll", dy, dx, ...(mods.length ? { mods } : {}) }).catch(() => {});
-        return;
-      }
-      // HID kinds (scroll/zoom, keystroke, …): one play per detent, like the
-      // firmware's own standalone encoder slots. The firmware drops play
-      // commands that land mid-playback, so pump serially (await play_done)
-      // over a bounded queue instead of firing blind.
-      const pend = encPending.current;
-      pend.set(dir, Math.min((pend.get(dir) ?? 0) + detents, ENC_QUEUE_MAX));
-      if (encPumping.current) return;
-      encPumping.current = true;
-      void (async () => {
-        try {
-          for (;;) {
-            const next = [...encPending.current.entries()].find(([, n]) => n > 0);
-            if (!next) break;
-            const [slot, n] = next;
-            encPending.current.set(slot, n - 1);
-            const p = activeRef.current;
-            if (!p || pausedRef.current) break;
-            const done = waitPlayDone(2000);
-            await send({ t: "play", file: profileMacroFileName(p.id, slot) });
-            await done;
-          }
-        } finally {
-          encPending.current.clear();
-          encPumping.current = false;
-        }
-      })();
     },
-    [send, waitPlayDone, runSequence],
+    [runSequence],
   );
 
   useEffect(
@@ -656,6 +570,24 @@ export function ProfilesProvider({ children }: { children: ReactNode }) {
     },
     [drive, hello],
   );
+
+  // Re-sync every profile's macro files to the device when its drive appears.
+  // Files are otherwise only written on edit, so a profile configured while
+  // the keypad was disconnected — or set up on another machine, or predating a
+  // firmware reflash — leaves the device without the override files, and it
+  // silently plays the standalone macro for that key instead (issue #23).
+  // saveProfiles rewrites the whole set idempotently.
+  const syncedDrive = useRef<string | null>(null);
+  useEffect(() => {
+    if (!drive) {
+      syncedDrive.current = null; // reconnect should re-sync
+      return;
+    }
+    if (!hello || updating || profiles.length === 0) return; // wait for proto
+    if (syncedDrive.current === drive.path) return;
+    syncedDrive.current = drive.path;
+    void saveProfiles(profiles);
+  }, [drive, hello, profiles, updating, saveProfiles]);
 
   return (
     <Ctx.Provider value={{ profiles, foreground, activeProfile, enabled, setEnabled, saveProfiles }}>
