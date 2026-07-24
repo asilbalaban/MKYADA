@@ -67,15 +67,20 @@ export function DevicesPage({ onConnected }: { onConnected: () => void }) {
     toast.success("Nickname saved");
   }
 
-  async function updateFirmware() {
+  async function updateFirmware(reinstall = false) {
     if (!hello || !drive) return;
     const ok = await confirm({
-      title: "Update firmware",
-      message:
-        `Update the device firmware from v${hello.fw} to v${bundledFw}?\n\n` +
-        "Your key assignments, macros and config stay untouched. " +
-        "The keypad restarts and reconnects automatically.",
-      confirmLabel: "Update",
+      title: reinstall ? "Reinstall firmware" : "Update firmware",
+      message: reinstall
+        ? `Rewrite every firmware file on the keypad with the bundled v${bundledFw}, ` +
+          "even though it already reports this version? Use this to repair a broken " +
+          "or half-finished install.\n\n" +
+          "Your key assignments, macros and config stay untouched. " +
+          "The keypad restarts and reconnects automatically."
+        : `Update the device firmware from v${hello.fw} to v${bundledFw}?\n\n` +
+          "Your key assignments, macros and config stay untouched. " +
+          "The keypad restarts and reconnects automatically.",
+      confirmLabel: reinstall ? "Reinstall" : "Update",
     });
     if (!ok) return;
     setUpdating(true);
@@ -90,7 +95,7 @@ export function DevicesPage({ onConnected }: { onConnected: () => void }) {
       // Drop the now-dead connection so auto-connect reattaches cleanly.
       await disconnect().catch(() => {});
       toast.success(
-        `Firmware updated (${files.length} files written)`,
+        `Firmware ${reinstall ? "reinstalled" : "updated"} (${files.length} files written)`,
         "The keypad is restarting — it will reconnect in a few seconds.",
       );
     } catch (e) {
@@ -185,7 +190,7 @@ export function DevicesPage({ onConnected }: { onConnected: () => void }) {
               <span>Board UID</span>
               <span className="text-fg font-mono text-xs">{hello.uid}</span>
             </div>
-            {fwOutdated && (
+            {fwOutdated ? (
               <div className="flex items-center gap-3 bg-warning-bg border border-warning-line rounded-lg px-3 py-2">
                 <span className="text-sm text-fg">
                   This app ships firmware v{bundledFw}; the device runs v{hello.fw}.
@@ -199,6 +204,20 @@ export function DevicesPage({ onConnected }: { onConnected: () => void }) {
                   {updating ? "Updating…" : "Update firmware"}
                 </Button>
               </div>
+            ) : (
+              bundledFw && (
+                <div className="flex items-center gap-3 text-sm text-fg-faint">
+                  <span>Firmware is up to date.</span>
+                  <Button
+                    onClick={() => void updateFirmware(true)}
+                    disabled={!drive}
+                    loading={updating}
+                    title="Rewrite all firmware files — repairs a broken or half-finished install"
+                  >
+                    {updating ? "Reinstalling…" : "Reinstall firmware"}
+                  </Button>
+                </div>
+              )
             )}
           </div>
         ) : (

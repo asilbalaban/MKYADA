@@ -421,18 +421,79 @@ app.pending_play = None
 app.play_file(path_stop, trigger=0)
 check("ignore keeps playing", app.pending_play is None, str(app.pending_play))
 
-# hold_repeat: replays while the physical key stays down
-path_hold = macro_file({"hold_repeat": True})
+# single keys hold like a real keyboard BY DEFAULT (issue #20): the HID key
+# stays down while the physical key is down — the host's typematic repeat
+# makes the eeee… — and is released when the key is released. No replay loop.
+path_hold = macro_file({})  # plain tap, no explicit hold_repeat
+sent_reports.clear()
 runs = {"n": 0}
+app.engine.play = lambda *a, **kw: runs.__setitem__("n", runs["n"] + 1)
+app.buttons.scan = lambda: []
+app.buttons.stable[0] = True
+_orig_tick = app.led.tick
+ticks = {"n": 0}
+def _release_after_3_ticks():
+    ticks["n"] += 1
+    if ticks["n"] >= 3:
+        app.buttons.stable[0] = False
+app.led.tick = _release_after_3_ticks
+app.play_file(path_hold, trigger=0)
+kbd = [r[2] for r in sent_reports if r[1] == 0x06]
+check("hold: key pressed", any(0x04 in r[2:] for r in kbd), str(kbd))
+check("hold: released on key-up", kbd and 0x04 not in kbd[-1][2:], str(kbd))
+check("hold: held across ticks", ticks["n"] >= 3, str(ticks))
+check("hold: no replay loop", runs["n"] == 0, str(runs))
+
+# "hold_repeat": false opts a single key back into play-once
+path_once = macro_file({"hold_repeat": False})
+app.led.tick = _orig_tick
+app.buttons.stable[0] = True
+runs["n"] = 0
+app.play_file(path_once, trigger=0)
+check("hold_repeat false plays once", runs["n"] == 1, str(runs))
+app.buttons.stable[0] = False
+
+# non-single-key macros keep the replay-while-held behaviour
+def multi_macro_file(settings):
+    f = tempfile.NamedTemporaryFile("w", suffix=".json", delete=False)
+    json.dump({"format": "mkyada-macro", "version": 2, "settings": settings,
+               "events": [{"delay": 0, "type": "key", "action": "down", "key": "ctrl_l"},
+                          {"delay": 0, "type": "key", "action": "down", "key": "a"},
+                          {"delay": 0, "type": "key", "action": "up", "key": "a"},
+                          {"delay": 0, "type": "key", "action": "up", "key": "ctrl_l"}]}, f)
+    f.close()
+    return f.name
+
+path_multi = multi_macro_file({"hold_repeat": True})
+runs["n"] = 0
 def _fake_play(events, **kw):
     runs["n"] += 1
     if runs["n"] >= 3:
         app.buttons.stable[0] = False
 app.engine.play = _fake_play
-app.buttons.scan = lambda: []
 app.buttons.stable[0] = True
-app.play_file(path_hold, trigger=0)
+app.play_file(path_multi, trigger=0)
 check("hold_repeat replays while held", runs["n"] == 3, str(runs))
+
+# serial hold (proto v5): {"t":"play","hold":true} keeps the key down until
+# the app's {"t":"stop"} — how host mode gives profile keys the same feel
+app.engine.play = _orig_play
+sent_reports.clear()
+app.proto.ser = FakeSerial([])  # connected, so the hold doesn't bail out
+app.last_rx = _time.monotonic()
+_orig_poll = app.proto.poll
+polls = {"n": 0}
+def _stop_on_second_poll():
+    polls["n"] += 1
+    return [{"t": "stop"}] if polls["n"] >= 2 else []
+app.proto.poll = _stop_on_second_poll
+app.play_file(path_hold, trigger=None, hold=True)
+kbd = [r[2] for r in sent_reports if r[1] == 0x06]
+check("serial hold: key pressed", any(0x04 in r[2:] for r in kbd), str(kbd))
+check("serial hold: released on stop", kbd and 0x04 not in kbd[-1][2:], str(kbd))
+check("serial hold: waited for stop", polls["n"] >= 2, str(polls))
+app.proto.poll = _orig_poll
+app.proto.ser = None
 
 app.buttons.scan = _orig_scan
 app.engine.play = _orig_play
@@ -590,7 +651,7 @@ app.proto.send = _orig_send
 app.proto.ser = None
 
 # --- serial "led" op (proto v2): app feedback override --------------------
-check("hello reports proto v4", app.hello()["proto"] == 4, str(app.hello()["proto"]))
+check("hello reports proto v5", app.hello()["proto"] == 5, str(app.hello()["proto"]))
 check("hello reports usb_drive", app.hello()["usb_drive"] is True, str(app.hello()))
 app.proto.ser = FakeSerial([])
 app.handle_msg({"t": "led", "mode": "solid", "rgb": [255, 0, 0]})
@@ -601,6 +662,20 @@ app.handle_msg({"t": "led", "mode": "off"})
 check("led override cleared by off", app.led.override is None, str(app.led.override))
 app.handle_msg({"t": "led", "mode": "solid", "rgb": "garbage"})
 check("led garbage rgb tolerated", app.led.override is None, str(app.led.override))
+
+# --- serial "label" op (fw 0.9.0): app-pushed profile label ---------------
+outbox.clear()
+app.proto.send = lambda obj: outbox.append(obj)
+app.handle_msg({"t": "label", "text": "Photoshop"})
+check("label stored", app.host_label == "Photoshop", str(app.host_label))
+check("label acked", outbox[-1] == {"t": "ok", "re": "label"}, str(outbox[-1:]))
+app.handle_msg({"t": "label", "text": "x" * 40})
+check("label truncated to 24", app.host_label == "x" * 24, str(app.host_label))
+app.handle_msg({"t": "label", "text": ""})
+check("label empty clears", app.host_label is None, str(app.host_label))
+app.handle_msg({"t": "label"})
+check("label missing text clears", app.host_label is None, str(app.host_label))
+app.proto.send = _orig_send
 app.proto.ser = None
 
 # --- serial file management (proto v3): fs_* commands ---------------------
@@ -714,6 +789,20 @@ check("usb_drive false honored", app.config["usb_drive"] is False)
 _b.open = _cfg_open({})
 app.load_config()
 check("usb_drive defaults on", app.config["usb_drive"] is True)
+_b.open = _real_open
+app.load_config()
+
+# show_layer / show_profile (fw 0.9.0): default off, non-bool coerced off
+_b.open = _cfg_open({"show_layer": True, "show_profile": "yes"})
+app.load_config()
+check("show_layer true honored", app.config["show_layer"] is True)
+check("show_profile non-bool -> off", app.config["show_profile"] is False)
+_b.open = _cfg_open({})
+app.load_config()
+check("band flags default off", app.config["show_layer"] is False
+      and app.config["show_profile"] is False)
+check("hello mirrors band flags", app.hello()["show_layer"] is False
+      and app.hello()["show_profile"] is False, str(app.hello()))
 _b.open = _real_open
 app.load_config()
 
@@ -934,8 +1023,38 @@ i18nmod.set_lang("en")
 check("i18n back to en", i18nmod.tr("settings") == "SETTINGS")
 check("i18n unknown key echoes", i18nmod.tr("nope-key") == "nope-key")
 
-# settings menu now has 4 localized items incl. Language
-check("set menu has language", uimod.set_items()[uimod.SET_LANG] == "Language")
+# settings menu: localized items incl. Language and the band toggles
+check("set menu has language", ui._set_items()[uimod.SET_LANG] == "Language")
+check("set menu band toggles show state",
+      ui._set_items()[uimod.SET_BAND_LAYER] == "Layer band: off"
+      and ui._set_items()[uimod.SET_BAND_PROFILE] == "Profile band: off",
+      str(ui._set_items()))
+
+# grid band composition (fw 0.9.0): layer part is device-side, profile part
+# is whatever the app last pushed via {"t":"label"}
+vapp.config["show_layer"] = False
+vapp.config["show_profile"] = False
+vapp.host_label = "Photoshop"
+check("band both off -> none", ui._band() is None, str(ui._band()))
+vapp.config["show_layer"] = True
+vapp.layer = 1
+check("band layer only", ui._band() == "Layer B", str(ui._band()))
+vapp.config["show_profile"] = True
+check("band layer + profile", ui._band() == "B: Photoshop", str(ui._band()))
+vapp.config["show_layer"] = False
+check("band profile only", ui._band() == "Photoshop", str(ui._band()))
+vapp.host_label = None
+check("band profile without label -> none", ui._band() is None, str(ui._band()))
+
+# {"t":"label"} lands in host_label and redraws through on_label (headless
+# no-op here — the point is it must not crash mid-grid)
+ui.state = uimod.S_SELECT
+vapp.handle_msg({"t": "label", "text": "GIMP"})
+check("vision6 label stored", vapp.host_label == "GIMP", str(vapp.host_label))
+vapp.handle_msg({"t": "label", "text": ""})
+check("vision6 label cleared", vapp.host_label is None)
+vapp.config["show_profile"] = False
+vapp.layer = 0
 
 # persist_lang rewrites config.json and announces the fresh config
 

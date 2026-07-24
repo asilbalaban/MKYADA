@@ -19,6 +19,10 @@ export interface Hello {
   model?: string;
   /** GPIO names in use, key 1 first (length == key_count); absent on older firmware */
   pins?: string[];
+  /** Vision 6 grid band: show the active layer; absent on firmware < 0.9.0 */
+  show_layer?: boolean;
+  /** Vision 6 grid band: show the app-pushed profile label; absent on firmware < 0.9.0 */
+  show_profile?: boolean;
   layer: string;
   mode: "standalone" | "host";
 }
@@ -54,6 +58,10 @@ export interface DeviceConfig {
   pins?: string[] | null;
   /** Vision 6 device UI language ("en" | "tr") — also editable on the device */
   lang?: string | null;
+  /** Vision 6: band over the key grid naming the active layer — also on the device */
+  show_layer?: boolean;
+  /** Vision 6: the band shows the app's active profile label — also on the device */
+  show_profile?: boolean;
   screen: { width: number; height: number };
 }
 
@@ -181,7 +189,10 @@ export interface MacroSettings {
   repeat?: number;
   /** pressing the macro's own key while it plays: stop it (default) or restart it */
   on_repress?: "stop" | "restart";
-  /** replay while the physical key is held — like holding a letter key down */
+  /** replay while the physical key is held — like holding a letter key down.
+   * Default ON for plain single-key macros (the firmware holds the HID key
+   * and the host OS's typematic repeat does the rest), off for every other
+   * kind; only deviations from that default are stored. */
   hold_repeat?: boolean;
   /** key logic: press-and-hold threshold in ms (default 400) */
   hold_ms?: number;

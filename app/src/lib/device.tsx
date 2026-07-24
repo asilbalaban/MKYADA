@@ -88,6 +88,20 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
         setReloading(false);
       }
       if (msg.t === "layer") setLayer(String((msg as { layer?: string }).layer ?? "a"));
+      // the device edited its own settings (Vision 6 menu persists straight
+      // into config.json and announces it) — mirror the toggles the
+      // Settings page renders from hello
+      if (msg.t === "config" && "show_layer" in msg) {
+        setHello((h) =>
+          h
+            ? {
+                ...h,
+                show_layer: msg.show_layer === true,
+                show_profile: (msg as { show_profile?: unknown }).show_profile === true,
+              }
+            : h,
+        );
+      }
       // Key presses carry a numeric `key`; Vision 6 nav buttons reuse t:"btn"
       // with a `slot` instead (and t:"enc" for the wheel) — those only go
       // through the generic fan-out above.

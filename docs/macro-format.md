@@ -33,7 +33,7 @@ identically.
 | `settings.speed` | no | Playback speed multiplier (default `1.0`; `2` = half the run time). On the Vision 6 the on-device speed editor rewrites this field in place and announces `macro_changed` (fw ≥ 0.7.0) |
 | `settings.repeat` | no | Repeat count. **`0` = loop until the key is pressed again.** Default `1`. |
 | `settings.on_repress` | no | What pressing the macro's own key does while it plays: `"stop"` (default) or `"restart"` (play again from the top). |
-| `settings.hold_repeat` | no | `true` = replay while the physical key is held down, like holding a letter key. Default `false`. Ignored when `variants` exist. |
+| `settings.hold_repeat` | no | Holding the physical key repeats the macro, like holding a letter key. **Default `true` for plain single-key macros** (one key down + its up, `kind` absent or `"keystroke"`) — the firmware then simply keeps the HID key down and the host OS's typematic repeat produces the stream at the user's own keyboard rate. Default `false` for everything else (those replay the file per pass). `false` opts a single key back into play-once. Ignored when `variants` exist. |
 | `settings.hold_ms` | no | Key logic: press-and-hold threshold in ms (default `400`). |
 | `settings.double_ms` | no | Key logic: double-press window in ms (default `250`). |
 | `events` | yes | Ordered event list (the **tap** action when `variants` exist) |

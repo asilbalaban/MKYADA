@@ -1,4 +1,10 @@
-# MKYADA serial protocol (v4)
+# MKYADA serial protocol (v5)
+
+v5 adds `hold: true` on `play`: for a plain single-key macro the device
+presses the HID key and **keeps it down until `stop`** (or until the app goes
+silent) — the host OS's typematic repeat then types like a held letter key.
+This is how host mode gives profile single keys the real-keyboard hold that
+standalone keys get natively (see macro-format.md `settings.hold_repeat`).
 
 v4 (firmware 0.5.0) is a **capability signal only** — no new messages. A
 device announcing `proto >= 4` in `hello` understands the v4 **stream macro
@@ -10,6 +16,12 @@ ignore them, old firmware never receives them): `hello.model` + `hello.pins`,
 the `macro_changed` / `enc` / `pin` announcements, the `pin_detect` command,
 and the `btn.slot` variant for the Vision 6 module buttons. See
 [Two models](#two-models-firmware-070) below.
+
+Firmware 0.9.0 adds the additive `label` command (the app pushes its active
+profile name for the Vision 6 grid band) plus the config fields
+`show_layer` / `show_profile` and their mirrors in `hello` — the band over
+the macro grid that names the active layer and/or the app's active profile
+(issue #18). Old firmware ignores `label`; old hosts never see the fields.
 
 v3 adds the `fs_*` file management commands (hidden-drive mode).
 v2 (firmware 0.3.0) adds: `btn` streaming in standalone mode, the `key_action`
@@ -57,7 +69,7 @@ STANDALONE ──(host_enter)──► HOST ──(host_leave | CDC disconnect |
 | `{"t":"identify"}` | Reply with `hello` |
 | `{"t":"ping"}` | Reply `pong`; refreshes the host-mode watchdog |
 | `{"t":"host_enter"}` / `{"t":"host_leave"}` | Switch mode; reply `ok` |
-| `{"t":"play","file":"macros/key1.json","speed":1.5,"repeat":2}` | Play a file from the drive. `speed`/`repeat` optional (default: the macro's own `settings`; `repeat: 0` = loop) |
+| `{"t":"play","file":"macros/key1.json","speed":1.5,"repeat":2}` | Play a file from the drive. `speed`/`repeat` optional (default: the macro's own `settings`; `repeat: 0` = loop). v5: optional `"hold": true` — a plain single-key macro is pressed and **held until `stop`** (real-keyboard hold; the sender must send `stop` on the key's up edge) |
 | `{"t":"stop"}` | Abort current playback |
 | `{"t":"keys","mods":["CTRL","SHIFT"],"key":"s"}` | Tap a combo directly (no file) |
 | `{"t":"get_config"}` | Reply with `config` |
@@ -68,6 +80,7 @@ STANDALONE ──(host_enter)──► HOST ──(host_leave | CDC disconnect |
 | `{"t":"fs_read","path":"macros/key1.json"}` | v3. Stream the file back as `fs_chunk` messages; the host must answer each non-final chunk with `{"t":"fs_ack"}` (one chunk in flight) |
 | `{"t":"fs_write","path":"macros/key1.json","seq":0,"data":"<base64>","eof":false}` | v3. Chunked upload (≤3 KB raw per chunk); every chunk is acknowledged with `ok`. Written to `<path>.part`, renamed into place on `eof` — a dropped transfer never corrupts the target. Needs a writable filesystem, i.e. `usb_drive: false` (otherwise `err readonly`) |
 | `{"t":"fs_delete","path":"macros/key1.json"}` | v3. Delete a file; replies `ok` |
+| `{"t":"label","text":"Photoshop"}` | fw 0.9.0, Vision 6. Name of the app's active profile (or any short text, ≤24 chars) for the grid band shown when config `show_profile` is on. Empty text clears it; the device also drops it on app disconnect. Replies `ok` |
 | `{"t":"pin_detect","on":true}` | fw 0.7.0. Key-wiring wizard: normal key handling is suspended, every non-reserved edge GPIO is watched and edges stream back as `pin` messages. Auto-disarms after 120 s, on app disconnect, or on `reload`. `{"on":false}` restores the keys |
 
 ## Device → Host
@@ -128,6 +141,19 @@ One firmware serves both devices; `config.json "model"` picks the variant
 per-key GPIO-name list (e.g. `["GP29","GP28","GP27","GP26","GP15","GP13"]`)
 for keys soldered off the model's default order; `null` = default. Reserved
 pins are refused (core6: GP16; vision6: GP0-GP6 + GP16).
+
+### Grid band (firmware 0.9.0, vision6)
+
+`config.json` `"show_layer"` / `"show_profile"` (booleans, default false)
+draw an inverted strip over the macro grid; the six cells squeeze under it.
+`show_layer` names the active layer ("Layer A") — fully device-side.
+`show_profile` shows the last `label` text the app pushed (its active
+per-app profile); with both on the band reads "A: Photoshop". Both toggles
+are editable in the app (Settings → Keypad, config write + `reload`) and on
+the device (SETTINGS menu, which rewrites config.json like the language
+setting — needs the hidden-drive mode, else the filesystem is host-owned
+and the device shows the read-only notice). `hello` mirrors both fields so
+the app can render the switches without reading the file.
 
 ### Encoder / module-button custom slots (vision6)
 

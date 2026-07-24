@@ -60,7 +60,7 @@ import {
   straightenDrag,
   thinDrag,
 } from "../lib/recorder-model";
-import { IS_MAC } from "../lib/macro-model";
+import { IS_MAC, holdRepeatDefault } from "../lib/macro-model";
 import { displayKey } from "../lib/layout";
 import { undoRedoFromEvent, type History } from "../lib/history";
 import { Button, Field, Input, Select } from "./ui";
@@ -444,7 +444,7 @@ export function MacroEditor({
           <ToolField label="Hold" align="start">
             <Select
               title="Holding the key down"
-              value={macro.settings?.hold_repeat ? "repeat" : "once"}
+              value={(macro.settings?.hold_repeat ?? holdRepeatDefault(macro.kind)) ? "repeat" : "once"}
               onChange={(e) =>
                 onChange({
                   ...macro,

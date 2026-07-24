@@ -67,7 +67,8 @@ gc.collect()  # the display stack litters the heap; start the app compacted
 
 DEBOUNCE_S = 0.02
 PING_TIMEOUT_S = 5.0
-PROTO_VERSION = 4  # v4: streamed JSONL macro files (full-rate playback);
+PROTO_VERSION = 5  # v5: "play" accepts hold:true (key held until "stop");
+                   # v4: streamed JSONL macro files (full-rate playback);
                    # v3: fs_* file management over serial (hidden-drive mode)
 MACRO_FORMATS = ("mkyada-macro", "asil-macro")
 LAYER_NAMES = "abcdefgh"
@@ -99,6 +100,8 @@ DEFAULT_CONFIG = {
     "screen": {"width": 1920, "height": 1080},
     "usb_drive": True,   # false = hide the CIRCUITPY drive from the host;
                          # the app manages files over serial instead (boot.py)
+    "show_layer": False,    # vision6: band over the grid with the active layer
+    "show_profile": False,  # vision6: band shows the app-pushed profile label
 }
 
 
@@ -167,6 +170,7 @@ class App:
         self.upload = None  # in-flight fs_write: {"path", "tmp", "f", "seq"}
         self.pin_watch = None  # ("names", Buttons) while pin-detect mode is on
         self.pin_watch_until = 0.0
+        self.host_label = None  # app-pushed profile/app label for the band
         self.ui = None  # vision6 menu module (encoder + OLED state machine)
         if OLED and Ui:
             try:
@@ -208,6 +212,8 @@ class App:
         if cfg.get("busy_other") not in ("ignore", "switch"):
             cfg["busy_other"] = "ignore"
         cfg["usb_drive"] = cfg.get("usb_drive") is not False  # same rule as boot.py
+        cfg["show_layer"] = cfg.get("show_layer") is True
+        cfg["show_profile"] = cfg.get("show_profile") is True
         self.config = cfg
         self.engine.set_screen(cfg["screen"].get("width", 1920),
                                cfg["screen"].get("height", 1080))
@@ -264,6 +270,7 @@ class App:
                 "layer_count": c["layer_count"], "layer_mode": c["layer_mode"],
                 "key_map": c["key_map"], "usb_drive": c["usb_drive"],
                 "pins": self.key_pin_names(),
+                "show_layer": c["show_layer"], "show_profile": c["show_profile"],
                 "layer": LAYER_NAMES[self.layer], "mode": self.mode}
 
     def handle_msg(self, msg, in_playback=False):
@@ -302,7 +309,8 @@ class App:
         elif t == "play":
             path = "/" + str(msg.get("file", "")).lstrip("/")
             self.play_file(path, trigger=None,
-                           speed=msg.get("speed"), repeat=msg.get("repeat"))
+                           speed=msg.get("speed"), repeat=msg.get("repeat"),
+                           hold=bool(msg.get("hold")))
         elif t == "keys":
             self.engine.tap_combo(msg.get("mods"), str(msg.get("key", "")))
             self.proto.send({"t": "ok", "re": "keys"})
@@ -335,6 +343,15 @@ class App:
             else:
                 self.stop_pin_watch()
             self.proto.send({"t": "ok", "re": "pin_detect"})
+        elif t == "label":
+            # the app's active profile / foreground-app label for the grid
+            # band (config show_profile). Empty text clears; cleared
+            # automatically when the app disconnects.
+            text = str(msg.get("text") or "")[:24] or None
+            self.proto.send({"t": "ok", "re": "label"})
+            if text != self.host_label:
+                self.host_label = text
+                self.ui_call("on_label")
         elif t == "led":
             # app feedback color (e.g. mic muted -> red); "off" restores the
             # normal LED grammar. Cleared automatically on app disconnect.
@@ -609,7 +626,30 @@ class App:
             except ValueError:
                 pass  # skip a corrupt line rather than abort mid-macro
 
-    def play_file(self, path, trigger=None, speed=None, repeat=None):
+    def hold_key(self, events, trigger, should_stop):
+        """Single-key hold passthrough: press the HID key, keep the report
+        held while the physical key stays down, release on release. The host
+        OS's typematic repeat generates the character stream — exactly a
+        normal keyboard's rate and initial delay. `trigger` None = a serial
+        hold play: released by the app's "stop" (via should_stop) or when
+        the app goes away."""
+        self.engine.key_down(events[0])
+        try:
+            while True:
+                if should_stop():
+                    raise StopPlayback()
+                if trigger is not None:
+                    if not self.buttons.stable[trigger]:
+                        return
+                elif (not self.proto.connected
+                        or time.monotonic() - self.last_rx > PING_TIMEOUT_S):
+                    return  # app vanished mid-hold: never leave a key stuck
+                self.led.tick()
+                time.sleep(0.002)
+        finally:
+            self.engine.key_up(events[1])
+
+    def play_file(self, path, trigger=None, speed=None, repeat=None, hold=False):
         f = None
         try:
             gc.collect()
@@ -684,10 +724,25 @@ class App:
         loop = int(repeat) == 0
         # what a re-press of the same key does while playing: stop or restart
         on_repress = settings.get("on_repress", "stop")
-        # replay while the physical key is held down (like OS key repeat)
-        hold_repeat = bool(settings.get("hold_repeat"))
         events = data.get("events") or []
         screen = data.get("screen")
+        # A plain single-key macro: one key down + its up, nothing else.
+        # These get the real-keyboard hold treatment (issue #20): the HID
+        # usage stays down while the physical key is down and the HOST's
+        # typematic repeat produces the eeee… stream at the user's own
+        # keyboard rate — replaying the file per character capped at ~7 cps.
+        plain_tap = (not variants and len(events) == 2
+                     and events[0].get("type") == "key"
+                     and events[0].get("action") == "down"
+                     and events[1].get("type") == "key"
+                     and events[1].get("action") == "up"
+                     and events[0].get("key") == events[1].get("key"))
+        # replay while the physical key is held down (like OS key repeat);
+        # single keys default ON — "hold_repeat": false opts out
+        hold_repeat = settings.get("hold_repeat")
+        if hold_repeat is None:
+            hold_repeat = plain_tap and data.get("kind", "keystroke") == "keystroke"
+        hold_repeat = bool(hold_repeat)
 
         self.playing_key = trigger
         self.led.set(state=ledmod.LOOPING if loop else ledmod.PLAYING)
@@ -723,26 +778,32 @@ class App:
             return stop
 
         try:
-            runs = 0
-            while True:
-                if stream_pos is None:
-                    evs = events
-                else:
-                    f.seek(stream_pos)  # each pass re-reads the event lines
-                    evs = self.stream_events(f)
-                self.engine.play(evs, screen=screen, speed=speed,
-                                 should_stop=should_stop, tick=self.led.tick)
-                runs += 1
-                if loop:
-                    continue
-                if runs < max(1, int(repeat)):
-                    continue
-                # "aaaa…" behaviour: keep replaying while the key stays down
-                if hold_repeat and trigger is not None and self.buttons.stable[trigger]:
-                    self.buttons.scan()  # keep edge state fresh
-                    if self.buttons.stable[trigger]:
+            if (plain_tap and not loop and int(repeat) == 1
+                    and (hold or (hold_repeat and trigger is not None))):
+                # real-keyboard hold: HID key down until the physical key
+                # (or, for serial holds, the app's "stop") lets go
+                self.hold_key(events, trigger, should_stop)
+            else:
+                runs = 0
+                while True:
+                    if stream_pos is None:
+                        evs = events
+                    else:
+                        f.seek(stream_pos)  # each pass re-reads the event lines
+                        evs = self.stream_events(f)
+                    self.engine.play(evs, screen=screen, speed=speed,
+                                     should_stop=should_stop, tick=self.led.tick)
+                    runs += 1
+                    if loop:
                         continue
-                break
+                    if runs < max(1, int(repeat)):
+                        continue
+                    # "aaaa…" behaviour: keep replaying while the key stays down
+                    if hold_repeat and trigger is not None and self.buttons.stable[trigger]:
+                        self.buttons.scan()  # keep edge state fresh
+                        if self.buttons.stable[trigger]:
+                            continue
+                    break
         except StopPlayback:
             stopped = True
         except MemoryError:
@@ -837,6 +898,10 @@ class App:
             # app-commanded LED feedback must not outlive the app
             if self.led.override and not self.proto.connected:
                 self.led.clear_override()
+            # ...and neither must its profile label on the band
+            if self.host_label and not self.proto.connected:
+                self.host_label = None
+                self.ui_call("on_label")
             # a half-received upload must not leak its file handle either
             if self.upload and not self.proto.connected:
                 self.close_upload(discard=True)

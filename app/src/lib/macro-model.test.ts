@@ -8,6 +8,7 @@ import {
   compileSequenceParts,
   compileVariantParts,
   describeAssignment,
+  holdRepeatDefault,
   kindRequiresHost,
   migrateMacro,
   parseAssignment,
@@ -21,7 +22,10 @@ function normalize(a: Assignment): Assignment {
   if (out.behavior) {
     const b = { ...out.behavior };
     if (b.on_repress === "stop") delete b.on_repress;
-    if (!b.hold_repeat) delete b.hold_repeat;
+    // hold_repeat defaults on for single keys, off elsewhere
+    if (b.hold_repeat === undefined || b.hold_repeat === holdRepeatDefault(out.kind)) {
+      delete b.hold_repeat;
+    }
     if (Object.keys(b).length === 0) delete out.behavior;
     else out.behavior = b;
   }
@@ -81,6 +85,7 @@ const CASES: [string, Assignment][] = [
     },
   ],
   ["keystroke with restart", { kind: "keystroke", key: "a", behavior: { on_repress: "restart" } }],
+  ["keystroke opted out of hold-repeat", { kind: "keystroke", key: "a", behavior: { hold_repeat: false } }],
   ["combo with hold_repeat", { kind: "combo", mods: ["ALT"], key: "tab", behavior: { hold_repeat: true } }],
   ["launch with both behaviors", { kind: "launch", target: "/Applications/Notes.app", behavior: { on_repress: "restart", hold_repeat: true } }],
   [
@@ -118,6 +123,36 @@ describe("assignment round-trip", () => {
     const file = compileAssignment({ kind: "keystroke", key: "a", behavior: { on_repress: "stop" } })!;
     expect(file.settings?.on_repress).toBeUndefined();
     expect(file.settings?.hold_repeat).toBeUndefined();
+  });
+
+  // issue #20: single keys hold-repeat by default, like a real keyboard.
+  // The firmware applies the default itself, so the file stays silent unless
+  // the user deviates from it.
+  it("single keys hold-repeat by default (nothing written)", () => {
+    expect(holdRepeatDefault("keystroke")).toBe(true);
+    expect(holdRepeatDefault("combo")).toBe(false);
+    const file = compileAssignment({ kind: "keystroke", key: "e", behavior: { hold_repeat: true } })!;
+    expect(file.settings?.hold_repeat).toBeUndefined();
+  });
+
+  it("single key opted out writes hold_repeat false", () => {
+    const file = compileAssignment({ kind: "keystroke", key: "e", behavior: { hold_repeat: false } })!;
+    expect(file.settings?.hold_repeat).toBe(false);
+  });
+
+  it("legacy keystroke files spelling out hold_repeat true normalize away", () => {
+    const a = parseAssignment({
+      format: "mkyada-macro",
+      version: 2,
+      kind: "keystroke",
+      combo: { mods: [], key: "e" },
+      settings: { hold_repeat: true },
+      events: [
+        { delay: 0, type: "key", action: "down", key: "e" },
+        { delay: 30, type: "key", action: "up", key: "e" },
+      ],
+    });
+    expect(a.behavior?.hold_repeat).toBeUndefined();
   });
 
   it("vertical scroll compiles to a wheel tick", () => {

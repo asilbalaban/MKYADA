@@ -279,22 +279,39 @@ class Oled:
             g.append(_circ(x0 + i * gap, 54, 3 if i == pos else 1))
         self.paint(g)
 
-    def show_grid(self, labels, active, invert=True):
+    BAND_H = 10  # inverted status strip over the grid (show_layer/show_profile)
+
+    def show_grid(self, labels, active, invert=True, band=None):
         """3x2 macro grid; labels = [(line1, line2)] * 6. The active cell
-        renders inverted while invert is True (selection / playing)."""
+        renders inverted while invert is True (selection / playing).
+        band = optional status text (active layer / profile label) drawn as
+        an inverted strip across the top; the six cells and their macro
+        names squeeze into the remaining height."""
         if not self.display:
             return
         g = displayio.Group()
+        top = 0
+        if band:
+            top = self.BAND_H
+            g.append(_rect(0, 0, self.W, top))
+            if self.ui_font is not terminalio.FONT:
+                try:  # profile names carry chars outside UI_GLYPHS
+                    self.ui_font.load_glyphs(set(band))
+                except Exception:
+                    pass
+            g.append(self._txt(band, self.CX, top // 2 - 1, color=0x000000,
+                               font=self.ui_font))
         cols, rows = 3, 2
-        cw = self.W // cols   # 42
-        ch = self.H // rows   # 32
+        cw = self.W // cols        # 42
+        ch = (self.H - top) // rows  # 32 full-height, 27 under the band
         maxc = (cw - 2) // self.grid_cpx
-        g.append(_rect(cw, 0, 1, self.H))
-        g.append(_rect(2 * cw, 0, 1, self.H))
-        g.append(_rect(0, ch, self.W, 1))
+        g.append(_rect(cw, top, 1, self.H - top))
+        g.append(_rect(2 * cw, top, 1, self.H - top))
+        g.append(_rect(0, top + ch, self.W, 1))
+        y1, y2 = (9, 18) if band else (11, 22)
         for k in range(6):
             x = (k % cols) * cw
-            y = (k // cols) * ch
+            y = top + (k // cols) * ch
             if k == active and invert:
                 g.append(_rect(x, y, cw, ch))
                 col = 0x000000
@@ -302,8 +319,8 @@ class Oled:
                 col = 0xFFFFFF
             l1, l2 = labels[k] if k < len(labels) else ("", "")
             if l2:
-                g.append(self._gtxt(l1[:maxc], x + cw // 2, y + 11, color=col))
-                g.append(self._gtxt(l2[:maxc], x + cw // 2, y + 22, color=col))
+                g.append(self._gtxt(l1[:maxc], x + cw // 2, y + y1, color=col))
+                g.append(self._gtxt(l2[:maxc], x + cw // 2, y + y2, color=col))
             elif l1:
                 g.append(self._gtxt(l1[:maxc], x + cw // 2, y + ch // 2, color=col))
         self.paint(g)

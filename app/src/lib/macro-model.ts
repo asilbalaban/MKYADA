@@ -461,7 +461,10 @@ export function compileAssignment(a: Assignment, name?: string): MacroFile | nul
       }
     }
   })();
-  // behavior options ride along in settings, whatever the kind
+  // behavior options ride along in settings, whatever the kind. Only
+  // deviations from each kind's default are written out: single keys
+  // hold-repeat by default (a held key types eeee… like a real keyboard),
+  // everything else plays once.
   if (compiled && a.behavior) {
     const { on_repress, hold_repeat } = a.behavior;
     compiled.settings = {
@@ -469,7 +472,9 @@ export function compileAssignment(a: Assignment, name?: string): MacroFile | nul
       ...(on_repress && on_repress !== "stop" ? { on_repress } : {}),
       // hold_repeat and key-logic variants are mutually exclusive: holding
       // the key IS the "hold" gesture once variants exist
-      ...(hold_repeat && !hasVariants(a) ? { hold_repeat } : {}),
+      ...(hold_repeat !== undefined && hold_repeat !== holdRepeatDefault(a.kind) && !hasVariants(a)
+        ? { hold_repeat }
+        : {}),
     };
   }
   // key logic (macro format v3): tap = the top-level events, double/hold
@@ -492,6 +497,13 @@ export function compileAssignment(a: Assignment, name?: string): MacroFile | nul
     }
   }
   return compiled;
+}
+
+/** Default for "repeat while the key is held": on for single keys — holding
+ * an assigned letter must type eeee… like a real keyboard — off elsewhere.
+ * The firmware applies the same default, so only deviations are stored. */
+export function holdRepeatDefault(kind: Assignment["kind"] | MacroFile["kind"]): boolean {
+  return kind === "keystroke";
 }
 
 function hasVariants(a: Assignment): boolean {
@@ -519,15 +531,13 @@ export function parseAssignment(m: MacroFile): Assignment {
 }
 
 function parseAssignmentBase(m: MacroFile): Assignment {
-  const behavior =
-    m.settings?.on_repress === "restart" || m.settings?.hold_repeat
-      ? {
-          behavior: {
-            ...(m.settings?.on_repress ? { on_repress: m.settings.on_repress } : {}),
-            ...(m.settings?.hold_repeat ? { hold_repeat: true } : {}),
-          },
-        }
-      : {};
+  const b: NonNullable<Assignment["behavior"]> = {};
+  if (m.settings?.on_repress === "restart") b.on_repress = m.settings.on_repress;
+  // a stored hold_repeat only surfaces when it deviates from the kind's
+  // default (legacy files spelled the default out; normalize them away)
+  const hr = m.settings?.hold_repeat;
+  if (hr !== undefined && !!hr !== holdRepeatDefault(m.kind)) b.hold_repeat = !!hr;
+  const behavior = Object.keys(b).length ? { behavior: b } : {};
   switch (m.kind) {
     case "keystroke":
       return { kind: "keystroke", key: m.combo?.key ?? "", ...behavior };

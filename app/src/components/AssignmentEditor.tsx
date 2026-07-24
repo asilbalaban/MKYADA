@@ -17,6 +17,7 @@ import {
   SCROLL_DEFAULT_AMOUNT,
   compileAssignment,
   describeAssignment,
+  holdRepeatDefault,
   keyFromEvent,
   kindRequiresHost,
   migrateMacro,
@@ -518,7 +519,7 @@ export function AssignmentEditor({
           {!hasVariants && (
             <Field label="While the key is held down">
               <Select
-                value={value.behavior?.hold_repeat ? "repeat" : "once"}
+                value={(value.behavior?.hold_repeat ?? holdRepeatDefault(value.kind)) ? "repeat" : "once"}
                 onChange={(e) =>
                   onChange({
                     ...value,

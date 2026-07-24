@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
 import { getVersion } from "@tauri-apps/api/app";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { HardDrive, Monitor, Moon, Pin, Power, Rocket, Sun } from "lucide-react";
+import { AppWindow, HardDrive, Layers, Monitor, Moon, Pin, Power, Rocket, Sun } from "lucide-react";
 import { ipc } from "../lib/ipc";
 import { keysCache } from "../lib/keys-cache";
 import { useDevice } from "../lib/device";
-import type { UpdateInfo } from "../lib/types";
+import { deviceModel, type UpdateInfo } from "../lib/types";
 import {
   setAlwaysOnTop,
   setAutostart,
@@ -123,13 +123,39 @@ function WindowCard() {
 
 /** Device-level settings that live in the keypad's own config.json. */
 function KeypadCard() {
-  const { hello, drive, send, disconnect } = useDevice();
+  const { hello, drive, send, disconnect, writeAndReload } = useDevice();
   const toast = useToast();
   const confirm = useConfirm();
   const [busy, setBusy] = useState(false);
   const hidden = hello?.usb_drive === false;
   // firmware < 0.4.0 has no usb_drive support (no fs_* serial commands)
   const supported = hello?.usb_drive !== undefined;
+  const vision = deviceModel(hello) === "vision6";
+  // firmware < 0.9.0 has no grid band (config show_layer / show_profile)
+  const bandSupported = hello?.show_layer !== undefined;
+  const [bandBusy, setBandBusy] = useState<"show_layer" | "show_profile" | null>(null);
+
+  /** Flip a band toggle in the keypad's config.json and reload the firmware. */
+  async function setBand(key: "show_layer" | "show_profile", value: boolean) {
+    if (!hello || !drive) return;
+    setBandBusy(key);
+    try {
+      // merge into the stored config so key/layer setup survives the toggle
+      let cfg: Record<string, unknown> = {};
+      try {
+        cfg = JSON.parse(await ipc.driveRead(drive.path, "config.json"));
+      } catch {
+        // fresh board without a config — the firmware defaults the rest
+      }
+      await writeAndReload([
+        { path: "config.json", content: JSON.stringify({ ...cfg, [key]: value }, null, 2) },
+      ]);
+    } catch (e) {
+      toast.error("Could not change the screen setting", String(e));
+    } finally {
+      setBandBusy(null);
+    }
+  }
 
   async function setHidden(hide: boolean) {
     if (!hello || !drive) return;
@@ -181,31 +207,89 @@ function KeypadCard() {
 
   return (
     <Card title="Keypad">
-      <div className="flex items-center justify-between gap-4">
-        <div className="flex flex-col gap-0.5 text-sm">
-          <span className="text-fg font-medium">Hide the keypad's USB drive</span>
-          <span className="text-xs text-fg-faint">
-            Finished-product mode: the keypad no longer appears as a flash drive full of
-            system files — this app manages everything over the serial connection instead.
-            Off by default. Hold key 1 while plugging in to force the drive back (recovery).
-          </span>
+      <div className="flex flex-col gap-4">
+        <div className="flex items-center justify-between gap-4">
+          <div className="flex flex-col gap-0.5 text-sm">
+            <span className="text-fg font-medium">Hide the keypad's USB drive</span>
+            <span className="text-xs text-fg-faint">
+              Finished-product mode: the keypad no longer appears as a flash drive full of
+              system files — this app manages everything over the serial connection instead.
+              Off by default. Hold key 1 while plugging in to force the drive back (recovery).
+            </span>
+          </div>
+          {!hello ? (
+            <Badge tone="amber">connect a keypad</Badge>
+          ) : !supported ? (
+            <Badge tone="amber">needs firmware ≥ 0.4.0</Badge>
+          ) : (
+            <Button
+              variant={hidden ? "primary" : "default"}
+              role="switch"
+              aria-checked={hidden}
+              loading={busy}
+              disabled={!drive}
+              onClick={() => void setHidden(!hidden)}
+            >
+              <HardDrive size={14} aria-hidden />
+              {hidden ? "Hidden" : "Visible"}
+            </Button>
+          )}
         </div>
-        {!hello ? (
-          <Badge tone="amber">connect a keypad</Badge>
-        ) : !supported ? (
-          <Badge tone="amber">needs firmware ≥ 0.4.0</Badge>
-        ) : (
-          <Button
-            variant={hidden ? "primary" : "default"}
-            role="switch"
-            aria-checked={hidden}
-            loading={busy}
-            disabled={!drive}
-            onClick={() => void setHidden(!hidden)}
-          >
-            <HardDrive size={14} aria-hidden />
-            {hidden ? "Hidden" : "Visible"}
-          </Button>
+
+        {vision && (
+          <>
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex flex-col gap-0.5 text-sm">
+                <span className="text-fg font-medium">Show the active layer on screen</span>
+                <span className="text-xs text-fg-faint">
+                  A band above the key grid names the layer you're on (Layer A, B, …),
+                  so a glance tells you which six macros are live. Macro names squeeze
+                  a little to make room.
+                </span>
+              </div>
+              {!bandSupported ? (
+                <Badge tone="amber">needs firmware ≥ 0.9.0</Badge>
+              ) : (
+                <Button
+                  variant={hello?.show_layer ? "primary" : "default"}
+                  role="switch"
+                  aria-checked={!!hello?.show_layer}
+                  loading={bandBusy === "show_layer"}
+                  disabled={!drive || bandBusy !== null}
+                  onClick={() => void setBand("show_layer", !hello?.show_layer)}
+                >
+                  <Layers size={14} aria-hidden />
+                  {hello?.show_layer ? "On" : "Off"}
+                </Button>
+              )}
+            </div>
+
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex flex-col gap-0.5 text-sm">
+                <span className="text-fg font-medium">Show the active profile on screen</span>
+                <span className="text-xs text-fg-faint">
+                  The band also shows which per-app profile is driving the keys
+                  (Profiles tab), following the app in the foreground. Needs this app
+                  running; shares the band with the layer name.
+                </span>
+              </div>
+              {!bandSupported ? (
+                <Badge tone="amber">needs firmware ≥ 0.9.0</Badge>
+              ) : (
+                <Button
+                  variant={hello?.show_profile ? "primary" : "default"}
+                  role="switch"
+                  aria-checked={!!hello?.show_profile}
+                  loading={bandBusy === "show_profile"}
+                  disabled={!drive || bandBusy !== null}
+                  onClick={() => void setBand("show_profile", !hello?.show_profile)}
+                >
+                  <AppWindow size={14} aria-hidden />
+                  {hello?.show_profile ? "On" : "Off"}
+                </Button>
+              )}
+            </div>
+          </>
         )}
       </div>
     </Card>

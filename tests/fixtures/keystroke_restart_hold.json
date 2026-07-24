@@ -22,7 +22,6 @@
     }
   ],
   "settings": {
-    "on_repress": "restart",
-    "hold_repeat": true
+    "on_repress": "restart"
   }
 }

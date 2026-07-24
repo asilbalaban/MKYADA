@@ -614,7 +614,7 @@ async fn firmware_update(app: AppHandle, drive: String) -> Result<Vec<String>, S
             .resolve("firmware", tauri::path::BaseDirectory::Resource)
             .map_err(|e| e.to_string())?;
         let mut written = Vec::new();
-        for name in ["boot.py", "code.py", "VERSION"] {
+        for name in ["boot.py", "code.py"] {
             let content = std::fs::read_to_string(src.join(name)).map_err(|e| e.to_string())?;
             write_to_device(&app, &drive, name, &content)?;
             written.push(name.to_string());
@@ -648,6 +648,16 @@ async fn firmware_update(app: AppHandle, drive: String) -> Result<Vec<String>, S
                 written.push(rel);
             }
         }
+        // VERSION goes LAST: if the transfer dies midway the device keeps
+        // reporting its old version, so the "update available" banner comes
+        // back and the update can simply be run again. Writing it first
+        // would leave a half-updated tree that already claims to be current
+        // — invisible until something breaks (seen in the field as a
+        // boot.py/engine.py HID descriptor mismatch crash-looping the
+        // device on every key press).
+        let content = std::fs::read_to_string(src.join("VERSION")).map_err(|e| e.to_string())?;
+        write_to_device(&app, &drive, "VERSION", &content)?;
+        written.push("VERSION".to_string());
         Ok(written)
     })
     .await

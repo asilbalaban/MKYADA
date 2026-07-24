@@ -53,11 +53,8 @@ NAV_SLOT = ("psh", "back", "confirm")  # host-mode event names
 (S_HOME, S_SELECT, S_SPEED, S_SAVED, S_SET_MENU, S_FONT, S_TIMEOUT,
  S_PLAYING, S_HOST, S_TOAST, S_LANG) = range(11)
 
-SET_FONT, SET_TMO, SET_LANG, SET_REBOOT = 0, 1, 2, 3
-
-
-def set_items():
-    return (tr("font"), tr("auto_return"), tr("language"), tr("restart"))
+(SET_FONT, SET_TMO, SET_LANG, SET_BAND_LAYER, SET_BAND_PROFILE,
+ SET_REBOOT) = range(6)
 
 SAVED_DWELL_S = 1.1
 TOAST_DWELL_S = 1.6
@@ -155,6 +152,15 @@ class Ui:
         except (TypeError, ValueError):
             t = SPEED_DEF_T
         return (name if isinstance(name, str) and name else None), t
+
+    def _set_items(self):
+        cfg = self.app.config
+        return (tr("font"), tr("auto_return"), tr("language"),
+                "%s: %s" % (tr("show_layer"),
+                            tr("on") if cfg["show_layer"] else tr("off")),
+                "%s: %s" % (tr("show_profile"),
+                            tr("on") if cfg["show_profile"] else tr("off")),
+                tr("restart"))
 
     def _split_name(self, name):
         cw = 128 // 3
@@ -329,6 +335,11 @@ class Ui:
         pairs = self.labels(l)
         return "".join(a + b for a, b in pairs)
 
+    def on_label(self):
+        """The app pushed (or cleared) its profile label for the band."""
+        if self.state == S_SELECT and self.app.config["show_profile"]:
+            self._draw_grid()
+
     def on_layer(self):
         if self.state in (S_HOME, S_SELECT):
             self.sel_key = 0
@@ -370,7 +381,8 @@ class Ui:
         key_no = self.app.config["key_map"][trigger]
         self.playing_cell = key_no - 1
         self.state = S_PLAYING
-        self.oled.show_grid(self.labels(self.app.layer), self.playing_cell, True)
+        self.oled.show_grid(self.labels(self.app.layer), self.playing_cell, True,
+                            band=self._band())
 
     def on_play_done(self):
         self._drain_inputs()  # inputs queued during playback are stale
@@ -408,10 +420,24 @@ class Ui:
         else:
             self.app.led.set(layer=self.app.layer)
 
+    def _band(self):
+        """Status-strip text over the grid, or None. Layer part is always
+        device-known; the profile part is whatever label the app last
+        pushed (t:"label") and vanishes with the app."""
+        cfg = self.app.config
+        label = self.app.host_label if cfg["show_profile"] else None
+        if cfg["show_layer"]:
+            letter = LAYER_NAMES[self.app.layer].upper()
+            if label:
+                return "%s: %s" % (letter, label)
+            return tr("layer_band") % letter
+        return label
+
     def _draw_grid(self):
         l = self.app.layer
         invert = self.sel_mode or not self._grid_custom()
-        self.oled.show_grid(self.labels(l), self.sel_key, invert)
+        self.oled.show_grid(self.labels(l), self.sel_key, invert,
+                            band=self._band())
 
     def _grid_custom(self):
         s = self.slots(self.app.layer)
@@ -508,7 +534,7 @@ class Ui:
             if self.home_pos == c:  # SETTINGS
                 self.set_menu_sel = 0
                 self.state = S_SET_MENU
-                self.oled.show_menu(tr("settings"), set_items(), 0)
+                self.oled.show_menu(tr("settings"), self._set_items(), 0)
             else:
                 self.app.set_layer_idx(self.home_pos)
                 self._nvm_save()
@@ -594,8 +620,8 @@ class Ui:
     def _st_set_menu(self, now, d, press):
         if d:
             self.set_menu_sel = clamp(self.set_menu_sel + (1 if d > 0 else -1),
-                                      0, len(set_items()) - 1)
-            self.oled.show_menu(tr("settings"), set_items(), self.set_menu_sel)
+                                      0, len(self._set_items()) - 1)
+            self.oled.show_menu(tr("settings"), self._set_items(), self.set_menu_sel)
         if press in (K_PSH, K_CONFIRM):
             if self.set_menu_sel == SET_FONT:
                 self.font_sel = self.font_idx
@@ -612,6 +638,18 @@ class Ui:
                 self.state = S_LANG
                 self.oled.show_menu(tr("lang_title"), i18n.LANG_DESC,
                                     self.lang_sel, marked=self.lang_sel)
+            elif self.set_menu_sel in (SET_BAND_LAYER, SET_BAND_PROFILE):
+                key = ("show_layer" if self.set_menu_sel == SET_BAND_LAYER
+                       else "show_profile")
+                title = tr(key).upper()
+                res = self.persist_cfg({key: not self.app.config[key]})
+                if res == "ok":
+                    self.oled.show_menu(tr("settings"), self._set_items(),
+                                        self.set_menu_sel)
+                elif res == "readonly":
+                    self._toast(title, tr("usb_on"), tr("read_only"))
+                else:
+                    self._toast(title, tr("save_fail"), "")
             elif microcontroller:
                 microcontroller.reset()
         elif press == K_BACK:
@@ -636,13 +674,13 @@ class Ui:
             self._enter_grid()
         elif press == K_BACK:
             self.state = S_SET_MENU
-            self.oled.show_menu(tr("settings"), set_items(), self.set_menu_sel)
+            self.oled.show_menu(tr("settings"), self._set_items(), self.set_menu_sel)
         elif now - self.activity_at > self.idle_secs:
             self._enter_grid()
 
-    def persist_lang(self, lang):
-        """Rewrite config.json "lang" so the app sees the same choice.
-        Returns "ok" | "readonly" | "error"."""
+    def persist_cfg(self, updates):
+        """Merge updates into config.json (and the live config) so the app
+        always sees the same values. Returns "ok" | "readonly" | "error"."""
         path = "/config.json"
         tmp = path + ".part"
         try:
@@ -652,7 +690,7 @@ class Ui:
                 data = {}
         except (OSError, ValueError, MemoryError):
             data = {}
-        data["lang"] = lang
+        data.update(updates)
         try:
             with open(tmp, "w") as f:
                 json.dump(data, f)
@@ -667,10 +705,17 @@ class Ui:
             except OSError:
                 pass
             return "readonly" if (e.args and e.args[0] == 30) else "error"
-        self.app.config["lang"] = lang
-        i18n.set_lang(lang)
-        self.app.send_config()  # a connected app refreshes its Setup view
+        self.app.config.update(updates)
+        self.app.send_config()  # a connected app refreshes its view
         return "ok"
+
+    def persist_lang(self, lang):
+        """Rewrite config.json "lang" so the app sees the same choice.
+        Returns "ok" | "readonly" | "error"."""
+        res = self.persist_cfg({"lang": lang})
+        if res == "ok":
+            i18n.set_lang(lang)
+        return res
 
     def _st_lang(self, now, d, press):
         if d:
@@ -682,14 +727,14 @@ class Ui:
             res = self.persist_lang(i18n.LANGS[self.lang_sel])
             if res == "ok":
                 self.state = S_SET_MENU
-                self.oled.show_menu(tr("settings"), set_items(), self.set_menu_sel)
+                self.oled.show_menu(tr("settings"), self._set_items(), self.set_menu_sel)
             elif res == "readonly":
                 self._toast(tr("language").upper(), tr("usb_on"), tr("read_only"))
             else:
                 self._toast(tr("language").upper(), tr("save_fail"), "")
         elif press == K_BACK:
             self.state = S_SET_MENU
-            self.oled.show_menu(tr("settings"), set_items(), self.set_menu_sel)
+            self.oled.show_menu(tr("settings"), self._set_items(), self.set_menu_sel)
         elif now - self.activity_at > self.idle_secs:
             self._enter_grid()
 
@@ -704,9 +749,9 @@ class Ui:
             self.idle_secs = self.tmo_val
             self._nvm_save()
             self.state = S_SET_MENU
-            self.oled.show_menu(tr("settings"), set_items(), self.set_menu_sel)
+            self.oled.show_menu(tr("settings"), self._set_items(), self.set_menu_sel)
         elif press == K_BACK:
             self.state = S_SET_MENU
-            self.oled.show_menu(tr("settings"), set_items(), self.set_menu_sel)
+            self.oled.show_menu(tr("settings"), self._set_items(), self.set_menu_sel)
         elif now - self.activity_at > self.idle_secs:
             self._enter_grid()

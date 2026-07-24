@@ -45,14 +45,22 @@ and the OLED fonts (`fonts/`).
   from the macro files the app uploads. Turn to select a cell, CONFIRM/push
   to open that key's **speed editor**, BACK for home. Pressing a macro key
   plays it over USB HID and inverts its cell until playback ends.
+  With **Layer band** / **Profile band** on (SETTINGS, or the app's
+  Settings → Keypad), an inverted strip across the top names the active
+  layer and/or the desktop app's active per-app profile — the macro names
+  squeeze a little to make room. The profile half needs the app running;
+  its label disappears the moment the app disconnects.
 - **Speed editor** — 0.1×–10.0× with encoder acceleration; CONFIRM writes
   the value into the macro file itself (`settings.speed`), so the app and
   the device always agree. 2× plays in half the time, 10× in a tenth.
   If the USB drive is visible (recovery boot) the filesystem is host-owned
   and the editor explains instead of saving.
 - **SETTINGS** — grid font size (Small 4×6 / Medium 5×8 / Large 6 px),
-  auto-return timeout (3–60 s), restart. Stored on the board (NVM), so they
-  survive power cycles and firmware updates.
+  auto-return timeout (3–60 s), language, the Layer/Profile band toggles,
+  restart. Font and timeout are stored on the board (NVM); language and the
+  band toggles live in `config.json` (rewritten on-device, like the app
+  does) so the app always shows the same values. All survive power cycles
+  and firmware updates.
 - **Connected to app** — shown while the desktop app holds host mode; key,
   encoder and button events stream to the app.
 
