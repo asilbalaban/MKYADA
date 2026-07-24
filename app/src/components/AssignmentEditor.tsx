@@ -27,7 +27,16 @@ import {
   stepIsHid,
 } from "../lib/macro-model";
 import { displayKey, untypeableChars } from "../lib/layout";
-import { Badge, Button, Field, Input, Select } from "./ui";
+import { Badge, Button, ControlField, Field, IconSelect, Input, Select } from "./ui";
+import type { IconOption } from "./ui";
+import {
+  HTTP_METHOD_ICON,
+  KIND_ICON,
+  MEDIA_ICON,
+  MENU_ICON,
+  MIC_ICON,
+  SOUND_HOLD_ICON,
+} from "./action-icons";
 
 const KINDS: { value: Assignment["kind"]; label: string }[] = [
   { value: "none", label: "Not assigned" },
@@ -194,13 +203,14 @@ export function AssignmentEditor({
 
   return (
     <div className="flex flex-col gap-3">
-      <Field label="Action type">
+      <ControlField label="Action type">
         <div className="flex items-center gap-2 flex-wrap">
-          <Select
+          <IconSelect
             className="flex-1 min-w-[12rem]"
+            ariaLabel="Action type"
             value={value.kind}
-            onChange={(e) => {
-              const kind = e.target.value as Assignment["kind"];
+            options={kinds.map((k) => ({ value: k.value, label: k.label, icon: KIND_ICON[k.value] }))}
+            onChange={(kind) => {
               if (kind === "none") onChange({ kind: "none" });
               else if (kind === "nothing") onChange({ kind: "nothing" });
               else if (kind === "keystroke") onChange({ kind: "keystroke", key: "" });
@@ -218,13 +228,7 @@ export function AssignmentEditor({
                 onChange({ kind: "sequence", steps: [{ a: { kind: "keystroke", key: "" }, delayMs: 0 }] });
               else importMacro();
             }}
-          >
-            {kinds.map((k) => (
-              <option key={k.value} value={k.value}>
-                {k.label}
-              </option>
-            ))}
-          </Select>
+          />
           {value.kind !== "none" && value.kind !== "nothing" && value.kind !== "sequence" && (
             kindRequiresHost(value.kind) ? (
               <Badge tone="amber">needs the MKYADA app running on this computer</Badge>
@@ -233,7 +237,7 @@ export function AssignmentEditor({
             )
           )}
         </div>
-      </Field>
+      </ControlField>
 
       {value.kind === "nothing" && (
         <p className="text-xs text-fg-faint">
@@ -310,15 +314,14 @@ export function AssignmentEditor({
       )}
 
       {value.kind === "media" && (
-        <Field label="Media action">
-          <Select value={value.usage} onChange={(e) => onChange({ ...value, usage: e.target.value })}>
-            {MEDIA_USAGES.map((u) => (
-              <option key={u} value={u}>
-                {u.replace(/_/g, " ")}
-              </option>
-            ))}
-          </Select>
-        </Field>
+        <ControlField label="Media action">
+          <IconSelect
+            ariaLabel="Media action"
+            value={value.usage}
+            options={MEDIA_USAGES.map((u) => ({ value: u, label: u.replace(/_/g, " "), icon: MEDIA_ICON[u] }))}
+            onChange={(usage) => onChange({ ...value, usage })}
+          />
+        </ControlField>
       )}
 
       {value.kind === "scroll" && (
@@ -388,32 +391,37 @@ export function AssignmentEditor({
       )}
 
       {value.kind === "menu" && (
-        <Field label="Device menu action">
-          <Select
+        <ControlField label="Device menu action">
+          <IconSelect
+            ariaLabel="Device menu action"
             value={value.action}
-            onChange={(e) => onChange({ ...value, action: e.target.value as typeof value.action })}
-          >
-            <option value="left">Scroll menu ← (encoder left)</option>
-            <option value="right">Scroll menu → (encoder right)</option>
-            <option value="confirm">Confirm (encoder press)</option>
-            <option value="back">Back</option>
-            <option value="home">Open the layer screen</option>
-            <option value="settings">Open the settings menu</option>
-            <option value="grid">Open the key grid</option>
-            <option value="layer_next">Switch to the next layer</option>
-            <option value="layer_prev">Switch to the previous layer</option>
-            {(slotMode || value.action === "default") && (
-              <option value="default">
-                {builtinDesc ? `This control's built-in action (${builtinDesc})` : "This control's built-in action"}
-              </option>
-            )}
-          </Select>
+            options={[
+              { value: "left", label: "Scroll menu ← (encoder left)", icon: MENU_ICON.left },
+              { value: "right", label: "Scroll menu → (encoder right)", icon: MENU_ICON.right },
+              { value: "confirm", label: "Confirm (encoder press)", icon: MENU_ICON.confirm },
+              { value: "back", label: "Back", icon: MENU_ICON.back },
+              { value: "home", label: "Open the layer screen", icon: MENU_ICON.home },
+              { value: "settings", label: "Open the settings menu", icon: MENU_ICON.settings },
+              { value: "grid", label: "Open the key grid", icon: MENU_ICON.grid },
+              { value: "layer_next", label: "Switch to the next layer", icon: MENU_ICON.layer_next },
+              { value: "layer_prev", label: "Switch to the previous layer", icon: MENU_ICON.layer_prev },
+              ...(slotMode || value.action === "default"
+                ? [{
+                    value: "default" as const,
+                    label: builtinDesc
+                      ? `This control's built-in action (${builtinDesc})`
+                      : "This control's built-in action",
+                  }]
+                : []),
+            ] satisfies IconOption<typeof value.action>[]}
+            onChange={(action) => onChange({ ...value, action })}
+          />
           <p className="text-xs text-fg-faint mt-1">
             {slotMode
               ? "Drives the BUILT-IN on-screen navigation, whatever else is customized — e.g. long-press = Back."
               : "Lets a normal key drive the on-screen menu, just like the wheel and the CONFIRM / BACK buttons. Only does something on a screen model."}
           </p>
-        </Field>
+        </ControlField>
       )}
 
       {value.kind === "launch" && (
@@ -494,37 +502,39 @@ export function AssignmentEditor({
       )}
 
       {value.kind === "sound" && (
-        <Field label="Holding the key for half a second">
-          <Select
+        <ControlField label="Holding the key for half a second">
+          <IconSelect
+            ariaLabel="Holding the key for half a second"
             value={value.holdAction ?? "stop"}
-            onChange={(e) => onChange({ ...value, holdAction: e.target.value as SoundHoldAction })}
-          >
-            <option value="stop">Stops all playing sounds</option>
-            <option value="fade">Fades all playing sounds out</option>
-            <option value="restart">Restarts this sound from the top</option>
-          </Select>
-        </Field>
+            options={[
+              { value: "stop", label: "Stops all playing sounds", icon: SOUND_HOLD_ICON.stop },
+              { value: "fade", label: "Fades all playing sounds out", icon: SOUND_HOLD_ICON.fade },
+              { value: "restart", label: "Restarts this sound from the top", icon: SOUND_HOLD_ICON.restart },
+            ] satisfies IconOption<SoundHoldAction>[]}
+            onChange={(holdAction) => onChange({ ...value, holdAction })}
+          />
+        </ControlField>
       )}
 
       {value.kind === "mic" && (
-        <Field label="What the key does">
-          <Select
+        <ControlField label="What the key does">
+          <IconSelect
+            ariaLabel="What the key does"
             value={value.mode ?? "toggle"}
-            onChange={(e) => onChange({ ...value, mode: e.target.value as MicMode })}
-          >
-            {(Object.keys(MIC_MODE_LABELS) as MicMode[]).map((m) => (
-              <option key={m} value={m}>
-                {MIC_MODE_LABELS[m]}
-              </option>
-            ))}
-          </Select>
+            options={(Object.keys(MIC_MODE_LABELS) as MicMode[]).map((m) => ({
+              value: m,
+              label: MIC_MODE_LABELS[m],
+              icon: MIC_ICON[m],
+            }))}
+            onChange={(mode) => onChange({ ...value, mode })}
+          />
           <p className="text-fg-faint text-xs mt-1 inline-flex items-start gap-1.5">
             <Mic size={13} aria-hidden className="mt-0.5 shrink-0" />
             {value.mode === "push_to_talk"
               ? "Unmutes while the key is held down, mutes again the instant you let go."
               : "Controls the computer's default microphone. Works while the MKYADA app is running (also minimized)."}
           </p>
-        </Field>
+        </ControlField>
       )}
 
       {value.kind === "webhook" && <WebhookFields value={value} onChange={onChange} />}
@@ -653,26 +663,23 @@ function WebhookFields({
 
   return (
     <>
-      <Field label="Request">
+      <ControlField label="Request">
         <div className="flex gap-2">
-          <Select
-            className="w-28"
+          <IconSelect
+            className="w-40"
+            ariaLabel="HTTP method"
             value={value.method ?? "GET"}
-            onChange={(e) =>
+            options={HTTP_METHODS.map((m) => ({ value: m, label: m, icon: HTTP_METHOD_ICON[m] }))}
+            onChange={(method) =>
               onChange({
                 ...value,
-                ...(e.target.value === "GET" ? { method: undefined } : { method: e.target.value }),
+                ...(method === "GET" ? { method: undefined } : { method }),
               })
             }
-          >
-            {HTTP_METHODS.map((m) => (
-              <option key={m} value={m}>
-                {m}
-              </option>
-            ))}
-          </Select>
+          />
           <Input
             className="flex-1"
+            aria-label="Webhook URL"
             value={value.url}
             placeholder="https://discord.com/api/webhooks/… or http://homeassistant.local:8123/api/…"
             onChange={(e) => onChange({ ...value, url: e.target.value })}
@@ -683,7 +690,7 @@ function WebhookFields({
           Discord/Telegram, anything with an HTTP API. Works while the MKYADA app is running
           (also minimized).
         </p>
-      </Field>
+      </ControlField>
 
       <Field label="Headers">
         <div className="flex flex-col gap-2">

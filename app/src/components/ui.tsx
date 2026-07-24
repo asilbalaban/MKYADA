@@ -7,8 +7,12 @@ import {
   ReactNode,
   Ref,
   SelectHTMLAttributes,
+  useEffect,
+  useRef,
+  useState,
 } from "react";
-import { Check, LoaderCircle } from "lucide-react";
+import { Check, ChevronDown, LoaderCircle } from "lucide-react";
+import { ActionIcon } from "./action-icons";
 
 export function Button({
   variant = "default",
@@ -84,6 +88,115 @@ export function Select(props: SelectHTMLAttributes<HTMLSelectElement>) {
   );
 }
 
+export type IconOption<V extends string> = {
+  value: V;
+  label: string;
+  /** SVG basename in assets/action-icons; omit for a blank chip slot. */
+  icon?: string;
+  hint?: string;
+};
+
+/**
+ * Dropdown that shows an icon beside every option — the native <select>/<option>
+ * can't render custom art, so this is a small accessible listbox replacement.
+ * Same visual language as <Select>; opens on click or ↓/↑, closes on Escape or
+ * outside click.
+ */
+export function IconSelect<V extends string>({
+  value,
+  options,
+  onChange,
+  className = "",
+  ariaLabel,
+}: {
+  value: V;
+  options: IconOption<V>[];
+  onChange: (v: V) => void;
+  className?: string;
+  ariaLabel?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const current = options.find((o) => o.value === value) ?? options[0];
+
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    window.addEventListener("mousedown", onDoc);
+    return () => window.removeEventListener("mousedown", onDoc);
+  }, [open]);
+
+  function move(delta: number) {
+    const i = options.findIndex((o) => o.value === value);
+    const next = options[(i + delta + options.length) % options.length];
+    if (next) onChange(next.value);
+  }
+
+  return (
+    <div ref={ref} className={`relative ${className}`}>
+      <button
+        type="button"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-label={ariaLabel}
+        onClick={() => setOpen((o) => !o)}
+        onKeyDown={(e) => {
+          if (e.key === "Escape") setOpen(false);
+          else if (e.key === "ArrowDown") {
+            e.preventDefault();
+            open ? move(1) : setOpen(true);
+          } else if (e.key === "ArrowUp") {
+            e.preventDefault();
+            open ? move(-1) : setOpen(true);
+          } else if ((e.key === "Enter" || e.key === " ") && open) {
+            e.preventDefault();
+            setOpen(false);
+          }
+        }}
+        className="flex w-full items-center gap-2 rounded-md border border-line bg-panel2 px-2.5 py-1.5 text-sm text-fg outline-none focus:border-accent"
+      >
+        <ActionIcon name={current?.icon} size={52} />
+        <span className="truncate text-left">{current?.label}</span>
+        <ChevronDown size={14} aria-hidden className="ml-auto shrink-0 text-fg-faint" />
+      </button>
+      {open && (
+        <ul
+          role="listbox"
+          aria-label={ariaLabel}
+          className="absolute z-30 mt-1 max-h-72 w-full min-w-max overflow-auto rounded-md border border-line bg-panel p-1 shadow-lg"
+        >
+          {options.map((o) => {
+            const sel = o.value === value;
+            return (
+              <li key={o.value} role="option" aria-selected={sel}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onChange(o.value);
+                    setOpen(false);
+                  }}
+                  className={`flex w-full items-center gap-2.5 rounded px-2 py-1.5 text-left text-sm transition-colors ${
+                    sel ? "bg-accent-dim text-accent-fg" : "text-fg hover:bg-panel2"
+                  }`}
+                >
+                  <ActionIcon name={o.icon} size={60} />
+                  <span className="flex min-w-0 flex-col">
+                    <span className="truncate">{o.label}</span>
+                    {o.hint && <span className="text-xs text-fg-faint">{o.hint}</span>}
+                  </span>
+                  {sel && <Check size={14} aria-hidden className="ml-auto shrink-0 pl-2" />}
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 export function Badge({
   children,
   tone = "default",
@@ -111,6 +224,23 @@ export function Field({ label, children }: { label: string; children: ReactNode 
       <span className="text-fg-muted text-xs">{label}</span>
       {children}
     </label>
+  );
+}
+
+/**
+ * Like {@link Field} but a plain <div> instead of a <label>. Use this for custom
+ * controls such as {@link IconSelect} that carry their own aria-label and manage
+ * their own popup: a wrapping <label> hijacks clicks inside the popup (the label
+ * forwards activation to its associated control), which swallows the selection
+ * and leaves the dropdown open. Native inputs keep {@link Field} for its label
+ * association; custom listboxes must use this.
+ */
+export function ControlField({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="flex flex-col gap-1 text-sm">
+      <span className="text-fg-muted text-xs">{label}</span>
+      {children}
+    </div>
   );
 }
 
