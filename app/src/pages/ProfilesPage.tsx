@@ -4,7 +4,8 @@
 import { useState } from "react";
 import { useDevice } from "../lib/device";
 import { useProfiles } from "../lib/profiles";
-import type { Assignment, Profile } from "../lib/types";
+import type { Assignment, ModuleSlot, Profile } from "../lib/types";
+import { MODULE_SLOTS, MODULE_SLOT_LABELS, deviceModel } from "../lib/types";
 import { assignmentComplete, describeAssignment } from "../lib/macro-model";
 import { AssignmentEditor } from "../components/AssignmentEditor";
 import { Crosshair } from "lucide-react";
@@ -14,11 +15,16 @@ export function ProfilesPage() {
   const { hello } = useDevice();
   const { profiles, foreground, activeProfile, enabled, setEnabled, saveProfiles } = useProfiles();
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [editKey, setEditKey] = useState<number | null>(null);
+  const [editKey, setEditKey] = useState<number | ModuleSlot | null>(null);
   const [draft, setDraft] = useState<Assignment | null>(null);
 
   const selected = profiles.find((p) => p.id === selectedId) ?? null;
   const keyCount = hello?.key_count ?? 6;
+  // module controls (wheel + BACK/CONFIRM) are a Vision thing; keep them
+  // visible for profiles that already carry slot overrides even when no
+  // (or another) device is connected
+  const showModules =
+    deviceModel(hello) === "vision6" || MODULE_SLOTS.some((s) => selected?.keys[s]);
 
   function addProfile() {
     const id = `p${Date.now().toString(36)}`;
@@ -160,6 +166,32 @@ export function ProfilesPage() {
                       </button>
                     );
                   })}
+                  {showModules && (
+                    <>
+                      <p className="text-xs text-fg-faint mt-3 mb-1">
+                        Module controls (screen models)
+                      </p>
+                      {MODULE_SLOTS.map((s) => {
+                        const a = selected.keys[s];
+                        return (
+                          <button
+                            key={s}
+                            onClick={() => {
+                              setEditKey(s);
+                              setDraft(null);
+                            }}
+                            className={`flex items-center justify-between px-3 py-2 rounded-md border text-sm
+                              ${editKey === s ? "border-accent bg-panel2" : "border-line bg-panel2 hover:border-fg-faint"}`}
+                          >
+                            <span className="font-semibold text-fg">{MODULE_SLOT_LABELS[s]}</span>
+                            <span className="text-xs text-fg-muted">
+                              {a ? describeAssignment(a) : "no action in this profile"}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </>
+                  )}
                 </div>
 
                 <div>
@@ -168,7 +200,9 @@ export function ProfilesPage() {
                   ) : (
                     <div className="flex flex-col gap-3">
                       <p className="text-xs text-fg-faint">
-                        Key {editKey} — unassigned keys fall back to the device's own config.
+                        {typeof editKey === "number"
+                          ? `Key ${editKey} — unassigned keys fall back to the device's own config.`
+                          : `${MODULE_SLOT_LABELS[editKey]} — only acts while this profile is active; e.g. set the wheel to zoom in Photoshop.`}
                       </p>
                       <AssignmentEditor
                         value={draft ?? selected.keys[String(editKey)] ?? { kind: "none" }}

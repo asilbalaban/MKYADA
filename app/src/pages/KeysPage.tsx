@@ -7,7 +7,7 @@ import { useDevice } from "../lib/device";
 import { useNav } from "../lib/nav";
 import { ipc } from "../lib/ipc";
 import type { Assignment, DeviceConfig, ModuleSlot } from "../lib/types";
-import { MODULE_SLOTS, deviceModel, layerLabel } from "../lib/types";
+import { MODULE_SLOTS, MODULE_SLOT_LABELS, deviceModel, layerLabel } from "../lib/types";
 import {
   AUX_FILE_RE,
   assignmentComplete,
@@ -35,13 +35,6 @@ import { AssignmentEditor } from "../components/AssignmentEditor";
 
 /** What can hold a macro: a numbered key, or a Vision 6 module control. */
 type SlotId = number | ModuleSlot;
-
-const MODULE_SLOT_LABELS: Record<ModuleSlot, string> = {
-  "enc-cw": "Encoder →",
-  "enc-ccw": "Encoder ←",
-  "btn-back": "BACK button",
-  "btn-confirm": "CONFIRM button",
-};
 
 function fileFor(slot: SlotId, layer: number): string {
   return typeof slot === "number" ? macroFileName(slot, layer) : slotFileName(slot, layer);

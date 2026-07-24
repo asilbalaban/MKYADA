@@ -662,8 +662,15 @@ function micActionName(mode?: MicMode): string {
 }
 
 /** File name for a profile-scoped macro synced to the device drive. */
-export function profileMacroFileName(profileId: string, keyNo: number): string {
-  return `macros/p_${profileId}_key${keyNo}.json`;
+export function profileMacroFileName(profileId: string, key: number | ModuleSlot): string {
+  return typeof key === "number"
+    ? `macros/p_${profileId}_key${key}.json`
+    : `macros/p_${profileId}_${key}.json`;
+}
+
+/** A Profile.keys entry names a key number ("3") or a module slot ("enc-cw"). */
+export function profileKeySlot(k: string): number | ModuleSlot {
+  return /^\d+$/.test(k) ? Number(k) : (k as ModuleSlot);
 }
 
 export function defaultConfig(): DeviceConfig {

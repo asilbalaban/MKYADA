@@ -106,6 +106,13 @@ export function defaultPins(model: DeviceModel, keyCount: number): string[] {
 export const MODULE_SLOTS = ["enc-cw", "enc-ccw", "btn-back", "btn-confirm"] as const;
 export type ModuleSlot = (typeof MODULE_SLOTS)[number];
 
+export const MODULE_SLOT_LABELS: Record<ModuleSlot, string> = {
+  "enc-cw": "Encoder →",
+  "enc-ccw": "Encoder ←",
+  "btn-back": "BACK button",
+  "btn-confirm": "CONFIRM button",
+};
+
 export type MacroEvent = (
   | { delay: number; type: "key"; action: "down" | "up"; key: string; vk?: number | null }
   | { delay: number; type: "move"; x: number; y: number }
@@ -272,7 +279,7 @@ export interface Profile {
   id: string;
   name: string;
   match: { exe: string; title_contains?: string | null };
-  keys: Record<string, Assignment>; // key number -> action
+  keys: Record<string, Assignment>; // key number ("3") or module slot ("enc-cw") -> action
 }
 
 export interface ForegroundInfo {

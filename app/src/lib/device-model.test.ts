@@ -14,6 +14,8 @@ import {
   effectiveLayers,
   macroFileName,
   parseMacroFileName,
+  profileKeySlot,
+  profileMacroFileName,
   slotFileName,
 } from "./macro-model";
 
@@ -70,6 +72,14 @@ describe("slot file naming", () => {
       slot: "btn-confirm",
       layer: 1,
     });
+  });
+
+  it("profile macros cover key numbers and module slots (issue #17)", () => {
+    expect(profileMacroFileName("abc", 3)).toBe("macros/p_abc_key3.json");
+    expect(profileMacroFileName("abc", "enc-cw")).toBe("macros/p_abc_enc-cw.json");
+    expect(profileMacroFileName("abc", "btn-confirm")).toBe("macros/p_abc_btn-confirm.json");
+    expect(profileKeySlot("3")).toBe(3);
+    expect(profileKeySlot("enc-ccw")).toBe("enc-ccw");
   });
 
   it("accepts device-style absolute paths (macro_changed messages)", () => {

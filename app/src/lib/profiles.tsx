@@ -23,11 +23,16 @@ import { useDevice } from "./device";
 
 /** Holding a sound key this long stops all playing sounds instead of playing. */
 const SOUND_HOLD_STOP_MS = 400;
+
+/** Encoder detents queued per direction at most — a fast spin plays a
+ *  bounded burst instead of a long zoom tail after the wheel stops. */
+const ENC_QUEUE_MAX = 8;
 import { ipc } from "./ipc";
 import type {
   Assignment,
   DriveInfo,
   ForegroundInfo,
+  ModuleSlot,
   Profile,
   SequenceStep,
   SoundHoldAction,
@@ -41,6 +46,7 @@ import {
   compileVariantParts,
   macroFileName,
   parseDeviceMacro,
+  profileKeySlot,
   profileMacroFileName,
   sequenceIsPureHid,
   sequencePartFileName,
@@ -152,6 +158,14 @@ export function ProfilesProvider({ children }: { children: ReactNode }) {
     activeRef.current = active;
     setActiveProfile(active);
   }, [enabled, paused, port, profiles, foreground]);
+
+  // keep the keypad's grid band (config show_profile) naming the active
+  // profile; empty text clears it. Old firmware ignores the message, and the
+  // device drops the label by itself when the app disconnects.
+  useEffect(() => {
+    if (!port) return;
+    void send({ t: "label", text: activeProfile?.name ?? "" }).catch(() => {});
+  }, [port, activeProfile, send]);
 
   // hold host mode while a profile is active; release it otherwise.
   // host_enter doubles as the watchdog ping and re-asserts host mode in case
@@ -305,6 +319,12 @@ export function ProfilesProvider({ children }: { children: ReactNode }) {
   const armedSounds = useRef(new Map<string, { timer: number; path: string }>());
   // push-to-talk mic keys currently held down — unmuted on down, muted on up
   const micDownKeys = useRef(new Set<string>());
+  // single keys held down as a real-keyboard hold (play {hold:true}): the
+  // device keeps the HID key down until we send "stop" on the up edge, and
+  // the OS typematic repeat types eeee… at the user's own keyboard rate
+  const hidHoldKeys = useRef(new Set<string>());
+  const protoRef = useRef(0);
+  protoRef.current = hello?.proto ?? 0;
 
   const armSound = useCallback((keyId: string, path: string, holdAction?: SoundHoldAction) => {
     if (!heldKeys.current.has(keyId)) {
@@ -326,13 +346,16 @@ export function ProfilesProvider({ children }: { children: ReactNode }) {
   // answer device key presses: profile overrides in host mode, and global
   // launch/command/sound keys (Keys tab) whenever the app is around to run
   // them — the device stores those as no-op macro files, so standalone they
-  // do nothing and here we perform the real action.
-  useEffect(
-    () =>
-      onBtn((e) => {
-        const keyId = `${e.key}:${e.layer ?? "a"}`;
-        if (e.edge === "up") {
+  // do nothing and here we perform the real action. Numbered keys and the
+  // Vision 6 nav buttons (BACK/CONFIRM, issue #17) share this edge handler;
+  // only the profile lookup key differs.
+  const handleEdge = useCallback(
+    (keyId: string, slot: number | ModuleSlot, layer: string, edge: "down" | "up") => {
+        if (edge === "up") {
           heldKeys.current.delete(keyId);
+          if (hidHoldKeys.current.delete(keyId)) {
+            void send({ t: "stop" }); // release a held single key
+          }
           if (micDownKeys.current.delete(keyId)) {
             void invoke("mic_action", { mode: "mute" }).catch(() => {});
           }
@@ -372,9 +395,9 @@ export function ProfilesProvider({ children }: { children: ReactNode }) {
         }
         const profile = activeRef.current;
         if (profile) {
-          const a = profile.keys[String(e.key)];
+          const a = profile.keys[String(slot)];
           if (!a || a.kind === "none") return;
-          const mainFile = profileMacroFileName(profile.id, e.key);
+          const mainFile = profileMacroFileName(profile.id, slot);
           if (a.variants?.double || a.variants?.hold) {
             // the device is in host mode and won't resolve variants itself —
             // we time the gesture and play/perform the chosen action
@@ -415,15 +438,27 @@ export function ProfilesProvider({ children }: { children: ReactNode }) {
           if (a.kind === "sequence" && !sequenceIsPureHid(a.steps)) {
             return void runSequence(keyId, a.steps, mainFile);
           }
+          // single keys behave like a real keyboard in host mode too: the
+          // device holds the HID key down until our "stop" on the up edge
+          // (proto v5) and the OS typematic repeat types eeee… at the
+          // user's own keyboard rate
+          if (a.kind === "keystroke" && a.behavior?.hold_repeat !== false && protoRef.current >= 5) {
+            hidHoldKeys.current.add(keyId);
+            void send({ t: "play", file: mainFile, hold: true });
+            return;
+          }
           // pure-HID sequences compiled into the profile macro file itself
           void send({ t: "play", file: mainFile });
           return;
         }
+        // nav-slot events only stream while a profile holds host mode, so
+        // the global (no-profile) fallback below is for numbered keys only
+        if (typeof slot !== "number") return;
         const d = driveRef.current;
         if (!d) return;
-        const layerIndex = Math.max(0, LAYER_NAMES.indexOf(e.layer ?? "a"));
+        const layerIndex = Math.max(0, LAYER_NAMES.indexOf(layer));
         void ipc
-          .driveRead(d.path, macroFileName(e.key, layerIndex))
+          .driveRead(d.path, macroFileName(slot, layerIndex))
           .then((raw) => {
             const m = parseDeviceMacro(raw);
             // key logic: the firmware resolves tap/double/hold itself and
@@ -433,7 +468,7 @@ export function ProfilesProvider({ children }: { children: ReactNode }) {
               // pure-HID: the keypad already played it standalone; mixed:
               // the main file is a no-op and the steps run here
               if (!m.events.length && m.seq?.length) {
-                void runSequence(keyId, m.seq, macroFileName(e.key, layerIndex));
+                void runSequence(keyId, m.seq, macroFileName(slot, layerIndex));
               }
               return;
             }
@@ -444,8 +479,86 @@ export function ProfilesProvider({ children }: { children: ReactNode }) {
             } else runHostAction(m);
           })
           .catch(() => {}); // unassigned key or drive hiccup — nothing to do
+    },
+    [send, armSound, runSequence, startKeyLogic],
+  );
+
+  useEffect(
+    () => onBtn((e) => handleEdge(`${e.key}:${e.layer ?? "a"}`, e.key, e.layer ?? "a", e.edge)),
+    [onBtn, handleEdge],
+  );
+
+  // ---- Vision 6 module controls under an active profile (issue #17) ------
+  // In host mode the firmware forwards the wheel as {"t":"enc",d,n} and the
+  // nav buttons as {"t":"btn",slot,down} instead of playing anything itself —
+  // perform the profile's slot assignments here (e.g. wheel = zoom in
+  // Photoshop). The encoder push ("psh") stays unassignable, same as the
+  // Keys tab.
+  const encPending = useRef(new Map<ModuleSlot, number>());
+  const encPumping = useRef(false);
+
+  const handleEncoder = useCallback(
+    (dir: "enc-cw" | "enc-ccw", detents: number) => {
+      if (pausedRef.current) return;
+      const profile = activeRef.current;
+      const a = profile?.keys[dir];
+      if (!profile || !a || a.kind === "none") return;
+      const mainFile = profileMacroFileName(profile.id, dir);
+      // host-performed kinds fire once per rotation event — a fast spin
+      // must not open an app or call a webhook once per detent
+      if (a.kind === "sound") return void playSound(a.file).catch(() => {});
+      if (a.kind === "launch" || a.kind === "command" || a.kind === "mic" || a.kind === "webhook") {
+        return runHostAction(a);
+      }
+      if (a.kind === "sequence" && !sequenceIsPureHid(a.steps)) {
+        return void runSequence(dir, a.steps, mainFile);
+      }
+      // HID kinds (scroll/zoom, keystroke, …): one play per detent, like the
+      // firmware's own standalone encoder slots. The firmware drops play
+      // commands that land mid-playback, so pump serially (await play_done)
+      // over a bounded queue instead of firing blind.
+      const pend = encPending.current;
+      pend.set(dir, Math.min((pend.get(dir) ?? 0) + detents, ENC_QUEUE_MAX));
+      if (encPumping.current) return;
+      encPumping.current = true;
+      void (async () => {
+        try {
+          for (;;) {
+            const next = [...encPending.current.entries()].find(([, n]) => n > 0);
+            if (!next) break;
+            const [slot, n] = next;
+            encPending.current.set(slot, n - 1);
+            const p = activeRef.current;
+            if (!p || pausedRef.current) break;
+            const done = waitPlayDone(2000);
+            await send({ t: "play", file: profileMacroFileName(p.id, slot) });
+            await done;
+          }
+        } finally {
+          encPending.current.clear();
+          encPumping.current = false;
+        }
+      })();
+    },
+    [send, waitPlayDone, runSequence],
+  );
+
+  useEffect(
+    () =>
+      onMsg((m) => {
+        if (!activeRef.current) return;
+        if (m.t === "enc") {
+          const d = Number(m.d ?? 0);
+          if (!d) return;
+          handleEncoder(d > 0 ? "enc-cw" : "enc-ccw", Math.max(1, Number(m.n) || 1));
+        } else if (m.t === "btn" && typeof m.slot === "string") {
+          const slot =
+            m.slot === "back" ? "btn-back" : m.slot === "confirm" ? "btn-confirm" : null;
+          if (!slot) return;
+          handleEdge(slot, slot, "a", m.down ? "down" : "up");
+        }
       }),
-    [onBtn, send, armSound, runSequence, startKeyLogic],
+    [onMsg, handleEdge, handleEncoder],
   );
 
   const setEnabled = useCallback((on: boolean) => {
@@ -463,7 +576,7 @@ export function ProfilesProvider({ children }: { children: ReactNode }) {
       for (const p of next) {
         for (const [keyNo, a] of Object.entries(p.keys)) {
           const macro = compileAssignment(a as Assignment);
-          const file = profileMacroFileName(p.id, Number(keyNo));
+          const file = profileMacroFileName(p.id, profileKeySlot(keyNo));
           if (macro) {
             await ipc.driveWrite(drive.path, file, serializeForDevice(macro, hello?.proto ?? 0));
           } else {
