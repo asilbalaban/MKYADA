@@ -688,12 +688,13 @@ fn firmware_update_run(app: &AppHandle, drive: &str) -> Result<Vec<String>, Stri
     let total_files = files.len();
     // Lock the keypad (best-effort: pre-v7 firmware answers err/nothing and
     // simply updates unlocked, exactly like before).
-    let mgr = app.state::<DeviceManager>();
-    let _ = serial::send(
-        &mgr,
-        &serde_json::json!({"t": "update_begin", "bytes": total_bytes}),
-    );
-    drop(mgr);
+    {
+        let mgr = app.state::<DeviceManager>();
+        let _ = serial::send(
+            &mgr,
+            &serde_json::json!({"t": "update_begin", "bytes": total_bytes}),
+        );
+    }
     let result = firmware_write_all(app, drive, &files, total_bytes, total_files);
     if result.is_err() {
         // release the lock so the keypad goes back to being a keypad
