@@ -85,7 +85,7 @@ STANDALONE ──(host_enter)──► HOST ──(host_leave | CDC disconnect |
 | `{"t":"play_done","file":"/macros/key1.json","stopped":false}` | Playback ended (`stopped: true` = aborted) |
 | `{"t":"config", ...config.json fields...}` | Reply to `get_config` |
 | `{"t":"ok","re":"reload"}` | Command acknowledged |
-| `{"t":"err","re":"play","code":"not_found","msg":"/macros/key9.json"}` | Codes: `not_found`, `bad_json`, `bad_format`, `oom` |
+| `{"t":"err","re":"play","code":"not_found","msg":"/macros/key9.json"}` | Codes: `not_found`, `bad_json`, `bad_format`, `oom`, `io`, `hid` (USB stack rejected a report — boot.py descriptor older than engine.py after a partial update; power-cycle to heal) |
 | `{"t":"pong"}` | Reply to `ping` |
 | `{"t":"fs_list","path":"/macros","entries":[{"name":"key1.json","size":123,"dir":false}]}` | v3. Reply to `fs_list` |
 | `{"t":"fs_chunk","path":"/macros/key1.json","seq":0,"data":"<base64>","eof":true}` | v3. `fs_read` stream; the last chunk carries `eof: true` |

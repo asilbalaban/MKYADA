@@ -495,6 +495,25 @@ check("pretty JSON still plays",
       any(m.get("t") == "play_done" for m in outbox)
       and not any(m.get("t") == "err" for m in outbox), str(outbox))
 
+# a HID report the USB stack rejects (boot.py descriptor older than
+# engine.py after a partial update) fails the key soft: err "hid" + LED
+# blink, never the fatal handler's crash-loop
+outbox.clear()
+
+
+def _reject(buf):
+    raise ValueError("report length must be 6")
+
+
+_orig_mouse_send = app.engine.mouse.send_report
+app.engine.mouse.send_report = _reject
+app.play_file(fpp.name)
+check("hid mismatch -> err not crash",
+      any(m.get("t") == "err" and m.get("code") == "hid" for m in outbox)
+      and any(m.get("t") == "play_done" and m.get("stopped") for m in outbox),
+      str(outbox))
+app.engine.mouse.send_report = _orig_mouse_send
+
 # --- key logic: tap / double press / long press (macro format v3) ---------
 def variant_file():
     f = tempfile.NamedTemporaryFile("w", suffix=".json", delete=False)

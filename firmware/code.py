@@ -754,6 +754,14 @@ class App:
             stopped = True
             self.led.error()
             self.proto.send({"t": "err", "re": "play", "code": "io", "msg": path})
+        except ValueError as e:
+            # USB stack rejected a report — classic cause: boot.py's HID
+            # descriptor (applied only at power-on) predates engine.py's
+            # report layout after a partial update. Fail the key soft; a
+            # power cycle re-runs boot.py and heals the mismatch.
+            stopped = True
+            self.led.error()
+            self.proto.send({"t": "err", "re": "play", "code": "hid", "msg": str(e)})
         finally:
             if f:
                 f.close()
