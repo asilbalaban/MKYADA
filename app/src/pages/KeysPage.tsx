@@ -647,6 +647,9 @@ export function KeysPage() {
               // slots it drives the BUILT-IN navigation (issue #19)
               allowMenu={isVision}
               slotMode={isSlot}
+              // the "Built-in" choice names the concrete operation, not an
+              // abstract "default action"
+              builtinDesc={isSlot ? SLOT_BUILTINS[ctx][selected as ModuleSlot] : undefined}
               // rotation has no press to double/hold on
               allowVariants={!isSlot || (selected as string).startsWith("btn-")}
               fwVersion={hello?.fw}

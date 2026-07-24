@@ -1162,6 +1162,41 @@ check("menu-none BACK slot swallows the press",
 os.remove(os.path.join(mac_dir, "btn-back.json"))
 ui.invalidate_labels()
 
+# direct-jump menu actions (fw 0.12.0): "settings" opens the settings menu,
+# "home" the layer screen — injected from a macro key or assigned to a slot
+ui.state = uimod.S_SELECT
+ui.inject("settings")
+check("inject settings jumps to the settings menu",
+      ui.state == uimod.S_SET_MENU, "state=%d" % ui.state)
+ui.inject("home")
+check("inject home jumps to the layer screen",
+      ui.state == uimod.S_HOME and ui.home_pos == vapp.layer,
+      "state=%d pos=%d" % (ui.state, ui.home_pos))
+with open(vapp.slot_path("btn-confirm", 0), "w") as f:
+    json.dump({"format": "mkyada-macro", "version": 2, "kind": "menu",
+               "menu": "settings", "events": []}, f)
+ui.invalidate_labels()
+ui.state = uimod.S_SELECT
+vplays.clear()
+ui._dispatch(_t2.monotonic(), 0, uimod.K_CONFIRM)
+check("menu-settings CONFIRM slot opens settings",
+      ui.state == uimod.S_SET_MENU and vplays == [], "state=%d" % ui.state)
+os.remove(os.path.join(mac_dir, "btn-confirm.json"))
+ui.invalidate_labels()
+_lyr0 = vapp.layer
+ui.inject("layer_next")
+check("inject layer_next cycles the layer and shows the grid",
+      vapp.layer == (_lyr0 + 1) % vapp.config["layer_count"]
+      and ui.state == uimod.S_SELECT,
+      "layer=%d state=%d" % (vapp.layer, ui.state))
+ui.inject("layer_prev")
+check("inject layer_prev returns", vapp.layer == _lyr0, str(vapp.layer))
+ui.state = uimod.S_HOME
+ui.inject("grid")
+check("inject grid jumps to the key grid", ui.state == uimod.S_SELECT,
+      "state=%d" % ui.state)
+ui._enter_grid()
+
 # per-context overrides: enc-cw@home plays on the layer picker; the other
 # direction of a half-assigned wheel is dead; unassigned BACK stays default
 vapp.slot_ctx_path = lambda s, c: os.path.join(mac_dir, "%s@%s.json" % (s, c))

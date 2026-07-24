@@ -321,6 +321,11 @@ const MENU_LABEL: Record<MenuAction, string> = {
   right: "Menu →",
   confirm: "Menu confirm",
   back: "Menu back",
+  home: "Open layer screen",
+  settings: "Open settings",
+  grid: "Open key grid",
+  layer_next: "Next layer",
+  layer_prev: "Previous layer",
   default: "Built-in action",
   none: "Do nothing",
 };

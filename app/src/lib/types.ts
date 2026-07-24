@@ -251,8 +251,15 @@ export type ScrollDir = "up" | "down" | "left" | "right";
  * "default" (module slots only, firmware 0.9.0) keeps the control's built-in
  * action — the carrier for "tap stays stock, hold/double do something".
  * "none" (firmware 0.10.0) is the wire carrier of the "nothing" assignment:
- * the firmware swallows the input entirely. */
-export type MenuAction = "left" | "right" | "confirm" | "back" | "default" | "none";
+ * the firmware swallows the input entirely.
+ * Direct-jump actions (firmware 0.12.0): "home" opens the layer screen,
+ * "settings" the on-device settings menu, "grid" the key grid;
+ * "layer_next" / "layer_prev" switch the active layer immediately —
+ * all assignable to any key or control. */
+export type MenuAction =
+  | "left" | "right" | "confirm" | "back"
+  | "home" | "settings" | "grid" | "layer_next" | "layer_prev"
+  | "default" | "none";
 
 /** Per-key behavior options shared by every assignment kind. */
 export interface AssignmentBehavior {

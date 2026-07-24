@@ -128,6 +128,7 @@ export function AssignmentEditor({
   nested = false,
   allowMenu = false,
   slotMode = false,
+  builtinDesc,
   allowVariants = true,
   fwVersion,
 }: {
@@ -144,6 +145,11 @@ export function AssignmentEditor({
    * offered even on a built-in tap (hold/double over the default), and
    * the device-only hold-to-repeat option is hidden (issue #19). */
   slotMode?: boolean;
+  /** What this control's built-in action concretely does in the edited
+   * context (e.g. "moves the selection left") — shown instead of the
+   * abstract "Built-in menu action" label so the choice reads as a real
+   * operation. Slot mode only. */
+  builtinDesc?: string;
   /** Key-logic variants make sense for things that are pressed — false for
    * encoder rotation slots. */
   allowVariants?: boolean;
@@ -153,7 +159,9 @@ export function AssignmentEditor({
 }) {
   const [importError, setImportError] = useState("");
   const kinds = KINDS.map((k) =>
-    k.value === "none" && slotMode ? { ...k, label: "Built-in menu action" } : k,
+    k.value === "none" && slotMode
+      ? { ...k, label: builtinDesc ? `Built-in: ${builtinDesc}` : "Built-in menu action" }
+      : k,
   ).filter(
     (k) =>
       (k.value !== "sequence" || !nested) &&
@@ -389,8 +397,15 @@ export function AssignmentEditor({
             <option value="right">Scroll menu → (encoder right)</option>
             <option value="confirm">Confirm (encoder press)</option>
             <option value="back">Back</option>
+            <option value="home">Open the layer screen</option>
+            <option value="settings">Open the settings menu</option>
+            <option value="grid">Open the key grid</option>
+            <option value="layer_next">Switch to the next layer</option>
+            <option value="layer_prev">Switch to the previous layer</option>
             {(slotMode || value.action === "default") && (
-              <option value="default">This control's built-in action</option>
+              <option value="default">
+                {builtinDesc ? `This control's built-in action (${builtinDesc})` : "This control's built-in action"}
+              </option>
             )}
           </Select>
           <p className="text-xs text-fg-faint mt-1">

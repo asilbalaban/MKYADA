@@ -543,6 +543,16 @@ class Ui:
                 default(now, 0, K_CONFIRM)
             elif act == "back":
                 default(now, 0, K_BACK)
+            elif act == "home":
+                self._go_home()
+            elif act == "settings":
+                self._goto_settings()
+            elif act == "grid":
+                self._enter_grid()
+            elif act == "layer_next":
+                self._jump_layer(1)
+            elif act == "layer_prev":
+                self._jump_layer(-1)
             elif act == "none":
                 pass  # assigned "Do nothing" in the app
             else:
@@ -661,7 +671,8 @@ class Ui:
 
     def inject(self, action):
         """A macro key mapped to a device-menu action drives the UI as if the
-        encoder or CONFIRM/BACK were used (menu left/right/confirm/back)."""
+        encoder or CONFIRM/BACK were used (menu left/right/confirm/back).
+        "home" / "settings" jump straight to that screen."""
         if self.state in (S_HOST, S_PLAYING):
             return  # menu nav is meaningless while playing / app-owned
         now = time.monotonic()
@@ -675,6 +686,16 @@ class Ui:
                 self._dispatch(now, 0, K_CONFIRM)
             elif action == "back":
                 self._dispatch(now, 0, K_BACK)
+            elif action == "home":
+                self._go_home()
+            elif action == "settings":
+                self._goto_settings()
+            elif action == "grid":
+                self._enter_grid()
+            elif action == "layer_next":
+                self._jump_layer(1)
+            elif action == "layer_prev":
+                self._jump_layer(-1)
         finally:
             self._injecting -= 1
 
@@ -729,9 +750,7 @@ class Ui:
             self._draw_home()
         if press in (K_PSH, K_CONFIRM):
             if self.home_pos == c:  # SETTINGS
-                self.set_menu_sel = 0
-                self.state = S_SET_MENU
-                self.oled.show_menu(tr("settings"), self._set_items(), 0)
+                self._goto_settings()
             else:
                 self.app.set_layer_idx(self.home_pos)
                 self._nvm_save()
@@ -745,7 +764,24 @@ class Ui:
         # lands back on the grid (issue #19)
         self.home_pos = self.app.layer
         self.state = S_HOME
+        self.activity_at = time.monotonic()  # injected jumps carry no press
         self._draw_home()
+
+    def _goto_settings(self):
+        """Open the settings menu — from the home SETTINGS entry, or as a
+        direct-jump "settings" menu action assigned to a key/control."""
+        self.set_menu_sel = 0
+        self.state = S_SET_MENU
+        self.activity_at = time.monotonic()
+        self.oled.show_menu(tr("settings"), self._set_items(), 0)
+
+    def _jump_layer(self, step):
+        """Switch the active layer directly (menu action "layer_next" /
+        "layer_prev") — same flow as confirming a layer on the home screen."""
+        c = self.app.config["layer_count"]
+        self.app.set_layer_idx((self.app.layer + step) % c)
+        self._nvm_save()
+        self._enter_grid()
 
     def _st_select(self, now, d, press):
         self._custom_input(now, d, press, self.slots(self.app.layer),

@@ -111,7 +111,11 @@ Every event has `delay` — milliseconds to wait **before** executing it.
 `left` / `right` / `confirm` / `back`, and the firmware feeds it to the
 on-screen menu so a normal key acts like the encoder / CONFIRM / BACK —
 including any custom slot assignments, so a key can fully stand in for a
-broken wheel. `"default"` (fw ≥ 0.9.0, module-slot files only) means "this
+broken wheel. Direct-jump actions (fw ≥ 0.12.0): `"home"` opens the layer
+screen, `"settings"` the on-device settings menu, `"grid"` the key grid;
+`"layer_next"` / `"layer_prev"` switch the active layer immediately — all
+from any key or control.
+`"default"` (fw ≥ 0.9.0, module-slot files only) means "this
 control's built-in action" — the carrier for slot files whose tap stays
 stock while `variants` customize double/long press; on a normal key it is
 a no-op. `"none"` (fw ≥ 0.10.0) is the app's "Do nothing" choice: the

@@ -402,6 +402,15 @@ describe("module-slot assignments (issue #19)", () => {
     expect(describeAssignment(back)).toBe("Do nothing");
   });
 
+  it("direct-jump menu actions (home/settings) round-trip", () => {
+    const settings = compileAssignment({ kind: "menu", action: "settings" });
+    expect(settings!.menu).toBe("settings");
+    expect(describeAssignment(parseAssignment(settings!))).toBe("Open settings");
+    const home = compileAssignment({ kind: "menu", action: "home" });
+    expect(home!.menu).toBe("home");
+    expect(describeAssignment(parseAssignment(home!))).toBe("Open layer screen");
+  });
+
   it('"nothing" tap can still carry gestures', () => {
     const file = compileSlotAssignment({
       kind: "nothing",
