@@ -1112,6 +1112,17 @@ class App:
     def run_loop(self):
         self.led.set(state=ledmod.IDLE, layer=0)
         self.ui_call("start")
+        # A Vision 6 whose menu module never loaded (self.ui is None: ui.py
+        # shipped as source and the display-fragmented heap MemoryError'd on
+        # the compile, or Ui() construction failed) must not sit forever on
+        # the boot "loading" splash — that reads as a dead board. Replace it
+        # with a clear status; keys and serial keep working, and the app can
+        # reinstall the precompiled .mpy build to restore the menu.
+        if OLED and not self.ui:
+            try:
+                OLED.show_headless()
+            except Exception:
+                pass
         self.arm_watchdog()
         while True:
             self.feed()

@@ -436,6 +436,19 @@ class Oled:
         g.append(self._txt(tr("host"), self.CX, 34, font=self.ui_font))
         self.paint(g)
 
+    def show_headless(self):
+        """The menu module could not load (import/compile/MemoryError — e.g.
+        ui.py shipped as source and the display-fragmented heap couldn't
+        compile it). Keys and serial still work; show why instead of leaving
+        the boot 'loading' splash frozen, which reads as a brick."""
+        if not self.display:
+            return
+        g = displayio.Group()
+        self._top_bar(g, "MKYADA")
+        g.append(self._txt(tr("menu_fail"), self.CX, 30, font=self.ui_font))
+        g.append(self._txt(tr("menu_fail_hint"), self.CX, 44, font=self.ui_font))
+        self.paint(g)
+
     def show_error(self, msg):
         if not self.display:
             return

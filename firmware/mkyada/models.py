@@ -25,7 +25,8 @@ MODELS = {
         "nav": None,
         "recovery_pin": "GP0",  # hold at power-on to force the USB drive back
         "max_keys": 20,
-        "min_layers": 2,
+        "min_layers": 1,        # single layer by default; a layer key + a
+                                # higher layer_count opt into cycling A->B->..
         "reserved": ("GP16",),  # onboard WS2812
         "usb_product": "MKYADA Keypad",
     },

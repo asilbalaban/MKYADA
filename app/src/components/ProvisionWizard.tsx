@@ -10,7 +10,7 @@ import { CircleCheck } from "lucide-react";
 import { BootloaderDrive, ipc } from "../lib/ipc";
 import type { DeviceModel, DriveInfo } from "../lib/types";
 import { MODEL_META } from "../lib/types";
-import { defaultConfig } from "../lib/macro-model";
+import { compileAssignment, defaultConfig } from "../lib/macro-model";
 import { useDevice } from "../lib/device";
 import { Button, Spinner, Stepper } from "./ui";
 import { ProductImage } from "./ProductImage";
@@ -93,8 +93,32 @@ export function ProvisionWizard({
       setPhase("Installing MKYADA firmware…");
       await invoke<string[]>("firmware_update", { drive: drive.path });
       setPhase("Writing the starter config…");
-      const cfg = { ...defaultConfig(), model, layer_key: null, usb_drive: true };
+      // Finished-product defaults on first install: USB drive hidden (the app
+      // manages files over serial), a single layer, no layer band, profile
+      // band on.
+      const cfg = {
+        ...defaultConfig(),
+        model,
+        layer_key: null,
+        layer_count: 1,
+        usb_drive: false,
+        show_layer: false,
+        show_profile: true,
+      };
       await ipc.driveWrite(drive.path, "config.json", JSON.stringify(cfg, null, 2));
+      // Starter macro so key 1 does something out of the box: type the
+      // project's releases URL (layout-aware — compiled to the user's layout).
+      const starter = compileAssignment(
+        { kind: "text", text: "https://github.com/asilbalaban/MKYADA/releases/" },
+        "MKYADA releases",
+      );
+      if (starter) {
+        await ipc.driveWrite(
+          drive.path,
+          "macros/key1.json",
+          JSON.stringify(starter, null, 2),
+        );
+      }
       setPhase("");
       setDone(true);
     } catch (e) {
