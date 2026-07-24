@@ -690,8 +690,8 @@ app.proto.send = _orig_send
 app.proto.ser = None
 
 # --- serial "led" op (proto v2): app feedback override --------------------
-check("hello reports proto v7", app.hello()["proto"] == 7, str(app.hello()["proto"]))
-check("hello reports usb_drive", app.hello()["usb_drive"] is True, str(app.hello()))
+check("hello reports proto v8", app.hello()["proto"] == 8, str(app.hello()["proto"]))
+check("hello reports usb_drive", app.hello()["usb_drive"] == app.config["usb_drive"], str(app.hello()))
 app.proto.ser = FakeSerial([])
 app.handle_msg({"t": "led", "mode": "solid", "rgb": [255, 0, 0]})
 check("led solid override set", app.led.override == ("solid", (255, 0, 0)), str(app.led.override))
@@ -849,13 +849,14 @@ if os.name != "nt":
 else:
     print("SKIP fs_* section (POSIX-rooted paths; covered on CI)")
 
-# usb_drive config: default on, explicit false survives load_config
-_b.open = _cfg_open({"usb_drive": False})
+# usb_drive config: finished-product default is hidden (False); an explicit
+# true shows the drive and survives load_config
+_b.open = _cfg_open({"usb_drive": True})
 app.load_config()
-check("usb_drive false honored", app.config["usb_drive"] is False)
+check("usb_drive true honored", app.config["usb_drive"] is True)
 _b.open = _cfg_open({})
 app.load_config()
-check("usb_drive defaults on", app.config["usb_drive"] is True)
+check("usb_drive defaults off", app.config["usb_drive"] is False)
 _b.open = _real_open
 app.load_config()
 
@@ -1002,6 +1003,27 @@ with open(vpath(2, 0)) as f:
     vdata2 = json.load(f)
 check("persist whole-file speed 0.5", res2 == "ok" and vdata2["settings"]["speed"] == 0.5)
 check("persist keeps name", vdata2["name"] == "mute")
+
+# per-profile speed (issue #23): under an active profile the speed editor
+# copy-on-writes into the PROFILE's file, leaving the standalone macro alone.
+def vprof_key_path(k):
+    return os.path.join(mac_dir, "p_test_key%d.json" % k)
+
+
+vapp.profile_id = "p_test"
+vapp.profile_key_path = vprof_key_path
+res_cow = ui.persist_speed(0, 0, 40)  # key1: no profile file yet -> seed it
+check("profile speed cow ok", res_cow == "ok")
+check("profile file created", os.path.exists(vprof_key_path(1)))
+with open(vprof_key_path(1)) as f:
+    cow_lines = f.read().strip().split("\n")
+check("profile speed 4.0", json.loads(cow_lines[0])["settings"]["speed"] == 4.0)
+check("profile cow kept events", len(cow_lines) == 3, str(len(cow_lines)))
+with open(vpath(1, 0)) as f:  # standalone macro untouched (still 3.0)
+    check("standalone speed untouched",
+          json.loads(f.readline())["settings"]["speed"] == 3.0)
+vapp.profile_id = None
+ui._speeds.clear()  # drop the profile-scoped cache before the slot tests
 
 with open(vapp.slot_path("enc-cw", 0), "w") as f:  # custom encoder slot
     json.dump({"format": "mkyada-macro", "version": 2, "name": "vol+",

@@ -63,7 +63,7 @@ NAV_SLOTS = {K_PSH: "btn-psh", K_BACK: "btn-back", K_CONFIRM: "btn-confirm"}
 ESC_HOLD_S = 1.2
 
 (S_HOME, S_SELECT, S_SPEED, S_SAVED, S_SET_MENU, S_FONT, S_TIMEOUT,
- S_PLAYING, S_HOST, S_TOAST, S_LANG) = range(11)
+ S_PLAYING, S_HOST, S_TOAST, S_LANG, S_TEST) = range(12)
 
 (SET_FONT, SET_TMO, SET_LANG, SET_BAND_LAYER, SET_BAND_PROFILE,
  SET_REBOOT) = range(6)
@@ -83,14 +83,29 @@ class Ui:
         self.oled = oled
         m = MODELS[app.model]
         ea, eb = m["encoder"]
+        if app.config.get("enc_swap"):
+            ea, eb = eb, ea  # encoder soldered backwards: flip CW/CCW
         self.enc = rotaryio.IncrementalEncoder(getattr(board, ea),
                                                getattr(board, eb))
-        self.nav = keypad.Keys(tuple(getattr(board, n) for n in m["nav"]),
+        nav_pins = app.config.get("nav") or m["nav"]
+        self.nav = keypad.Keys(tuple(getattr(board, n) for n in nav_pins),
                                value_when_pressed=False, pull=True)
         self.last_enc = self.enc.position
 
         i18n.set_lang(app.config.get("lang"))
         self.font_idx, self.idle_secs, last_layer = self._nvm_load()
+        # config.json can carry font/timeout (the app-facing mirror). When it
+        # does, it wins over NVM so a value set from the app applies; either
+        # way we publish the resolved values into app.config so hello reports
+        # them without waiting for the first on-device change.
+        cf = app.config.get("font")
+        if isinstance(cf, int) and 0 <= cf < len(FONTS):
+            self.font_idx = cf
+        ct = app.config.get("timeout")
+        if isinstance(ct, int) and TMO_MIN <= ct <= TMO_MAX:
+            self.idle_secs = ct
+        app.config["font"] = self.font_idx
+        app.config["timeout"] = self.idle_secs
         self.lang_sel = 0
         self.state = S_HOME
         self.prev_state = S_HOME  # where to return after host mode / toast
@@ -315,13 +330,22 @@ class Ui:
     # --- speed persistence ---
     def persist_speed(self, l, key0, tenths):
         """Rewrite settings.speed inside the key's macro file. Returns
-        "ok" | "missing" | "readonly" | "error"."""
-        path = self.app.macro_path_for(key0 + 1, l)
+        "ok" | "missing" | "readonly" | "error".
+
+        Under an active profile the new speed lands in the PROFILE's file
+        (copy-on-write from the standalone macro the first time), so a
+        per-app speed never touches the shared standalone config (issue #23).
+        """
+        read_path = self.app.macro_path_for(key0 + 1, l)  # profile file or std
+        if self.app.profile_id:
+            path = self.app.profile_key_path(key0 + 1)  # write target (profile)
+        else:
+            path = read_path
         tmp = path + ".part"
         speed = tenths / 10.0
         gc.collect()  # a big recorded macro gets rewritten below; start clean
         try:
-            f = open(path, "rb")
+            f = open(read_path, "rb")
         except OSError:
             return "missing"
         try:
@@ -413,6 +437,16 @@ class Ui:
         elif self.state == S_SELECT and self.app.config["show_profile"]:
             self._draw_grid()
 
+    def on_profile(self):
+        """A per-app profile was activated or cleared (issue #23): the macro
+        files behind every key/slot changed, so drop the cached labels,
+        speeds and slots and repaint the grid with the new set."""
+        self._labels.clear()
+        self._speeds.clear()
+        self._slots.clear()
+        if self.state == S_SELECT:
+            self._enter_grid()
+
     def _draw_host(self):
         """Host-mode screen: the active profile's six key names as a grid
         (pushed by the app in the "label" message, proto v6) so the user
@@ -444,6 +478,22 @@ class Ui:
 
     def on_reload(self):
         i18n.set_lang(self.app.config.get("lang"))
+        # the app may have changed font/timeout in config.json — apply them
+        changed = False
+        ct = self.app.config.get("timeout")
+        if isinstance(ct, int) and TMO_MIN <= ct <= TMO_MAX and ct != self.idle_secs:
+            self.idle_secs = ct
+            changed = True
+        cf = self.app.config.get("font")
+        if isinstance(cf, int) and 0 <= cf < len(FONTS) and cf != self.font_idx:
+            self.font_idx = cf
+            self.oled.load_grid_font(self.font_idx,
+                                     self._glyphs_for(self.app.layer))
+            changed = True
+        if changed:
+            self._nvm_save()
+        self.app.config["font"] = self.font_idx
+        self.app.config["timeout"] = self.idle_secs
         self._labels.clear()
         self._speeds.clear()
         self._slots.clear()
@@ -662,10 +712,25 @@ class Ui:
         if self.state == S_HOST:
             self._tick_host()
             return
+        if self.state == S_TEST:
+            self._tick_test()
+            return
         if self.state == S_PLAYING:
             return  # playback owns the loop; on_play_done() restores us
         d = self._enc_delta()
         ev = self.nav.events.get()
+        # Mirror the wheel/nav to a connected app even in standalone mode, the
+        # same way macro keys stream their btn events on every screen — so the
+        # Setup test panel lights up live with no "host mode" round-trip. The
+        # inputs still drive the menu below; the app just gets to watch.
+        if self.app.proto.connected:
+            if d:
+                self.app.proto.send({"t": "enc", "d": 1 if d > 0 else -1,
+                                     "n": abs(d)})
+            if ev:
+                self.app.proto.send({"t": "btn",
+                                     "slot": NAV_SLOT[ev.key_number],
+                                     "down": bool(ev.pressed)})
         press = ev.key_number if (ev and ev.pressed) else None
         self._dispatch(now, d, press)
 
@@ -736,6 +801,57 @@ class Ui:
                 break
             self.app.proto.send({"t": "btn", "slot": NAV_SLOT[ev.key_number],
                                  "down": bool(ev.pressed)})
+
+    def _tick_test(self):
+        """Setup test mode: the wheel/nav stream to the app's tester like host
+        mode AND show on the screen (wheel direction / pressed nav button + its
+        pin), so every control is verifiable on the device. Key presses come
+        via App.on_edge (on_test_key)."""
+        d = self._enc_delta()
+        if d:
+            if self.app.proto.connected:
+                self.app.proto.send({"t": "enc", "d": 1 if d > 0 else -1,
+                                     "n": abs(d)})
+            ea, eb = MODELS[self.app.model]["encoder"]
+            self.oled.show_toast(tr("setup_test"),
+                                 "Wheel " + ("CW" if d > 0 else "CCW"),
+                                 "%s/%s" % (ea, eb))
+        while True:
+            ev = self.nav.events.get()
+            if not ev:
+                break
+            if self.app.proto.connected:
+                self.app.proto.send({"t": "btn",
+                                     "slot": NAV_SLOT[ev.key_number],
+                                     "down": bool(ev.pressed)})
+            if ev.pressed:
+                names = self.app.nav_pin_names() or ()
+                pin = names[ev.key_number] if ev.key_number < len(names) else "?"
+                self.oled.show_toast(tr("setup_test"),
+                                     NAV_SLOT[ev.key_number].upper(), pin)
+
+    # --- Setup test mode (issue #24) ---
+    def on_test_enter(self):
+        self.state = S_TEST
+        self._drain_inputs()
+        self.oled.show_toast(tr("setup_test"), tr("press_key"), "")
+
+    def on_test_key(self, key_no, pin):
+        if self.state != S_TEST:
+            return
+        try:
+            a, b = self.labels(self.app.layer)[key_no - 1]
+            name = (a + " " + b).strip()
+        except Exception:
+            name = ""
+        self.oled.show_toast(tr("setup_test"), name or ("K%d" % key_no),
+                             "K%d  %s" % (key_no, pin))
+
+    def on_test_leave(self):
+        if self.state == S_TEST:
+            self._drain_inputs()
+            self.state = S_SELECT
+            self._draw_grid()
 
     def _st_home(self, now, d, press):
         self._custom_input(now, d, press, self.ctx_slots("home"),
@@ -898,6 +1014,9 @@ class Ui:
                                      self._glyphs_for(self.app.layer))
             self._labels.clear()  # re-split for the new char width
             self._nvm_save()
+            # mirror into config.json so a connected app sees the choice
+            # (best-effort: NVM already holds it; ignore a read-only drive)
+            self.persist_cfg({"font": self.font_idx})
             self._enter_grid()
         elif press == K_BACK:
             self.state = S_SET_MENU
@@ -983,6 +1102,7 @@ class Ui:
         if press in (K_PSH, K_CONFIRM):
             self.idle_secs = self.tmo_val
             self._nvm_save()
+            self.persist_cfg({"timeout": self.idle_secs})  # app-facing mirror
             self.state = S_SET_MENU
             self.oled.show_menu(tr("settings"), self._set_items(), self.set_menu_sel)
         elif press == K_BACK:

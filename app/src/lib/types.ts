@@ -19,10 +19,19 @@ export interface Hello {
   model?: string;
   /** GPIO names in use, key 1 first (length == key_count); absent on older firmware */
   pins?: string[];
+  /** Vision 6 PSH/BACK/CONFIRM pin order (index 0=PSH,1=BACK,2=CONFIRM);
+   * absent on firmware < 0.14.0 or on core6 (no nav buttons) */
+  nav?: string[] | null;
   /** Vision 6 grid band: show the active layer; absent on firmware < 0.9.0 */
   show_layer?: boolean;
   /** Vision 6 grid band: show the app-pushed profile label; absent on firmware < 0.9.0 */
   show_profile?: boolean;
+  /** Vision 6 grid font index (0=Small,1=Medium,2=Large); absent on firmware < 0.14.0 */
+  font?: number;
+  /** Vision 6 auto-return idle seconds (3–60); absent on firmware < 0.14.0 */
+  timeout?: number;
+  /** Vision 6 encoder wired backwards (CW/CCW flipped); absent on firmware < 0.14.0 */
+  enc_swap?: boolean;
   layer: string;
   /** "rescue": the main firmware failed to start and code.py's rescue
    * console answered instead — only file repair + reset are available */
@@ -60,12 +69,22 @@ export interface DeviceConfig {
   model?: string | null;
   /** per-key GPIO names (key 1 first); null = the model's default order */
   pins?: string[] | null;
+  /** Vision 6 PSH/BACK/CONFIRM pin order override (fixes a swapped solder);
+   * null = the model's default nav wiring */
+  nav?: string[] | null;
   /** Vision 6 device UI language ("en" | "tr") — also editable on the device */
   lang?: string | null;
   /** Vision 6: band over the key grid naming the active layer — also on the device */
   show_layer?: boolean;
   /** Vision 6: the band shows the app's active profile label — also on the device */
   show_profile?: boolean;
+  /** Vision 6 grid font index (0=Small,1=Medium,2=Large); null = keep the
+   * device's own value. Set from the app or the on-device Settings menu. */
+  font?: number | null;
+  /** Vision 6 auto-return idle seconds (3–60); null = keep the device's value */
+  timeout?: number | null;
+  /** Vision 6 encoder wired backwards — true flips the wheel's CW/CCW */
+  enc_swap?: boolean;
   screen: { width: number; height: number };
 }
 

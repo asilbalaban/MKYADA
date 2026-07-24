@@ -41,6 +41,8 @@ STRINGS = {
         "save_fail": "could not save",
         "updating": "updating - do not unplug",
         "restarting": "restarting...",
+        "setup_test": "SETUP - TEST",
+        "press_key": "press a key",
     },
     "tr": {
         "loading": "yukleniyor",
@@ -72,6 +74,8 @@ STRINGS = {
         "save_fail": "kaydedilemedi",
         "updating": "guncelleniyor - fisi cekmeyin",
         "restarting": "yeniden baslatiliyor...",
+        "setup_test": "KURULUM - TEST",
+        "press_key": "bir tusa bas",
     },
 }
 

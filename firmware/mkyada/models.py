@@ -111,6 +111,20 @@ def validate_key_pins(pins, key_count, model):
     return list(pins)
 
 
+def validate_nav_pins(nav, model):
+    """A config "nav" list overrides the model's default PSH/BACK/CONFIRM
+    solder order — the escape hatch for a swapped BACK/CONFIRM (or PSH)
+    joint. Must be the model's own three nav pins, reordered. Returns the
+    validated list of names, or None to use the model default."""
+    m = MODELS[model]
+    base = m.get("nav")
+    if not base or not isinstance(nav, (list, tuple)) or len(nav) != len(base):
+        return None
+    if sorted(nav) != sorted(base):  # same pins, any order
+        return None
+    return list(nav)
+
+
 def detect_candidates(model):
     """GPIO names worth watching in pin-detect mode: every edge pin the
     model doesn't reserve for itself."""

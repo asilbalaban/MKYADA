@@ -97,12 +97,21 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
       // into config.json and announces it) — mirror the toggles the
       // Settings page renders from hello
       if (msg.t === "config" && "show_layer" in msg) {
+        const c = msg as {
+          show_profile?: unknown;
+          font?: unknown;
+          timeout?: unknown;
+        };
         setHello((h) =>
           h
             ? {
                 ...h,
                 show_layer: msg.show_layer === true,
-                show_profile: (msg as { show_profile?: unknown }).show_profile === true,
+                show_profile: c.show_profile === true,
+                // font/timeout mirror the on-device Settings menu (firmware
+                // ≥ 0.14.0 rewrites config.json + announces it)
+                ...(typeof c.font === "number" ? { font: c.font } : {}),
+                ...(typeof c.timeout === "number" ? { timeout: c.timeout } : {}),
               }
             : h,
         );

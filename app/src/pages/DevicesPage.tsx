@@ -4,7 +4,7 @@
 
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { CirclePlus, LifeBuoy, RotateCcw, Usb } from "lucide-react";
+import { CirclePlus, LifeBuoy, RotateCcw, RotateCw, Usb } from "lucide-react";
 import { FirmwareProgress, ipc, onFirmwareProgress } from "../lib/ipc";
 import { isSerialDrive, useDevice } from "../lib/device";
 import { useNav } from "../lib/nav";
@@ -169,7 +169,10 @@ export function DevicesPage({ onConnected }: { onConnected: () => void }) {
         >
           <div className="w-[26rem] max-w-[calc(100vw-2rem)] rounded-xl border border-line bg-panel shadow-2xl p-5 flex flex-col gap-4">
             <div className="flex items-start gap-3">
-              <RotateCcw size={22} className="text-accent shrink-0 mt-0.5 animate-spin" aria-hidden />
+              {/* clockwise arrow so the glyph turns the same way animate-spin
+                  rotates it — RotateCcw's arrowhead points the other way and
+                  reads as "spinning backwards" (issue #21) */}
+              <RotateCw size={22} className="text-accent shrink-0 mt-0.5 animate-spin" aria-hidden />
               <div className="flex-1 min-w-0">
                 <p className="text-fg font-medium text-sm">Updating firmware…</p>
                 <p className="text-xs text-fg-muted truncate">

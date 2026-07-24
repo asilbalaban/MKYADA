@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { getVersion } from "@tauri-apps/api/app";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { AppWindow, Gauge, HardDrive, Layers, Monitor, Moon, Pin, Power, Rocket, Sun } from "lucide-react";
+import { AppWindow, Gauge, HardDrive, Layers, Monitor, Moon, Pin, Power, Rocket, Sun, Type } from "lucide-react";
 import { ipc } from "../lib/ipc";
 import { keysCache } from "../lib/keys-cache";
 import { useDevice } from "../lib/device";
@@ -19,7 +19,7 @@ import {
   useThemePref,
   useWheelAccel,
 } from "../lib/settings";
-import { Badge, Button, Card } from "../components/ui";
+import { Badge, Button, Card, Select, Spinner } from "../components/ui";
 import { PermissionsCard } from "../components/Permissions";
 import { useToast } from "../components/toast";
 import { useConfirm } from "../components/dialog";
@@ -129,6 +129,13 @@ function KeypadCard() {
   const toast = useToast();
   const confirm = useConfirm();
   const [busy, setBusy] = useState(false);
+  // A usb-drive toggle restarts the keypad, which briefly drops the
+  // connection. Track that so the card shows a calm "restarting" state instead
+  // of every row flipping to a "connect a keypad" badge mid-reboot.
+  const [restarting, setRestarting] = useState(false);
+  useEffect(() => {
+    if (hello) setRestarting(false);
+  }, [hello]);
   const hidden = hello?.usb_drive === false;
   // firmware < 0.4.0 has no usb_drive support (no fs_* serial commands)
   const supported = hello?.usb_drive !== undefined;
@@ -137,6 +144,30 @@ function KeypadCard() {
   const bandSupported = hello?.show_layer !== undefined;
   const wheelAccel = useWheelAccel();
   const [bandBusy, setBandBusy] = useState<"show_layer" | "show_profile" | null>(null);
+  const [fieldBusy, setFieldBusy] = useState<string | null>(null);
+  // firmware < 0.14.0 doesn't mirror font/timeout into config.json
+  const prefsSupported = hello?.font !== undefined;
+
+  /** Merge one field into the keypad's config.json and reload the firmware. */
+  async function setKeypadField(key: string, value: unknown) {
+    if (!hello || !drive) return;
+    setFieldBusy(key);
+    try {
+      let cfg: Record<string, unknown> = {};
+      try {
+        cfg = JSON.parse(await ipc.driveRead(drive.path, "config.json"));
+      } catch {
+        // fresh board without a config — the firmware defaults the rest
+      }
+      await writeAndReload([
+        { path: "config.json", content: JSON.stringify({ ...cfg, [key]: value }, null, 2) },
+      ]);
+    } catch (e) {
+      toast.error("Could not change the screen setting", String(e));
+    } finally {
+      setFieldBusy(null);
+    }
+  }
 
   /** Flip a band toggle in the keypad's config.json and reload the firmware. */
   async function setBand(key: "show_layer" | "show_profile", value: boolean) {
@@ -193,6 +224,7 @@ function KeypadCard() {
       // Same restart dance as the Devices page: clean unmount, reset, drop
       // the dead connection so auto-connect reattaches after the reboot.
       await ipc.driveEject(drive.path).catch(() => {});
+      setRestarting(true);
       await send({ t: "reset" }).catch(() => {});
       await disconnect().catch(() => {});
       toast.success(
@@ -206,6 +238,24 @@ function KeypadCard() {
     } finally {
       setBusy(false);
     }
+  }
+
+  if (!hello) {
+    // No device (or one mid-restart): one calm line instead of a column of
+    // amber "connect a keypad" / "needs firmware" badges on every row.
+    return (
+      <Card title="Keypad">
+        <div className="flex items-center justify-center gap-2 py-6 text-sm text-fg-muted">
+          {restarting ? (
+            <>
+              <Spinner size={14} /> Keypad is restarting…
+            </>
+          ) : (
+            "Connect a keypad to change its settings."
+          )}
+        </div>
+      </Card>
+    );
   }
 
   return (
@@ -290,6 +340,61 @@ function KeypadCard() {
                   <AppWindow size={14} aria-hidden />
                   {hello?.show_profile ? "On" : "Off"}
                 </Button>
+              )}
+            </div>
+
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex flex-col gap-0.5 text-sm">
+                <span className="text-fg font-medium">Screen font size</span>
+                <span className="text-xs text-fg-faint">
+                  How big the macro names on the keypad's screen are. Larger fits fewer
+                  characters per key. Also changeable on the device (Settings → Font).
+                </span>
+              </div>
+              {!prefsSupported ? (
+                <Badge tone="amber">needs firmware ≥ 0.14.0</Badge>
+              ) : (
+                <div className="flex gap-1.5 shrink-0">
+                  {["Small", "Medium", "Large"].map((label, i) => (
+                    <Button
+                      key={label}
+                      variant={hello?.font === i ? "primary" : "default"}
+                      loading={fieldBusy === "font"}
+                      disabled={!drive || fieldBusy !== null}
+                      onClick={() => void setKeypadField("font", i)}
+                    >
+                      {i === 0 && <Type size={12} aria-hidden />}
+                      {label}
+                    </Button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex flex-col gap-0.5 text-sm">
+                <span className="text-fg font-medium">Auto-return to the key grid</span>
+                <span className="text-xs text-fg-faint">
+                  After this many idle seconds the screen leaves a menu and returns to the
+                  key grid. Also changeable on the device (Settings → Auto-return).
+                </span>
+              </div>
+              {!prefsSupported ? (
+                <Badge tone="amber">needs firmware ≥ 0.14.0</Badge>
+              ) : (
+                <Select
+                  value={hello?.timeout ?? 10}
+                  disabled={!drive || fieldBusy !== null}
+                  className="shrink-0"
+                  aria-label="Auto-return idle seconds"
+                  onChange={(e) => void setKeypadField("timeout", Number(e.target.value))}
+                >
+                  {[5, 10, 15, 20, 30, 45, 60].map((s) => (
+                    <option key={s} value={s}>
+                      {s} seconds
+                    </option>
+                  ))}
+                </Select>
               )}
             </div>
           </>

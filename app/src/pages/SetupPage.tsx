@@ -1,8 +1,8 @@
 // Onboarding wizard: key count -> layer choice -> write config.json + reload.
 // Ends with a live key test that doubles as a solder-joint check.
 
-import { useEffect, useState } from "react";
-import { Pencil, Usb } from "lucide-react";
+import { Fragment, useEffect, useState } from "react";
+import { Disc3, Pencil, Usb } from "lucide-react";
 import { useDevice } from "../lib/device";
 import { useNav } from "../lib/nav";
 import { ipc } from "../lib/ipc";
@@ -11,6 +11,7 @@ import { defaultConfig, macroSlots } from "../lib/macro-model";
 import type { DeviceConfig } from "../lib/types";
 import { MODEL_META, assignablePins, defaultPins, deviceModel } from "../lib/types";
 import { Keypad } from "../components/Keypad";
+import { useToast } from "../components/toast";
 
 export function SetupPage({ onDone }: { onDone: () => void }) {
   const { hello, drive, writeAndReload, send, onMsg } = useDevice();
@@ -40,6 +41,14 @@ export function SetupPage({ onDone }: { onDone: () => void }) {
       layer_mode: hello.layer_mode,
       key_map: hello.key_map ?? null,
       model: hello.model ?? c.model ?? null,
+      // carry the device's current settings so a config rewrite from Setup
+      // never clobbers what the on-device menu / Settings page set (issue #27)
+      ...(hello.show_layer !== undefined ? { show_layer: hello.show_layer } : {}),
+      ...(hello.show_profile !== undefined ? { show_profile: hello.show_profile } : {}),
+      ...(hello.nav !== undefined ? { nav: hello.nav } : {}),
+      ...(hello.enc_swap !== undefined ? { enc_swap: hello.enc_swap } : {}),
+      ...(typeof hello.font === "number" ? { font: hello.font } : {}),
+      ...(typeof hello.timeout === "number" ? { timeout: hello.timeout } : {}),
     }));
   }, [hello]);
 
@@ -199,6 +208,12 @@ export function SetupPage({ onDone }: { onDone: () => void }) {
                   joint.
                 </p>
                 <TestPad cfg={cfg} send={send} />
+              </>
+            )}
+            {model === "vision6" && (
+              <>
+                <VisionControls />
+                <VisionTestBanner send={send} />
               </>
             )}
             <div className="flex justify-end">
@@ -415,6 +430,12 @@ export function SetupPage({ onDone }: { onDone: () => void }) {
                   <TestPad cfg={cfg} send={send} />
                 </>
               )}
+              {model === "vision6" && (
+                <>
+                  <VisionControls />
+                  <VisionTestBanner send={send} />
+                </>
+              )}
               <div className="flex justify-end">
                 <Button
                   variant="primary"
@@ -462,6 +483,9 @@ export function SetupPage({ onDone }: { onDone: () => void }) {
  * reports whichever pin gets grounded next. Saving writes the full `pins`
  * array into config.json; reset writes null (= model defaults).
  */
+const NAV_DEFAULT = ["GP4", "GP5", "GP6"];
+const NAV_ROLES = ["PSH (wheel press)", "BACK", "CONFIRM"];
+
 function WiringPanel({
   cfg,
   onApply,
@@ -471,24 +495,37 @@ function WiringPanel({
   onApply: (pins: string[] | null) => Promise<void>;
   onDetectingChange: (active: boolean) => void;
 }) {
-  const { hello, send, onMsg } = useDevice();
+  const { hello, drive, send, disconnect, onMsg } = useDevice();
+  const toast = useToast();
   const model = deviceModel(hello);
+  const isVision = model === "vision6";
   const supported = hello?.pins !== undefined;
+  // nav wiring is a Vision-only extra section in the same panel (firmware
+  // ≥ 0.14.0 reports it)
+  const navSupported = isVision && Array.isArray(hello?.nav);
   const defaults = defaultPins(model, cfg.key_count);
   const current =
     cfg.pins && cfg.pins.length === cfg.key_count ? cfg.pins : defaults;
   const currentKey = current.join(" ");
+  const curNav = hello?.nav && hello.nav.length === 3 ? hello.nav : NAV_DEFAULT;
+  const curNavKey = curNav.join(" ");
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState<string[]>(current);
+  const [navDraft, setNavDraft] = useState<string[]>(curNav);
   const [detectKey, setDetectKey] = useState<number | null>(null);
+  const [navDetect, setNavDetect] = useState<number | null>(null); // nav role index
   const [applying, setApplying] = useState(false);
   const options = assignablePins(model);
+  const navOptions = [...curNav].sort();
 
-  // Re-sync the draft whenever the config's wiring changes underneath us
-  // (a save landed, or another panel rewrote the config).
+  // Re-sync drafts whenever the config's wiring changes underneath us (a save
+  // landed, or another panel rewrote the config).
   useEffect(() => {
     setDraft(currentKey.split(" "));
   }, [currentKey]);
+  useEffect(() => {
+    setNavDraft(curNavKey.split(" "));
+  }, [curNavKey]);
 
   // Detect mode: the firmware suspends key events, streams {"t":"pin"}
   // instead, and auto-stops after 120 s — we also stop it on any exit path.
@@ -510,13 +547,61 @@ function WiringPanel({
     };
   }, [detectKey, onMsg, send, onDetectingChange]);
 
-  const dirty = draft.join(" ") !== currentKey;
-  const dupes = [...new Set(draft.filter((p, i) => draft.indexOf(p) !== i))];
+  // Nav-button Detect: no pin_detect needed — the nav pins are reserved so the
+  // wiring wizard can't watch them, but the firmware streams the pressed
+  // button's slot live (like the keys' btn events). Translate that slot to its
+  // physical pin through the current mapping and drop it into the role's row.
+  useEffect(() => {
+    if (navDetect === null) return;
+    const cur = curNavKey.split(" ");
+    return onMsg((m) => {
+      if (m.t !== "btn" || typeof m.slot !== "string" || m.down !== true) return;
+      const slotIdx = NAV_SLOT_ORDER.indexOf(m.slot);
+      if (slotIdx < 0) return;
+      const pin = cur[slotIdx];
+      setNavDraft((d) => d.map((p, i) => (i === navDetect ? pin : p)));
+      setNavDetect(null);
+    });
+  }, [navDetect, onMsg, curNavKey]);
 
-  async function apply(pins: string[] | null) {
+  const keyDupes = [...new Set(draft.filter((p, i) => draft.indexOf(p) !== i))];
+  const navDupes = [...new Set(navDraft.filter((p, i) => navDraft.indexOf(p) !== i))];
+  const dupes = [...keyDupes, ...navDupes];
+  const keyDirty = draft.join(" ") !== currentKey;
+  const navDirty = navSupported && navDraft.join(" ") !== curNavKey;
+  const dirty = keyDirty || navDirty;
+  const customNow = cfg.pins != null || curNavKey !== NAV_DEFAULT.join(" ");
+
+  // Write the whole wiring at once. Nav/encoder pins are bound at boot, so on
+  // Vision we rewrite config.json and hard-reset (a soft reload wouldn't
+  // rebind the buttons); Core 6 has no nav, so its plain key-pin path stays.
+  async function saveWiring(toDefault: boolean) {
     setApplying(true);
     try {
-      await onApply(pins);
+      const pins = toDefault || draft.join(" ") === defaults.join(" ") ? null : draft;
+      if (navSupported) {
+        if (!drive) return;
+        const nav = toDefault || navDraft.join(" ") === NAV_DEFAULT.join(" ") ? null : navDraft;
+        let stored: Record<string, unknown> = {};
+        try {
+          stored = JSON.parse(await ipc.driveRead(drive.path, "config.json"));
+        } catch {
+          // fresh board — firmware defaults the rest
+        }
+        await ipc.driveWrite(
+          drive.path,
+          "config.json",
+          JSON.stringify({ ...stored, pins, nav }, null, 2),
+        );
+        await ipc.driveEject(drive.path).catch(() => {});
+        await send({ t: "reset" }).catch(() => {});
+        await disconnect().catch(() => {});
+        toast.success("Keypad restarting", "Wiring saved.");
+      } else {
+        await onApply(pins);
+      }
+    } catch (e) {
+      toast.error("Could not save the wiring", String(e));
     } finally {
       setApplying(false);
     }
@@ -524,7 +609,7 @@ function WiringPanel({
 
   return (
     <Card
-      title="Key wiring (GPIO pins)"
+      title="Wiring (GPIO pins)"
       actions={
         supported && (
           <Button onClick={() => setOpen((o) => !o)}>{open ? "Hide" : "Change wiring"}</Button>
@@ -541,11 +626,19 @@ function WiringPanel({
           <span className="font-mono text-fg">
             {current.map((p, i) => `${i + 1}:${p}`).join("  ")}
           </span>
+          {navSupported && (
+            <>
+              {" · "}
+              <span className="font-mono text-fg">
+                {NAV_ROLES.map((r, i) => `${r.split(" ")[0]}:${curNav[i]}`).join("  ")}
+              </span>
+            </>
+          )}
         </p>
       ) : (
         <div className="flex flex-col gap-3 text-sm">
           <p className="text-fg-muted text-xs">
-            A key can sit on any free edge pin. Pick it here — or hit Detect and press that key
+            Which GPIO drives each control. Pick it here — or, for a key, hit Detect and press it
             (touch its wire to GND) so the keypad reports the pin itself.
           </p>
           <div className="grid grid-cols-[auto_1fr_auto] items-center gap-x-3 gap-y-1.5 max-w-md">
@@ -557,30 +650,67 @@ function WiringPanel({
                 draft={draft}
                 options={options}
                 detectKey={detectKey}
+                busy={navDetect !== null}
                 onPin={(p) => setDraft(draft.map((v, j) => (j === i ? p : v)))}
                 onDetect={(on) => setDetectKey(on ? i + 1 : null)}
               />
             ))}
+            {navSupported &&
+              navDraft.map((pin, i) => {
+                const locked = detectKey !== null || (navDetect !== null && navDetect !== i);
+                return (
+                  <Fragment key={`nav${i}`}>
+                    <span className="text-fg text-xs">{NAV_ROLES[i]}</span>
+                    <Select
+                      value={pin}
+                      disabled={locked || navDetect === i}
+                      onChange={(e) =>
+                        setNavDraft(navDraft.map((v, j) => (j === i ? e.target.value : v)))
+                      }
+                    >
+                      {navOptions.map((o) => {
+                        const usedBy = navDraft.findIndex((p) => p === o);
+                        const used = usedBy !== -1 && usedBy !== i;
+                        return (
+                          <option key={o} value={o} disabled={used}>
+                            {o}
+                            {used ? ` — ${NAV_ROLES[usedBy].split(" ")[0]}` : ""}
+                          </option>
+                        );
+                      })}
+                    </Select>
+                    {navDetect === i ? (
+                      <Button onClick={() => setNavDetect(null)}>
+                        <Spinner size={12} /> Press {NAV_ROLES[i].split(" ")[0]}… cancel
+                      </Button>
+                    ) : (
+                      <Button disabled={locked} onClick={() => setNavDetect(i)}>
+                        Detect
+                      </Button>
+                    )}
+                  </Fragment>
+                );
+              })}
           </div>
           {dupes.length > 0 && (
             <p className="text-warning text-xs">
-              Each pin can drive only one key — {dupes.join(", ")} is picked twice.
+              Each pin can drive only one control — {dupes.join(", ")} is picked twice.
             </p>
           )}
           <div className="flex gap-2">
             <Button
               variant="primary"
               loading={applying}
-              disabled={!dirty || dupes.length > 0 || detectKey !== null}
-              onClick={() => void apply(draft)}
+              disabled={!dirty || dupes.length > 0 || detectKey !== null || navDetect !== null}
+              onClick={() => void saveWiring(false)}
             >
               Save wiring
             </Button>
-            {(cfg.pins != null || dirty) && (
+            {(customNow || dirty) && (
               <Button
                 loading={applying}
-                disabled={detectKey !== null}
-                onClick={() => void apply(null)}
+                disabled={detectKey !== null || navDetect !== null}
+                onClick={() => void saveWiring(true)}
               >
                 Reset to default wiring
               </Button>
@@ -599,6 +729,7 @@ function WiringRow({
   draft,
   options,
   detectKey,
+  busy = false,
   onPin,
   onDetect,
 }: {
@@ -607,18 +738,17 @@ function WiringRow({
   draft: string[];
   options: string[];
   detectKey: number | null;
+  /** another detect (e.g. a nav row) is running — lock this row too */
+  busy?: boolean;
   onPin: (pin: string) => void;
   onDetect: (on: boolean) => void;
 }) {
   const detecting = detectKey === index + 1;
+  const locked = detectKey !== null || busy;
   return (
     <>
       <span className="text-fg text-xs">Key {index + 1}</span>
-      <Select
-        value={pin}
-        disabled={detectKey !== null}
-        onChange={(e) => onPin(e.target.value)}
-      >
+      <Select value={pin} disabled={locked} onChange={(e) => onPin(e.target.value)}>
         {!options.includes(pin) && <option value={pin}>{pin}</option>}
         {options.map((o) => {
           const usedBy = draft.findIndex((p) => p === o);
@@ -636,7 +766,7 @@ function WiringRow({
           <Spinner size={12} /> Press key {index + 1}… cancel
         </Button>
       ) : (
-        <Button disabled={detectKey !== null} onClick={() => onDetect(true)}>
+        <Button disabled={locked} onClick={() => onDetect(true)}>
           Detect
         </Button>
       )}
@@ -644,10 +774,17 @@ function WiringRow({
   );
 }
 
+// Nav slot names in the firmware's NAV_SLOT order (index-aligned with a
+// config `nav` pin list: [PSH, BACK, CONFIRM]).
+const NAV_SLOT_ORDER = ["psh", "back", "confirm"];
+
 /**
- * Fix mismatched solder order: press the physical keys in the order they
- * should be numbered (top-left = 1, ...). Builds config.key_map so both the
- * app and standalone playback use the corrected numbering.
+ * Fix mismatched solder order by pressing the controls in the order/role they
+ * should have. Core 6: press the physical keys in numbering order → key_map.
+ * Vision 6 continues past the keys through the module controls — press BACK,
+ * press CONFIRM, press the wheel (PSH), then turn the wheel right — so one flow
+ * corrects the key numbering, the BACK/CONFIRM/PSH wiring (nav) and a
+ * backwards-wired wheel (enc_swap) together, exactly like the keys' own remap.
  */
 function RemapPanel({
   cfg,
@@ -656,72 +793,184 @@ function RemapPanel({
   cfg: DeviceConfig;
   onApply: (keyMap: number[]) => Promise<void>;
 }) {
-  const { hello, onBtn } = useDevice();
-  const [active, setActive] = useState(false);
-  const [order, setOrder] = useState<number[]>([]); // GPIO numbers in press order
+  const { hello, drive, send, disconnect, onBtn, onMsg } = useDevice();
+  const toast = useToast();
+  const isVision = deviceModel(hello) === "vision6";
   const supported = hello?.key_map !== undefined;
+  const [phase, setPhase] = useState<
+    "idle" | "keys" | "back" | "confirm" | "psh" | "wheel" | "saving"
+  >("idle");
+  const [order, setOrder] = useState<number[]>([]); // key GPIO numbers, press order
+  const [navRoles, setNavRoles] = useState<Record<string, string>>({}); // role -> pin
   const identity = Array.from({ length: cfg.key_count }, (_, i) => i + 1);
   const current = cfg.key_map ?? identity;
   const isIdentity = current.every((v, i) => v === i + 1);
+  const active = phase !== "idle";
+  const curNav = hello?.nav ?? ["GP4", "GP5", "GP6"];
 
-  useEffect(() => {
-    if (!active) return;
-    return onBtn((e) => {
-      if (e.edge !== "down") return;
-      const phys = e.phys;
-      if (!phys) return;
-      setOrder((o) => (o.includes(phys) ? o : [...o, phys]));
+  function cancel() {
+    setPhase("idle");
+    setOrder([]);
+    setNavRoles({});
+  }
+
+  async function finishKeysOnly(pressed: number[]) {
+    const map = Array<number>(cfg.key_count).fill(0);
+    pressed.forEach((phys, idx) => {
+      map[phys - 1] = idx + 1;
     });
-  }, [active, onBtn]);
+    cancel();
+    await onApply(map);
+  }
 
-  useEffect(() => {
-    if (!active || order.length < cfg.key_count) return;
-    // pressed 1st -> logical 1: key_map[gpio-1] = press position
+  // Vision: write key_map + nav + enc_swap in one config rewrite, then hard
+  // reset (nav/encoder pins are bound at boot, so a soft reload won't rebind).
+  async function finishVision(roles: Record<string, string>, encSwap: boolean) {
+    if (!drive) return;
+    setPhase("saving");
     const map = Array<number>(cfg.key_count).fill(0);
     order.forEach((phys, idx) => {
       map[phys - 1] = idx + 1;
     });
-    setActive(false);
-    setOrder([]);
-    void onApply(map);
-  }, [order, active, cfg.key_count, onApply]);
+    const nav = [roles.psh, roles.back, roles.confirm];
+    try {
+      let stored: Record<string, unknown> = {};
+      try {
+        stored = JSON.parse(await ipc.driveRead(drive.path, "config.json"));
+      } catch {
+        // fresh board — firmware defaults the rest
+      }
+      await ipc.driveWrite(
+        drive.path,
+        "config.json",
+        JSON.stringify({ ...stored, key_map: map, nav, enc_swap: encSwap }, null, 2),
+      );
+      await ipc.driveEject(drive.path).catch(() => {});
+      await send({ t: "reset" }).catch(() => {});
+      await disconnect().catch(() => {});
+      toast.success("Keypad restarting", "Keys, buttons and wheel remapped.");
+    } catch (e) {
+      toast.error("Could not save the remap", String(e));
+    } finally {
+      cancel();
+    }
+  }
+
+  // Key press capture.
+  useEffect(() => {
+    if (phase !== "keys") return;
+    return onBtn((e) => {
+      if (e.edge !== "down" || !e.phys) return;
+      const phys = e.phys;
+      setOrder((o) => (o.includes(phys) ? o : [...o, phys]));
+    });
+  }, [phase, onBtn]);
+
+  useEffect(() => {
+    if (phase !== "keys" || order.length < cfg.key_count) return;
+    if (isVision) setPhase("back");
+    else void finishKeysOnly(order);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [order, phase, cfg.key_count, isVision]);
+
+  // Nav button capture (back -> confirm -> psh): translate the reported slot to
+  // a physical pin via the current mapping, ignoring a button already assigned.
+  useEffect(() => {
+    if (phase !== "back" && phase !== "confirm" && phase !== "psh") return;
+    return onMsg((m) => {
+      if (m.t !== "btn" || typeof m.slot !== "string" || m.down !== true) return;
+      const slotIdx = NAV_SLOT_ORDER.indexOf(m.slot);
+      if (slotIdx < 0) return;
+      const pin = curNav[slotIdx];
+      setNavRoles((r) => (Object.values(r).includes(pin) ? r : { ...r, [phase]: pin }));
+    });
+  }, [phase, onMsg, curNav]);
+
+  // Advance nav phases once the current role has a pin.
+  useEffect(() => {
+    if (phase === "back" && navRoles.back) setPhase("confirm");
+    else if (phase === "confirm" && navRoles.confirm) setPhase("psh");
+    else if (phase === "psh" && navRoles.psh) setPhase("wheel");
+  }, [phase, navRoles]);
+
+  // Wheel direction: user turns right; d<0 means the encoder is wired backwards
+  // relative to the current enc_swap, so flip it.
+  useEffect(() => {
+    if (phase !== "wheel") return;
+    return onMsg((m) => {
+      if (m.t !== "enc" || typeof m.d !== "number" || m.d === 0) return;
+      const cur = hello?.enc_swap ?? false;
+      void finishVision(navRoles, m.d < 0 ? !cur : cur);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase, onMsg, navRoles, hello?.enc_swap]);
+
+  const prompt =
+    phase === "keys"
+      ? `Press the physical key that should be #${order.length + 1} of ${cfg.key_count}…`
+      : phase === "back"
+        ? "Press the button you want as BACK…"
+        : phase === "confirm"
+          ? "Press the button you want as CONFIRM…"
+          : phase === "psh"
+            ? "Press the wheel down (PSH)…"
+            : phase === "wheel"
+              ? "Turn the wheel to the RIGHT (clockwise)…"
+              : "";
 
   return (
-    <Card title="Key order (remap)">
+    <Card title="Order & wiring (remap)">
       <div className="flex flex-col gap-3 text-sm">
         {!supported ? (
           <p className="text-warning text-xs">
             This firmware doesn't support remapping — update the firmware on the drive first.
           </p>
+        ) : phase === "saving" ? (
+          <p className="flex items-center gap-2 text-fg">
+            <Spinner size={14} /> Saving & restarting…
+          </p>
         ) : active ? (
           <>
-            <p className="text-fg">
-              Press the physical key that should be{" "}
-              <span className="text-accent font-bold text-lg">#{order.length + 1}</span> of{" "}
-              {cfg.key_count} …
-            </p>
-            <p className="text-xs text-fg-faint">
-              Pressed so far (GPIO order): {order.join(", ") || "—"}
-            </p>
+            <p className="text-fg">{prompt}</p>
+            {phase === "keys" && (
+              <p className="text-xs text-fg-faint">
+                Pressed so far (GPIO order): {order.join(", ") || "—"}
+              </p>
+            )}
+            {isVision && phase !== "keys" && (
+              <p className="text-xs text-fg-faint">Keys done · now the module controls.</p>
+            )}
             <div>
-              <Button onClick={() => { setActive(false); setOrder([]); }}>Cancel</Button>
+              <Button onClick={cancel}>Cancel</Button>
             </div>
           </>
         ) : (
           <>
             <p className="text-fg-muted text-xs">
-              Keys lighting up in the wrong order? Your solder order differs from GP0…GP5.
-              Remap fixes the numbering everywhere — including standalone mode.
+              {isVision
+                ? "Controls reacting wrong? Remap them by use: press the keys in order, then BACK, CONFIRM, the wheel press, and turn the wheel right. Fixes key numbering, the BACK/CONFIRM/PSH wiring and a backwards wheel — standalone too."
+                : "Keys lighting up in the wrong order? Your solder order differs from GP0…GP5. Remap fixes the numbering everywhere — including standalone mode."}
               {!isIdentity && (
-                <> Current map (GP0…): <span className="font-mono text-fg">{current.join(" ")}</span></>
+                <>
+                  {" "}
+                  Current key map (GP0…): <span className="font-mono text-fg">{current.join(" ")}</span>
+                </>
               )}
             </p>
             <div className="flex gap-2">
-              <Button variant="primary" onClick={() => { setOrder([]); setActive(true); }}>
-                Start remap — press keys in order
+              <Button
+                variant="primary"
+                disabled={isVision && !drive}
+                onClick={() => {
+                  setOrder([]);
+                  setNavRoles({});
+                  setPhase("keys");
+                }}
+              >
+                {isVision ? "Start remap — keys, buttons & wheel" : "Start remap — press keys in order"}
               </Button>
               {!isIdentity && (
-                <Button onClick={() => void onApply(identity)}>Reset to default</Button>
+                <Button onClick={() => void onApply(identity)}>Reset key order</Button>
               )}
             </div>
           </>
@@ -737,3 +986,106 @@ function TestPad({ cfg }: { cfg: DeviceConfig; send: (m: Record<string, unknown>
   // the keypad keeps working on every screen.
   return <Keypad config={cfg} selected={null} onSelect={() => {}} />;
 }
+
+/**
+ * Vision 6 only: while the Setup tab is open, put the keypad in test mode
+ * (issue #24) — its macro keys stop firing and the screen shows the pressed
+ * key + its pin instead, so wiring can be checked without side effects. Core 6
+ * has no screen and keeps working, so this isn't rendered for it. Leaving the
+ * tab unmounts this and hands the keys back (the firmware also clears test mode
+ * if the app disconnects).
+ */
+function VisionTestBanner({ send }: { send: (m: Record<string, unknown>) => Promise<void> }) {
+  useEffect(() => {
+    void send({ t: "test_enter" });
+    return () => {
+      void send({ t: "test_leave" });
+    };
+  }, [send]);
+  return (
+    <p className="text-xs text-fg-faint border-t border-line pt-3">
+      While this tab is open the keypad is in <span className="text-fg-muted">test mode</span> —
+      pressing a key shows its name and pin on the keypad's screen instead of running the macro.
+      Leave this tab to use the keypad normally.
+    </p>
+  );
+}
+
+// Vision 6 nav-button slot names the firmware streams over serial (t:"btn"
+// with a "slot", in host mode) — index-aligned with the on-screen tester.
+const NAV_TESTS: { slot: string; label: string }[] = [
+  { slot: "psh", label: "PSH (wheel press)" },
+  { slot: "back", label: "BACK" },
+  { slot: "confirm", label: "CONFIRM" },
+];
+
+/**
+ * Vision 6 live test for the wheel and the PSH/BACK/CONFIRM buttons (issue
+ * #24). Always live, exactly like the key TestPad above: firmware ≥ 0.14.0
+ * streams enc/nav events on every screen (not just host mode), so turning the
+ * wheel or pressing a button lights the matching indicator with no "start
+ * test" step. The controls still drive the on-screen menu; the app just watches.
+ */
+function VisionControls() {
+  const { onMsg } = useDevice();
+  const [down, setDown] = useState<Record<string, boolean>>({});
+  const [wheel, setWheel] = useState(0);
+  const [lastDir, setLastDir] = useState<"cw" | "ccw" | null>(null);
+
+  useEffect(() => {
+    return onMsg((m) => {
+      if (m.t === "enc") {
+        const d = typeof m.d === "number" ? m.d : 0;
+        const n = typeof m.n === "number" ? m.n : 1;
+        setWheel((w) => w + (d > 0 ? n : -n));
+        setLastDir(d > 0 ? "cw" : "ccw");
+      } else if (m.t === "btn" && typeof m.slot === "string") {
+        setDown((s) => ({ ...s, [m.slot as string]: m.down === true }));
+      }
+    });
+  }, [onMsg]);
+
+  return (
+    <div className="flex flex-col gap-3 text-sm border-t border-line pt-4">
+      <div className="flex flex-col gap-0.5">
+        <span className="text-fg font-medium">Wheel &amp; buttons</span>
+        <p className="text-fg-muted text-xs">
+          Turn the wheel and press PSH / BACK / CONFIRM — each lights up here. If a control
+          doesn't react, check its solder joint.
+        </p>
+      </div>
+      <div className="flex items-center justify-between gap-3 rounded-lg border border-line bg-panel2 px-3 py-2">
+        <span className="flex items-center gap-2 text-fg">
+          <Disc3 size={18} aria-hidden className={lastDir ? "text-accent" : "text-fg-faint"} />
+          Wheel
+        </span>
+        <span className="tabular-nums text-fg-muted">
+          {lastDir === "cw" ? "↻ clockwise" : lastDir === "ccw" ? "↺ counter-clockwise" : "turn it…"}
+          <span className="ml-2 text-fg">{wheel > 0 ? `+${wheel}` : wheel}</span>
+        </span>
+      </div>
+      <div className="grid grid-cols-3 gap-2">
+        {NAV_TESTS.map((b) => (
+          <div
+            key={b.slot}
+            className={`rounded-lg border px-2 py-3 text-center text-xs transition-colors ${
+              down[b.slot]
+                ? "border-accent bg-accent/15 text-accent font-medium"
+                : "border-line bg-panel2 text-fg-muted"
+            }`}
+          >
+            {b.label}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Vision 6 nav-button remap (issue #24), shown inside the wiring panel next to
+ * the key wiring: when BACK and CONFIRM were soldered to each other's GPIO the
+ * live test reports them swapped. This writes a `nav` pin-order override into
+ * config.json and restarts the keypad so the firmware rebinds the buttons —
+ * fixing a wrong solder joint without a soldering iron.
+ */

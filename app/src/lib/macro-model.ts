@@ -751,10 +751,21 @@ export function defaultConfig(): DeviceConfig {
     layer_mode: "toggle",
     key_map: null,
     busy_other: "ignore",
-    // null passthroughs: device-set model/wiring/language survive rewrites
+    // Vision 6 grid band defaults for a finished product: the profile band is
+    // on so the screen names the active app profile; the layer band stays off.
+    // Without these here a config rewrite from Setup dropped them and the
+    // firmware fell back to both-off — the "settings disappeared" of issue #27.
+    show_layer: false,
+    show_profile: true,
+    // null passthroughs: device-set model/wiring/language/font/timeout/nav
+    // survive a config rewrite (the firmware keeps its own value on null)
     model: null,
     pins: null,
+    nav: null,
+    enc_swap: false,
     lang: null,
+    font: null,
+    timeout: null,
     screen: { width: screen.width, height: screen.height },
   };
 }

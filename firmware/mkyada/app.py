@@ -33,7 +33,8 @@ except Exception:
     pass
 
 from mkyada.models import (MODELS, resolve_model, resolve_pins,
-                           validate_key_pins, detect_candidates)
+                           validate_key_pins, validate_nav_pins,
+                           detect_candidates)
 
 
 def _read_config_dict():
@@ -89,7 +90,10 @@ gc.collect()  # the display stack litters the heap; start the app compacted
 
 DEBOUNCE_S = 0.02
 PING_TIMEOUT_S = 5.0
-PROTO_VERSION = 7  # v7: update_begin/update_end/update_abort (locked update
+PROTO_VERSION = 8  # v8: "profile" command — the app activates a per-app
+                   # profile natively (macro paths redirect to its files) so
+                   # the on-device grid/wheel/speed editor run it, no host mode;
+                   # v7: update_begin/update_end/update_abort (locked update
                    # mode with on-screen progress), fs_write/fs_read CRC32
                    # verification, "bootloader" (UF2 without the BOOT button)
                    # and the code.py rescue console (hello mode:"rescue");
@@ -137,6 +141,16 @@ DEFAULT_CONFIG = {
                          # debugging — a paused debugger trips it)
     "show_layer": False,    # vision6: band over the grid with the active layer
     "show_profile": False,  # vision6: band shows the app-pushed profile label
+    "font": None,        # vision6: grid font index (mirror of the on-device
+                         # Settings > Font choice, so the app can set/read it);
+                         # null = keep whatever the device's own NVM holds
+    "timeout": None,     # vision6: auto-return idle seconds (mirror of the
+                         # on-device Settings > Auto-return); null = NVM value
+    "nav": None,         # vision6: PSH/BACK/CONFIRM pin order override, e.g.
+                         # ["GP4","GP6","GP5"] to fix a swapped BACK/CONFIRM
+                         # solder; null = the model's default nav (models.py)
+    "enc_swap": False,   # vision6: encoder soldered backwards (CW/CCW flipped);
+                         # true swaps the two encoder pins in ui.py
 }
 
 
@@ -207,6 +221,19 @@ class App:
         self.pin_watch_until = 0.0
         self.host_label = None  # app-pushed profile/app label for the band
         self.host_keys = None  # app-pushed profile key names (host-mode grid)
+        # Active per-app profile (issue #23): a file prefix like "p_p123" the
+        # app sets via {t:"profile"}. When set, macro paths resolve to that
+        # profile's files (falling back to the standalone macro when a key
+        # isn't overridden), so the whole on-device UI — grid, wheel, speed
+        # editor — runs the profile's config natively instead of the app
+        # holding host mode. Cleared when the app disconnects.
+        self.profile_id = None
+        # Setup "test keys" mode (issue #24): while the app's Setup tab is open
+        # on a Vision 6, macro keys don't play — the screen shows the pressed
+        # key + its pin instead, so a user can verify wiring without firing
+        # macros. Core 6 has no screen, so keys keep working there. Cleared on
+        # {t:"test_leave"} and on app disconnect.
+        self.test_mode = False
         self.inbox = []  # serial messages drained during blocking key logic
         self.updating = False  # locked update mode (update_begin..update_end)
         self.update_total = 0  # bytes announced by update_begin
@@ -295,6 +322,14 @@ class App:
         cfg["usb_drive"] = cfg.get("usb_drive") is True  # same rule as boot.py
         cfg["show_layer"] = cfg.get("show_layer") is True
         cfg["show_profile"] = cfg.get("show_profile") is True
+        # font / timeout: light bounds here (the UI clamps to its exact
+        # FONTS length / TMO range); null means "use the device's NVM value".
+        f = cfg.get("font")
+        cfg["font"] = f if isinstance(f, int) and 0 <= f <= 7 else None
+        tmo = cfg.get("timeout")
+        cfg["timeout"] = tmo if isinstance(tmo, int) and 3 <= tmo <= 60 else None
+        cfg["nav"] = validate_nav_pins(cfg.get("nav"), MODEL)
+        cfg["enc_swap"] = cfg.get("enc_swap") is True
         self.config = cfg
         self.engine.set_screen(cfg["screen"].get("width", 1920),
                                cfg["screen"].get("height", 1080))
@@ -303,16 +338,45 @@ class App:
         c = self.config
         return c["pins"] or list(MODELS[MODEL]["pin_order"][: c["key_count"]])
 
+    def nav_pin_names(self):
+        """The effective PSH/BACK/CONFIRM pins (config override or the model
+        default), or None on a model without nav buttons (core6)."""
+        base = MODELS[MODEL].get("nav")
+        if not base:
+            return None
+        return self.config.get("nav") or list(base)
+
+    def _file_exists(self, path):
+        try:
+            os.stat(path)
+            return True
+        except OSError:
+            return False
+
+    def profile_key_path(self, key_no):
+        """The active profile's file for a numbered key (no fallback) — used
+        by the speed editor's copy-on-write so a per-app speed lands in the
+        profile, not the shared standalone macro."""
+        return "/macros/%s_key%d.json" % (self.profile_id, key_no)
+
     def macro_path(self, key_no):
         return self.macro_path_for(key_no, self.layer)
 
     def macro_path_for(self, key_no, layer_idx):
+        if self.profile_id:
+            p = "/macros/%s_key%d.json" % (self.profile_id, key_no)
+            if self._file_exists(p):
+                return p  # overridden in this profile
         if layer_idx == 0:
             return "/macros/key%d.json" % key_no
         return "/macros/key%d-%s.json" % (key_no, LAYER_NAMES[layer_idx])
 
     def slot_path(self, slot, layer_idx):
         """Macro file behind an encoder/nav virtual slot (see UI_SLOTS)."""
+        if self.profile_id:
+            p = "/macros/%s_%s.json" % (self.profile_id, slot)
+            if self._file_exists(p):
+                return p  # overridden in this profile
         if layer_idx == 0:
             return "/macros/%s.json" % slot
         return "/macros/%s-%s.json" % (slot, LAYER_NAMES[layer_idx])
@@ -330,6 +394,15 @@ class App:
         self.led.set(layer=i)
         self.announce_layer()
         self.ui_call("on_layer")
+
+    def set_profile(self, pid):
+        """Switch the active per-app profile (or None). The set of macro
+        files behind the grid changes, so the UI must drop its cached
+        labels/speeds/slots and repaint."""
+        if pid == self.profile_id:
+            return
+        self.profile_id = pid
+        self.ui_call("on_profile")
 
     def ui_call(self, name, *args):
         """Run a UI hook, but never let a display/menu failure (including a
@@ -356,8 +429,10 @@ class App:
                 "key_count": c["key_count"], "layer_key": c["layer_key"],
                 "layer_count": c["layer_count"], "layer_mode": c["layer_mode"],
                 "key_map": c["key_map"], "usb_drive": c["usb_drive"],
-                "pins": self.key_pin_names(),
+                "pins": self.key_pin_names(), "nav": self.nav_pin_names(),
                 "show_layer": c["show_layer"], "show_profile": c["show_profile"],
+                "font": c.get("font"), "timeout": c.get("timeout"),
+                "enc_swap": c.get("enc_swap"),
                 "layer": LAYER_NAMES[self.layer], "mode": self.mode}
 
     def handle_msg(self, msg, in_playback=False):
@@ -448,6 +523,24 @@ class App:
         elif t == "host_leave":
             self.set_mode("standalone")
             self.proto.send({"t": "ok", "re": "host_leave"})
+        elif t == "test_enter":
+            # Vision 6 only has a screen to show it; on core6 keys keep working.
+            self.test_mode = bool(OLED)
+            if self.test_mode:
+                self.ui_call("on_test_enter")
+            self.proto.send({"t": "ok", "re": "test_enter"})
+        elif t == "test_leave":
+            if self.test_mode:
+                self.test_mode = False
+                self.ui_call("on_test_leave")
+            self.proto.send({"t": "ok", "re": "test_leave"})
+        elif t == "profile":
+            # Activate/clear a per-app profile: redirect macro paths to the
+            # profile's files so the device runs it natively (issue #23). No
+            # host mode — the wheel, nav and speed editor keep working.
+            pid = msg.get("id")
+            self.set_profile(str(pid) if pid else None)
+            self.proto.send({"t": "ok", "re": "profile"})
         elif t == "play":
             path = "/" + str(msg.get("file", "")).lstrip("/")
             self.play_file(path, trigger=None,
@@ -1078,6 +1171,11 @@ class App:
             self.proto.send({"t": "btn", "key": key_no, "phys": i + 1,
                              "layer": LAYER_NAMES[self.layer],
                              "edge": "down" if pressed else "up"})
+        if self.test_mode:
+            # Setup test: don't play the macro; show the pressed key + pin.
+            if pressed:
+                self.ui_call("on_test_key", key_no, self.key_pin_names()[i])
+            return
         if self.mode == "host":
             return
         if c["layer_key"] == key_no:
@@ -1163,6 +1261,15 @@ class App:
                 self.host_label = None
                 self.host_keys = None
                 self.ui_call("on_label")
+            # a profile is app-driven too: revert to the standalone config so
+            # a crashed/closed app can't strand the device on a profile
+            if self.profile_id and not self.proto.connected:
+                self.set_profile(None)
+            # test mode is app-driven: a closed app must not strand the keypad
+            # with its keys dead
+            if self.test_mode and not self.proto.connected:
+                self.test_mode = False
+                self.ui_call("on_test_leave")
             # a half-received upload must not leak its file handle either
             if self.upload and not self.proto.connected:
                 self.close_upload(discard=True)
