@@ -22,6 +22,8 @@ import {
   parseDeviceMacro,
   parseMacroFileName,
   slotFileName,
+  slotEditValue,
+  SLOT_BUILTIN_ACTION,
 } from "../lib/macro-model";
 import { serializeForDevice } from "../lib/recorder-model";
 import { keysCache, slotKey } from "../lib/keys-cache";
@@ -343,8 +345,11 @@ export function KeysPage() {
   async function saveDraft() {
     if (selected === null || !draft || !cfg || !drive) return;
     const file = fileFor(selected, layer, ctx);
-    // module slots may save "built-in tap + custom hold/double" (issue #19)
-    const macro = isSlot ? compileSlotAssignment(draft) : compileAssignment(draft);
+    // module slots may save "built-in tap + custom hold/double" (issue #19);
+    // leaving the concrete built-in action untouched writes no file (issue #26)
+    const macro = isSlot
+      ? compileSlotAssignment(draft, SLOT_BUILTIN_ACTION[selected as ModuleSlot])
+      : compileAssignment(draft);
     setSaving(true);
     try {
       // The whole save runs under the blocking write modal (issue #15): the
@@ -640,7 +645,12 @@ export function KeysPage() {
               </div>
             )}
             <AssignmentPanel
-              value={draft ?? current ?? { kind: "none" }}
+              value={
+                draft ??
+                (isSlot
+                  ? slotEditValue(current, SLOT_BUILTIN_ACTION[selected as ModuleSlot])
+                  : current ?? { kind: "none" })
+              }
               onChange={draftHistory.set}
               onSave={() => void saveDraft()}
               onRevert={() => setDraft(null)}

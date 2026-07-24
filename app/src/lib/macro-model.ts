@@ -326,6 +326,7 @@ const MENU_LABEL: Record<MenuAction, string> = {
   grid: "Open key grid",
   layer_next: "Next layer",
   layer_prev: "Previous layer",
+  select: "Toggle select mode",
   default: "Built-in action",
   none: "Do nothing",
 };
@@ -534,19 +535,57 @@ function hasVariants(a: Assignment): boolean {
   return !!((d && d.kind !== "none") || (h && h.kind !== "none"));
 }
 
-/** Compile a MODULE-SLOT assignment (issue #19). Same as compileAssignment,
- * with one extra shape: kind "none" WITH double/hold variants — "the tap
- * keeps the control's built-in menu action, only the extra gestures are
- * customized" (e.g. wheel long-press = menu back). That compiles to a
- * menu:"default" carrier file the firmware falls through on tap. */
-export function compileSlotAssignment(a: Assignment): MacroFile | null {
+/** Each module control's concrete built-in menu action (issue #26). These
+ * simulate the physical control, so the firmware treats them exactly like the
+ * out-of-the-box behavior in every context (grid / layer screen / settings) —
+ * e.g. the encoder's `right` is `default(now, +1)`, CONFIRM is `K_CONFIRM`.
+ * Editing a slot now pre-selects this concrete action instead of an abstract
+ * "default" carrier, so every control reads as an explicitly chosen row. */
+export const SLOT_BUILTIN_ACTION: Record<ModuleSlot, MenuAction> = {
+  "enc-cw": "right",
+  "enc-ccw": "left",
+  "btn-back": "back",
+  "btn-confirm": "confirm",
+  "btn-psh": "confirm", // the wheel push is handled like CONFIRM on the device
+};
+
+/** True when a module-slot assignment is exactly the control's concrete
+ * built-in action with no extra gestures — i.e. equivalent to leaving it
+ * un-overridden, so it need not be stored (issue #26). */
+export function isSlotBuiltin(a: Assignment, builtinAction: MenuAction): boolean {
+  return a.kind === "menu" && a.action === builtinAction && !hasVariants(a);
+}
+
+/** The value to edit for a module slot: an un-overridden slot (no entry, or a
+ * legacy "built-in" carrier that parses to "none") shows its concrete built-in
+ * menu action pre-selected instead of an abstract "default" (issue #26). */
+export function slotEditValue(current: Assignment | undefined, builtinAction: MenuAction): Assignment {
+  if (!current || current.kind === "none") {
+    return current?.variants
+      ? { kind: "menu", action: builtinAction, variants: current.variants }
+      : { kind: "menu", action: builtinAction };
+  }
+  return current;
+}
+
+/** Compile a MODULE-SLOT assignment (issue #19, #26). The concrete built-in
+ * action with no extra gestures IS the device's own fallback, so it writes no
+ * file — the firmware keeps its built-in navigation. Anything else (a different
+ * action, or the built-in tap plus custom hold/double gestures) compiles to a
+ * real file carrying the concrete action. */
+export function compileSlotAssignment(a: Assignment, builtinAction: MenuAction): MacroFile | null {
+  // legacy "none tap + custom gestures": the tap keeps the built-in action,
+  // now stored as the concrete action rather than an abstract "default"
   if (a.kind === "none" && hasVariants(a)) {
     return compileAssignment({
       kind: "menu",
-      action: "default",
+      action: builtinAction,
       variants: a.variants,
       label: a.label,
     });
+  }
+  if (isSlotBuiltin(a, builtinAction)) {
+    return null; // equals built-in → leave the slot to the firmware's fallback
   }
   return compileAssignment(a);
 }

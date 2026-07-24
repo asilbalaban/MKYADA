@@ -38,22 +38,30 @@ import {
   SOUND_HOLD_ICON,
 } from "./action-icons";
 
+// Grouped by concept, most-used first (issue #28): the key/typing family
+// together, then input/media, the device screen, and finally host-side
+// actions — with the neutral "Not assigned" on top and the rare "Do nothing"
+// off-switch at the bottom.
 const KINDS: { value: Assignment["kind"]; label: string }[] = [
   { value: "none", label: "Not assigned" },
-  { value: "nothing", label: "Do nothing (turn this control off)" },
+  // key / typing family
   { value: "keystroke", label: "Single key" },
   { value: "combo", label: "Key combination" },
+  { value: "sequence", label: "Multi action (sequence)" },
+  { value: "recorded", label: "Recorded macro (JSON)" },
   { value: "text", label: "Type text" },
+  // input / media
   { value: "media", label: "Media key" },
   { value: "scroll", label: "Mouse scroll / zoom" },
+  { value: "mic", label: "Mute/unmute microphone" },
+  // device screen
   { value: "menu", label: "Device menu (screen models)" },
-  { value: "recorded", label: "Recorded macro (JSON)" },
+  // host / computer
   { value: "launch", label: "Open app / file / URL" },
   { value: "command", label: "Run terminal command" },
   { value: "sound", label: "Play a sound" },
-  { value: "mic", label: "Mute/unmute microphone" },
   { value: "webhook", label: "Call a webhook (HTTP request)" },
-  { value: "sequence", label: "Multi action (sequence)" },
+  { value: "nothing", label: "Do nothing (turn this control off)" },
 ];
 
 const HTTP_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"] as const;
@@ -167,10 +175,11 @@ export function AssignmentEditor({
   fwVersion?: string;
 }) {
   const [importError, setImportError] = useState("");
+  // On a module slot, "Not assigned" reads as "keep the control's built-in
+  // action" — the concrete built-in is pre-selected under Device menu, so this
+  // is just the fall-back-to-firmware choice (issue #26).
   const kinds = KINDS.map((k) =>
-    k.value === "none" && slotMode
-      ? { ...k, label: builtinDesc ? `Built-in: ${builtinDesc}` : "Built-in menu action" }
-      : k,
+    k.value === "none" && slotMode ? { ...k, label: "Keep built-in action" } : k,
   ).filter(
     (k) =>
       (k.value !== "sequence" || !nested) &&
@@ -204,9 +213,9 @@ export function AssignmentEditor({
   return (
     <div className="flex flex-col gap-3">
       <ControlField label="Action type">
-        <div className="flex items-center gap-2 flex-wrap">
+        <div className="flex flex-col gap-2">
           <IconSelect
-            className="flex-1 min-w-[12rem]"
+            className="w-full"
             ariaLabel="Action type"
             value={value.kind}
             options={kinds.map((k) => ({ value: k.value, label: k.label, icon: KIND_ICON[k.value] }))}
@@ -405,7 +414,10 @@ export function AssignmentEditor({
               { value: "grid", label: "Open the key grid", icon: MENU_ICON.grid },
               { value: "layer_next", label: "Switch to the next layer", icon: MENU_ICON.layer_next },
               { value: "layer_prev", label: "Switch to the previous layer", icon: MENU_ICON.layer_prev },
-              ...(slotMode || value.action === "default"
+              { value: "select", label: "Toggle select mode", icon: MENU_ICON.select },
+              // legacy configs only: new slots carry the concrete built-in
+              // action directly, so the abstract "default" row is gone (issue #26)
+              ...(value.action === "default"
                 ? [{
                     value: "default" as const,
                     label: builtinDesc
@@ -418,7 +430,9 @@ export function AssignmentEditor({
           />
           <p className="text-xs text-fg-faint mt-1">
             {slotMode
-              ? "Drives the BUILT-IN on-screen navigation, whatever else is customized — e.g. long-press = Back."
+              ? `Drives the on-screen navigation, whatever else is customized${
+                  builtinDesc ? ` — built-in here: ${builtinDesc}` : ""
+                }.`
               : "Lets a normal key drive the on-screen menu, just like the wheel and the CONFIRM / BACK buttons. Only does something on a screen model."}
           </p>
         </ControlField>

@@ -10,9 +10,12 @@ import { MODULE_SLOTS, MODULE_SLOT_LABELS, deviceModel } from "../lib/types";
 import {
   defaultConfig,
   describeAssignment,
+  isSlotBuiltin,
   macroFileName,
   parseAssignment,
   parseDeviceMacro,
+  slotEditValue,
+  SLOT_BUILTIN_ACTION,
 } from "../lib/macro-model";
 import { AssignmentPanel } from "../components/AssignmentPanel";
 import { Crosshair } from "lucide-react";
@@ -103,12 +106,18 @@ export function ProfilesPage() {
 
   function saveKeyAssignment() {
     if (!selected || editKey === null || !draft) return;
-    // Always store the choice — including "none" (not assigned). saveProfiles
-    // compiles "none" to null and DELETES that key's copied file, so the key
-    // does nothing under this profile (there's no fallback to global). Just
-    // dropping it from the map would leave the copied file behind and it would
-    // keep firing (issue #23).
-    const keys = { ...selected.keys, [String(editKey)]: draft };
+    // A module control left on its concrete built-in action is the same as not
+    // overriding it: store the "none" marker (not the concrete action) so
+    // saveProfiles compiles it to null and DELETES any copied file, leaving the
+    // device to run its native navigation under this profile (issue #26).
+    // Storing "none" — rather than dropping the key — is what triggers that
+    // delete; just removing it from the map would leave a stale override file
+    // behind and it would keep firing (issue #23).
+    const store: Assignment =
+      typeof editKey !== "number" && isSlotBuiltin(draft, SLOT_BUILTIN_ACTION[editKey])
+        ? { kind: "none" }
+        : draft;
+    const keys = { ...selected.keys, [String(editKey)]: store };
     updateSelected({ keys });
     setDraft(null);
   }
@@ -271,7 +280,12 @@ export function ProfilesPage() {
                           : `${MODULE_SLOT_LABELS[editKey]} — left on “Built-in” it keeps ${SLOT_BUILTINS[editKey]} while this profile is active; override it e.g. to zoom the wheel in Photoshop.`}
                       </p>
                       <AssignmentPanel
-                        value={draft ?? selected.keys[String(editKey)] ?? { kind: "none" }}
+                        value={
+                          draft ??
+                          (typeof editKey !== "number"
+                            ? slotEditValue(selected.keys[String(editKey)], SLOT_BUILTIN_ACTION[editKey])
+                            : selected.keys[String(editKey)] ?? { kind: "none" })
+                        }
                         onChange={setDraft}
                         onSave={saveKeyAssignment}
                         onRevert={() => setDraft(null)}

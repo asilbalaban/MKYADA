@@ -11,10 +11,13 @@ import {
   describeAssignment,
   describeSlotAssignment,
   holdRepeatDefault,
+  isSlotBuiltin,
   kindRequiresHost,
   migrateMacro,
   parseAssignment,
   sequencePartFileName,
+  slotEditValue,
+  SLOT_BUILTIN_ACTION,
 } from "./macro-model";
 import type { Assignment, MacroFile } from "./types";
 
@@ -339,26 +342,54 @@ describe("legacy migration", () => {
 });
 
 describe("module-slot assignments (issue #19)", () => {
-  it("kind none + variants compiles to a menu:default carrier", () => {
+  it("kind none + variants compiles to the concrete built-in carrier (issue #26)", () => {
     const a: Assignment = {
       kind: "none",
       variants: { hold: { kind: "menu", action: "back" } },
     };
-    const file = compileSlotAssignment(a);
+    const file = compileSlotAssignment(a, "right");
     expect(file).not.toBeNull();
     expect(file!.kind).toBe("menu");
-    expect(file!.menu).toBe("default");
+    expect(file!.menu).toBe("right"); // concrete built-in, not an abstract "default"
     expect(file!.variants?.hold?.kind).toBe("menu");
     expect(file!.variants?.hold?.menu).toBe("back");
-    // and parses back to the same editing shape (tap = built-in)
+    // and parses back to the concrete built-in tap + gesture
     const back = parseAssignment(JSON.parse(JSON.stringify(file)) as MacroFile);
-    expect(back.kind).toBe("none");
+    expect(back).toMatchObject({ kind: "menu", action: "right" });
     expect(back.variants?.hold).toEqual({ kind: "menu", action: "back" });
     expect(back.label).toBeUndefined();
   });
 
+  it("the concrete built-in action with no gestures writes no file (issue #26)", () => {
+    expect(compileSlotAssignment({ kind: "menu", action: "right" }, "right")).toBeNull();
+    // a different action IS a real override
+    expect(compileSlotAssignment({ kind: "menu", action: "confirm" }, "right")).not.toBeNull();
+    // isSlotBuiltin backs the same decision
+    expect(isSlotBuiltin({ kind: "menu", action: "right" }, "right")).toBe(true);
+    expect(isSlotBuiltin({ kind: "menu", action: "confirm" }, "right")).toBe(false);
+  });
+
+  it("slotEditValue pre-selects the concrete built-in for an un-overridden slot (issue #26)", () => {
+    expect(slotEditValue(undefined, "right")).toEqual({ kind: "menu", action: "right" });
+    expect(slotEditValue({ kind: "none" }, "left")).toEqual({ kind: "menu", action: "left" });
+    // a legacy built-in-tap-with-gestures keeps its gestures
+    expect(
+      slotEditValue({ kind: "none", variants: { hold: { kind: "menu", action: "back" } } }, "right"),
+    ).toEqual({ kind: "menu", action: "right", variants: { hold: { kind: "menu", action: "back" } } });
+    // a real override is left untouched
+    expect(slotEditValue({ kind: "scroll", dir: "up" }, "right")).toEqual({ kind: "scroll", dir: "up" });
+  });
+
+  it("SLOT_BUILTIN_ACTION maps each module control to its concrete action", () => {
+    expect(SLOT_BUILTIN_ACTION["enc-cw"]).toBe("right");
+    expect(SLOT_BUILTIN_ACTION["enc-ccw"]).toBe("left");
+    expect(SLOT_BUILTIN_ACTION["btn-back"]).toBe("back");
+    expect(SLOT_BUILTIN_ACTION["btn-confirm"]).toBe("confirm");
+    expect(SLOT_BUILTIN_ACTION["btn-psh"]).toBe("confirm");
+  });
+
   it("kind none without variants stays unassigned (deletes the file)", () => {
-    expect(compileSlotAssignment({ kind: "none" })).toBeNull();
+    expect(compileSlotAssignment({ kind: "none" }, "right")).toBeNull();
   });
 
   it("a real tap with a hold variant compiles like a key assignment", () => {
@@ -367,7 +398,7 @@ describe("module-slot assignments (issue #19)", () => {
       dir: "up",
       variants: { hold: { kind: "menu", action: "back" } },
     };
-    const file = compileSlotAssignment(a);
+    const file = compileSlotAssignment(a, "right");
     expect(file!.kind).toBe("scroll");
     expect(file!.variants?.hold?.menu).toBe("back");
     const back = parseAssignment(JSON.parse(JSON.stringify(file)) as MacroFile);
@@ -391,7 +422,7 @@ describe("module-slot assignments (issue #19)", () => {
   });
 
   it('"nothing" compiles to a menu:none carrier and round-trips', () => {
-    const file = compileSlotAssignment({ kind: "nothing" });
+    const file = compileSlotAssignment({ kind: "nothing" }, "right");
     expect(file).not.toBeNull();
     expect(file!.kind).toBe("menu");
     expect(file!.menu).toBe("none");
@@ -415,7 +446,7 @@ describe("module-slot assignments (issue #19)", () => {
     const file = compileSlotAssignment({
       kind: "nothing",
       variants: { hold: { kind: "menu", action: "back" } },
-    });
+    }, "right");
     expect(file!.menu).toBe("none");
     expect(file!.variants?.hold?.menu).toBe("back");
     const back = parseAssignment(JSON.parse(JSON.stringify(file)) as MacroFile);

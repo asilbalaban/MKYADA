@@ -274,10 +274,12 @@ export type ScrollDir = "up" | "down" | "left" | "right";
  * Direct-jump actions (firmware 0.12.0): "home" opens the layer screen,
  * "settings" the on-device settings menu, "grid" the key grid;
  * "layer_next" / "layer_prev" switch the active layer immediately —
- * all assignable to any key or control. */
+ * all assignable to any key or control.
+ * "select" (firmware 0.17.0) toggles select mode — the built-in behavior that
+ * was previously only reachable via the PSH long-press escape (issue #26). */
 export type MenuAction =
   | "left" | "right" | "confirm" | "back"
-  | "home" | "settings" | "grid" | "layer_next" | "layer_prev"
+  | "home" | "settings" | "grid" | "layer_next" | "layer_prev" | "select"
   | "default" | "none";
 
 /** Per-key behavior options shared by every assignment kind. */

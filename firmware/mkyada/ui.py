@@ -603,6 +603,8 @@ class Ui:
                 self._jump_layer(1)
             elif act == "layer_prev":
                 self._jump_layer(-1)
+            elif act == "select":
+                self._toggle_sel_mode()  # built-in PSH-hold escape, now assignable (issue #26)
             elif act == "none":
                 pass  # assigned "Do nothing" in the app
             else:
