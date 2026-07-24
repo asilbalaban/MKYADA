@@ -126,6 +126,8 @@ export function AssignmentEditor({
   onChange,
   nested = false,
   allowMenu = false,
+  slotMode = false,
+  allowVariants = true,
   fwVersion,
 }: {
   value: Assignment;
@@ -133,19 +135,29 @@ export function AssignmentEditor({
   /** Rendering a sequence step or key-logic variant: no nesting, no
    * behavior options, no key logic of its own. */
   nested?: boolean;
-  /** Offer the device-menu action (only meaningful on a screen model, and
-   * never inside a sequence step). */
+  /** Offer the device-menu action (only meaningful on a screen model;
+   * passed through to key-logic variants, never into sequence steps). */
   allowMenu?: boolean;
+  /** Editing a Vision 6 module control (wheel / nav button) rather than a
+   * key: "none" reads as "keep the built-in menu action", key logic is
+   * offered even on a built-in tap (hold/double over the default), and
+   * the device-only hold-to-repeat option is hidden (issue #19). */
+  slotMode?: boolean;
+  /** Key-logic variants make sense for things that are pressed — false for
+   * encoder rotation slots. */
+  allowVariants?: boolean;
   /** Connected keypad's firmware version — used to warn when key logic
    * needs a firmware update (variants shipped with 0.3.0). */
   fwVersion?: string;
 }) {
   const [importError, setImportError] = useState("");
-  const kinds = KINDS.filter(
+  const kinds = KINDS.map((k) =>
+    k.value === "none" && slotMode ? { ...k, label: "Built-in menu action (default)" } : k,
+  ).filter(
     (k) =>
       (k.value !== "sequence" || !nested) &&
-      // menu nav is device-only and pointless inside a sequence
-      (k.value !== "menu" || (allowMenu && !nested)),
+      // menu nav is device-only; callers opt in (never inside a sequence)
+      (k.value !== "menu" || allowMenu),
   );
   const hasVariants = !!(value.variants?.double || value.variants?.hold);
 
@@ -364,10 +376,14 @@ export function AssignmentEditor({
             <option value="right">Scroll menu → (encoder right)</option>
             <option value="confirm">Confirm (encoder press)</option>
             <option value="back">Back</option>
+            {(slotMode || value.action === "default") && (
+              <option value="default">This control's built-in action</option>
+            )}
           </Select>
           <p className="text-xs text-fg-faint mt-1">
-            Lets a normal key drive the on-screen menu, just like the wheel and
-            the CONFIRM / BACK buttons. Only does something on a screen model.
+            {slotMode
+              ? "Drives the BUILT-IN on-screen navigation, whatever else is customized — e.g. long-press = Back."
+              : "Lets a normal key drive the on-screen menu, just like the wheel and the CONFIRM / BACK buttons. Only does something on a screen model."}
           </p>
         </Field>
       )}
@@ -516,7 +532,7 @@ export function AssignmentEditor({
               <option value="restart">Restart it from the top</option>
             </Select>
           </Field>
-          {!hasVariants && (
+          {!hasVariants && !slotMode && (
             <Field label="While the key is held down">
               <Select
                 value={(value.behavior?.hold_repeat ?? holdRepeatDefault(value.kind)) ? "repeat" : "once"}
@@ -535,26 +551,35 @@ export function AssignmentEditor({
         </div>
       )}
 
-      {!nested && value.kind !== "none" && (
+      {!nested && allowVariants && (value.kind !== "none" || slotMode) && (
         <div className="flex flex-col gap-3 border-t border-line pt-3">
           <div className="flex items-center gap-2">
             <span className="text-xs font-semibold text-fg-muted">
-              Key logic — extra actions on the same key
+              Key logic — extra actions on the same {slotMode ? "control" : "key"}
             </span>
-            {hasVariants && fwVersion && !fwSupportsVariants(fwVersion) && (
-              <Badge tone="amber">needs firmware 0.3.0 — update on the Devices page</Badge>
+            {hasVariants && fwVersion && !fwSupportsVariants(fwVersion, slotMode) && (
+              <Badge tone="amber">
+                needs firmware {slotMode ? "0.9.0" : "0.3.0"} — update on the Devices page
+              </Badge>
             )}
           </div>
+          {slotMode && value.kind === "none" && (
+            <p className="text-xs text-fg-faint">
+              The tap keeps its built-in menu action — only the gestures below are customized.
+            </p>
+          )}
           <VariantSlot
             label="Double press"
             hint="A quick tap then waits a moment before firing — only when this is set."
             value={value.variants?.double}
+            allowMenu={allowMenu}
             onChange={(v) => onChange({ ...value, variants: setVariant(value.variants, "double", v) })}
           />
           <VariantSlot
             label="Long press (hold)"
             hint="Fires after holding the key ~0.4 s. Replaces the hold-to-repeat option."
             value={value.variants?.hold}
+            allowMenu={allowMenu}
             onChange={(v) => onChange({ ...value, variants: setVariant(value.variants, "hold", v) })}
           />
         </div>
@@ -708,21 +733,25 @@ function setVariant(
   return next.double || next.hold ? next : undefined;
 }
 
-/** Firmware resolves key-logic variants since 0.3.0. */
-function fwSupportsVariants(fw: string): boolean {
+/** Firmware resolves key-logic variants since 0.3.0; on module slots
+ * (wheel / nav buttons) the Ui-side resolver shipped with 0.9.0. */
+function fwSupportsVariants(fw: string, slot = false): boolean {
   const [maj = 0, min = 0] = fw.split(".").map((n) => parseInt(n) || 0);
-  return maj > 0 || min >= 3;
+  return maj > 0 || min >= (slot ? 9 : 3);
 }
 
 function VariantSlot({
   label,
   hint,
   value,
+  allowMenu = false,
   onChange,
 }: {
   label: string;
   hint: string;
   value?: Assignment;
+  /** Offer device-menu actions inside this variant (Vision 6). */
+  allowMenu?: boolean;
   onChange: (a: Assignment | undefined) => void;
 }) {
   if (!value) {
@@ -742,7 +771,7 @@ function VariantSlot({
           <Trash2 size={13} aria-hidden />
         </Button>
       </div>
-      <AssignmentEditor nested value={value} onChange={onChange} />
+      <AssignmentEditor nested allowMenu={allowMenu} value={value} onChange={onChange} />
       <p className="text-xs text-fg-faint">{hint}</p>
     </div>
   );

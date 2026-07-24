@@ -93,7 +93,7 @@ STANDALONE ──(host_enter)──► HOST ──(host_leave | CDC disconnect |
 | `{"t":"btn","slot":"back","down":true}` | fw 0.7.0, Vision 6, host mode. Module buttons (`psh` \| `back` \| `confirm`) — the slot variant of `btn`, distinct from key events |
 | `{"t":"pin","pin":"GP13","down":true}` | fw 0.7.0. While `pin_detect` is armed: a watched GPIO changed — the wiring wizard assigns it to the key being probed |
 | `{"t":"btn","key":2,"phys":4,"layer":"a","edge":"down"}` | Every press/release. `key` = logical (after `key_map`), `phys` = GPIO number. Host mode: always; standalone: since v2, while an app is connected |
-| `{"t":"key_action","file":"/macros/key2.json","key":2,"layer":"a","variant":"double"}` | v2. A key with key-logic `variants` resolved its gesture (`tap` \| `double` \| `hold`) in standalone mode. The app uses it to run host-side variants (launch/command/sound) |
+| `{"t":"key_action","file":"/macros/key2.json","key":2,"layer":"a","variant":"double"}` | v2. A key with key-logic `variants` resolved its gesture (`tap` \| `double` \| `hold`) in standalone mode. The app uses it to run host-side variants (launch/command/sound). Since fw 0.9.0 a Vision 6 module slot resolving its own gesture announces the same message with `"key": null` and the slot's file path |
 | `{"t":"play_start","file":"/macros/key1.json"}` | Playback began |
 | `{"t":"play_done","file":"/macros/key1.json","stopped":false}` | Playback ended (`stopped: true` = aborted) |
 | `{"t":"config", ...config.json fields...}` | Reply to `get_config` |

@@ -492,8 +492,8 @@ export function ProfilesProvider({ children }: { children: ReactNode }) {
   // In host mode the firmware forwards the wheel as {"t":"enc",d,n} and the
   // nav buttons as {"t":"btn",slot,down} instead of playing anything itself —
   // perform the profile's slot assignments here (e.g. wheel = zoom in
-  // Photoshop). The encoder push ("psh") stays unassignable, same as the
-  // Keys tab.
+  // Photoshop). The encoder push ("psh") is assignable like the rest since
+  // issue #19 made it a standalone slot too.
   const encPending = useRef(new Map<ModuleSlot, number>());
   const encPumping = useRef(false);
 
@@ -553,7 +553,13 @@ export function ProfilesProvider({ children }: { children: ReactNode }) {
           handleEncoder(d > 0 ? "enc-cw" : "enc-ccw", Math.max(1, Number(m.n) || 1));
         } else if (m.t === "btn" && typeof m.slot === "string") {
           const slot =
-            m.slot === "back" ? "btn-back" : m.slot === "confirm" ? "btn-confirm" : null;
+            m.slot === "back"
+              ? "btn-back"
+              : m.slot === "confirm"
+                ? "btn-confirm"
+                : m.slot === "psh"
+                  ? "btn-psh"
+                  : null;
           if (!slot) return;
           handleEdge(slot, slot, "a", m.down ? "down" : "up");
         }

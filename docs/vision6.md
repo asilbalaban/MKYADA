@@ -67,7 +67,7 @@ and the OLED fonts (`fonts/`).
 ## Custom wheel / button assignments
 
 By default the wheel navigates the menu. In the app (Keys → Module
-controls) any layer can instead assign macros to four virtual slots:
+controls) any layer can instead assign macros to five virtual slots:
 
 | Slot | File | Fires when |
 |---|---|---|
@@ -75,6 +75,7 @@ controls) any layer can instead assign macros to four virtual slots:
 | Encoder ← | `macros/enc-ccw[-<layer>].json` | one play per counter-clockwise detent |
 | BACK | `macros/btn-back[-<layer>].json` | BACK pressed on the resting grid |
 | CONFIRM | `macros/btn-confirm[-<layer>].json` | CONFIRM pressed on the resting grid |
+| Encoder press | `macros/btn-psh[-<layer>].json` | the wheel pushed on the resting grid (fw ≥ 0.9.0) |
 
 Typical uses: volume up/down on the wheel, mouse scroll, zoom (Ctrl +/−),
 OBS hotkeys, a soundboard clip on CONFIRM. Anything the app can assign to a
@@ -83,9 +84,45 @@ standalone, host-performed kinds (sound, launch, command, webhook) run while
 the app is connected. A layer without its own slot file inherits the layer-A
 one; deleting the files restores the default menu navigation.
 
-On a customized grid the **wheel push is always a menu key**: it toggles a
-temporary select mode with the default navigation, so settings and the speed
-editor stay reachable.
+### Per-context overrides (fw ≥ 0.9.0, issue #19)
+
+The files above apply on the **resting grid**. Each menu context can be
+overridden separately with a global (unlayered) file:
+
+| Context | File | Where it applies |
+|---|---|---|
+| Layer screen | `macros/<slot>@home.json` | the layer picker |
+| Settings menu | `macros/<slot>@menu.json` | settings and its sub-menus |
+
+So "wheel scrolls the page even while the layer picker is open" is
+`enc-cw@home.json` + `enc-ccw@home.json`; navigation then happens via
+select mode or keys mapped to menu actions. An absent file keeps that
+context's built-in behavior.
+
+### Key logic on slots (fw ≥ 0.9.0)
+
+The button slots (BACK / CONFIRM / encoder press) may carry the same
+`variants` as keys: tap, **double press** and **long press** each doing
+something different. Two extras specific to slots:
+
+- The tap can stay **built-in** (`kind:"menu"`, `menu:"default"`) while
+  only the gestures are customized — e.g. *wheel long-press = Back* with
+  the push otherwise behaving stock.
+- A `menu`-kind action assigned to a slot drives the **built-in**
+  navigation, never other custom slots — so "hold = Back" always
+  navigates, whatever else is remapped. (A menu action on a normal
+  *key* emulates the control fully, custom assignments included — the
+  broken-wheel scenario.)
+
+### Escape hatch
+
+On a customized grid the wheel push toggles a temporary **select mode**
+with the default navigation everywhere (it survives into the layer picker
+and settings until you land back on the grid or the idle timeout fires).
+If the push itself is assigned, **holding it ~1.2 s** toggles select mode
+instead — unless you deliberately gave the push its own hold action, in
+which case the menus stay reachable via keys mapped to menu actions or
+the app.
 
 ## Recovery
 

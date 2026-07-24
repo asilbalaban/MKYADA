@@ -941,8 +941,12 @@ with open(vapp.slot_path("enc-cw", 0), "w") as f:  # custom encoder slot
                "events": []}, f)
 ui.invalidate_labels()
 check("slot found on layer a", bool(ui.slots(0)["enc-cw"]))
-check("slot layer b falls back to a", ui.slots(1)["enc-cw"] == vapp.slot_path("enc-cw", 0))
+check("slot layer b falls back to a",
+      ui.slots(1)["enc-cw"]["path"] == vapp.slot_path("enc-cw", 0),
+      str(ui.slots(1)["enc-cw"]))
 check("slot unassigned is None", ui.slots(0)["btn-back"] is None)
+check("slot meta tap is play", ui.slots(0)["enc-cw"]["tap"] == ("play",),
+      str(ui.slots(0)["enc-cw"]))
 
 # boot goes straight to the active layer's grid, not the layer picker
 ui.oled.load_grid_font = lambda *a, **k: None
@@ -1002,6 +1006,98 @@ check("host nav slot event",
       str(voutbox))
 vapp.handle_msg({"t": "host_leave"})
 check("host exit restores grid", ui.state == uimod.S_SELECT)
+
+# --- issue #19: btn-psh, slot key logic, per-context overrides ------------
+# btn-psh is a grid slot: tap plays its macro (resolved from a queued
+# release), holding it past ESC_HOLD_S is the guaranteed select-mode escape
+with open(vapp.slot_path("btn-psh", 0), "w") as f:
+    json.dump({"format": "mkyada-macro", "version": 2, "name": "mute",
+               "kind": "media", "events": []}, f)
+ui.invalidate_labels()
+ui.state = uimod.S_SELECT
+ui.sel_mode = False
+vplays.clear()
+ui.nav.events.queue.append(FakeKeyEvent(0, False))  # released -> tap
+ui._dispatch(_t2.monotonic(), 0, uimod.K_PSH)
+check("psh tap plays its macro", vplays == [vapp.slot_path("btn-psh", 0)],
+      str(vplays))
+vplays.clear()
+ui._dispatch(_t2.monotonic(), 0, uimod.K_PSH)  # never released -> escape hold
+check("psh hold escape toggles select mode", ui.sel_mode and vplays == [],
+      "sel_mode=%s %s" % (ui.sel_mode, vplays))
+ui._dispatch(_t2.monotonic(), 0, uimod.K_PSH)  # sel_mode: default PSH exits it
+check("psh in select mode toggles back", not ui.sel_mode)
+
+# an own hold variant beats the escape and drives BUILT-IN navigation
+with open(vapp.slot_path("btn-psh", 0), "w") as f:
+    json.dump({"format": "mkyada-macro", "version": 3, "name": "mute",
+               "kind": "media", "events": [],
+               "variants": {"hold": {"kind": "menu", "menu": "back",
+                                     "events": []}}}, f)
+ui.invalidate_labels()
+ui.state = uimod.S_SELECT
+ui.sel_mode = False
+vplays.clear()
+ui._dispatch(_t2.monotonic(), 0, uimod.K_PSH)  # held -> hold variant
+check("psh hold variant = menu back goes home",
+      ui.state == uimod.S_HOME and not ui.sel_mode and vplays == [],
+      "state=%d" % ui.state)
+
+# menu-kind tap on an encoder slot drives the built-in nav (no recursion)
+with open(vapp.slot_path("enc-ccw", 0), "w") as f:
+    json.dump({"format": "mkyada-macro", "version": 2, "kind": "menu",
+               "menu": "left", "events": []}, f)
+ui.invalidate_labels()
+ui.state = uimod.S_SELECT
+ui.sel_mode = False
+ui.sel_key = 3
+vplays.clear()
+ui._dispatch(_t2.monotonic(), -1, None)
+check("menu-kind enc slot drives built-in nav",
+      ui.sel_key == 2 and vplays == [], "sel=%d %s" % (ui.sel_key, vplays))
+
+# per-context overrides: enc-cw@home plays on the layer picker; the other
+# direction of a half-assigned wheel is dead; unassigned BACK stays default
+vapp.slot_ctx_path = lambda s, c: os.path.join(mac_dir, "%s@%s.json" % (s, c))
+with open(vapp.slot_ctx_path("enc-cw", "home"), "w") as f:
+    json.dump({"format": "mkyada-macro", "version": 2, "name": "vol+",
+               "events": []}, f)
+ui._ctx_slots.clear()
+ui.state = uimod.S_HOME
+ui.home_pos = 0
+vplays.clear()
+ui._dispatch(_t2.monotonic(), 1, None)
+check("home ctx encoder override plays",
+      vplays == [vapp.slot_ctx_path("enc-cw", "home")], str(vplays))
+vplays.clear()
+ui._dispatch(_t2.monotonic(), -1, None)
+check("half-assigned home wheel other direction is dead",
+      vplays == [] and ui.home_pos == 0, "pos=%d %s" % (ui.home_pos, vplays))
+ui._dispatch(_t2.monotonic(), 0, uimod.K_BACK)
+check("home ctx unassigned BACK keeps default", ui.state == uimod.S_SELECT)
+ui.invalidate_labels("/macros/enc-cw@home.json")
+check("ctx invalidate drops the context cache", "home" not in ui._ctx_slots)
+
+# select mode entered on the grid keeps default nav inside home too
+ui.state = uimod.S_HOME
+ui.sel_mode = True
+ui.home_pos = 0
+vplays.clear()
+ui._ctx_slots.clear()
+ui._dispatch(_t2.monotonic(), 1, None)
+check("select mode overrides home ctx customs",
+      vplays == [] and ui.home_pos == 1, "pos=%d %s" % (ui.home_pos, vplays))
+ui.sel_mode = False
+ui._enter_grid()
+
+# cleanup: drop the issue-19 slot files so earlier expectations stay valid
+for _f in ("btn-psh.json", "enc-ccw.json", "enc-cw@home.json"):
+    try:
+        os.remove(os.path.join(mac_dir, _f))
+    except OSError:
+        pass
+ui.invalidate_labels()
+ui._ctx_slots.clear()
 
 # --- language (config "lang", i18n tables) --------------------------------
 from mkyada import i18n as i18nmod  # noqa: E402

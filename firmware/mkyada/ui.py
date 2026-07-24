@@ -9,9 +9,16 @@
 #   speed    encoder edits 0.1x-10.0x, CONFIRM persists it into the key's
 #            macro file (settings.speed) — the app sees the same value
 # Custom slots (macros/enc-cw.json etc., written by the app) override the
-# resting grid: rotation/BACK/CONFIRM then play their macros, and PSH opens
-# a temporary "select mode" with the default navigation. Menus themselves
-# always navigate normally, so settings stay reachable.
+# resting grid: rotation/BACK/CONFIRM/PSH then play their macros, and the
+# menus keep default navigation. Each menu context can be overridden on its
+# own too (issue #19): macros/<slot>@home.json applies on the layer picker,
+# macros/<slot>@menu.json inside settings. Button slots may carry key-logic
+# variants (double / hold) resolved here from nav events; a "menu"-kind
+# assignment drives the BUILT-IN navigation (never other custom slots).
+# Escape hatch: on a customized grid PSH toggles a temporary default-nav
+# "select mode"; with PSH itself assigned, holding it ESC_HOLD_S does —
+# unless the user deliberately gave PSH its own hold action (then the menu
+# stays reachable via keys mapped to menu actions, or the app).
 #
 # NVM keeps only UI prefs: [magic, font_idx, idle_secs, last_layer].
 # Macro speeds live in the macro files — single source of truth.
@@ -49,6 +56,11 @@ TMO_MIN, TMO_MAX, DEFAULT_TIMEOUT = 3, 60, 10
 
 K_PSH, K_BACK, K_CONFIRM = 0, 1, 2
 NAV_SLOT = ("psh", "back", "confirm")  # host-mode event names
+# nav key -> its assignable slot name (standalone custom assignments)
+NAV_SLOTS = {K_PSH: "btn-psh", K_BACK: "btn-back", K_CONFIRM: "btn-confirm"}
+# PSH held this long toggles select mode when its slot has no hold variant —
+# past the 400 ms variant default so an assigned hold still wins cleanly
+ESC_HOLD_S = 1.2
 
 (S_HOME, S_SELECT, S_SPEED, S_SAVED, S_SET_MENU, S_FONT, S_TIMEOUT,
  S_PLAYING, S_HOST, S_TOAST, S_LANG) = range(11)
@@ -99,7 +111,9 @@ class Ui:
         self._enc_batch = 0  # host mode: accumulated detents
         self._labels = {}  # layer -> [(l1, l2)] * 6
         self._speeds = {}  # (layer, key0) -> tenths
-        self._slots = {}   # layer -> {slot: path or None}
+        self._slots = {}   # layer -> {slot: meta dict or None} (grid context)
+        self._ctx_slots = {}  # "home" / "menu" -> {slot: meta dict or None}
+        self._injecting = 0  # >0 while a macro key drives the menu (inject)
 
     # --- NVM prefs ---
     def _nvm_load(self):
@@ -153,6 +167,48 @@ class Ui:
             t = SPEED_DEF_T
         return (name if isinstance(name, str) and name else None), t
 
+    def _node(self, d):
+        """Classify what an assignment (macro dict) does when it fires:
+        ("menu", action) drives the built-in navigation, ("play",) plays
+        the macro file. None for an absent/invalid variant."""
+        if not isinstance(d, dict):
+            return None
+        if d.get("kind") == "menu":
+            return ("menu", d.get("menu") or "default")
+        return ("play",)
+
+    def _read_slot_meta(self, path):
+        """What a slot file's tap/double/hold gestures do, parsed from the
+        header line without loading events (same cost as _read_meta).
+        Returns a meta dict, or None when the file doesn't exist."""
+        try:
+            size = os.stat(path)[6]
+        except OSError:
+            return None
+        data = None
+        try:
+            with open(path, "rb") as f:
+                try:
+                    data = json.loads(f.readline())
+                except ValueError:
+                    if size <= META_MAX_WHOLE:
+                        f.seek(0)
+                        data = json.load(f)
+        except (OSError, ValueError, MemoryError):
+            data = None
+        if not isinstance(data, dict):
+            data = {}
+        variants = data.get("variants")
+        if data.get("stream") or not isinstance(variants, dict):
+            variants = {}  # stream files never carry variants
+        s = data.get("settings") or {}
+        return {"path": path,
+                "tap": self._node(data) or ("play",),
+                "double": self._node(variants.get("double")),
+                "hold": self._node(variants.get("hold")),
+                "hold_s": (s.get("hold_ms") or 400) / 1000.0,
+                "double_s": (s.get("double_ms") or 250) / 1000.0}
+
     def _set_items(self):
         cfg = self.app.config
         return (tr("font"), tr("auto_return"), tr("language"),
@@ -197,7 +253,7 @@ class Ui:
             if not self._exists(p):
                 p0 = self.app.slot_path(s, 0)
                 p = p0 if (l != 0 and self._exists(p0)) else None
-            slots[s] = p
+            slots[s] = self._read_slot_meta(p) if p else None
         self._slots[l] = slots
         gc.collect()
 
@@ -211,6 +267,16 @@ class Ui:
             self.load_layer(l)
         return self._slots[l]
 
+    def ctx_slots(self, ctx):
+        """Per-context nav overrides ("home" = layer picker, "menu" =
+        settings): macros/<slot>@<ctx>.json — global files, no layers."""
+        if ctx not in self._ctx_slots:
+            slots = {}
+            for s in UI_SLOTS:
+                slots[s] = self._read_slot_meta(self.app.slot_ctx_path(s, ctx))
+            self._ctx_slots[ctx] = slots
+        return self._ctx_slots[ctx]
+
     def speed_tenths(self, l, key0):
         if (l, key0) not in self._speeds:
             self.load_layer(l)
@@ -221,10 +287,15 @@ class Ui:
         layer's cache; None drops everything."""
         if path is None:
             layers = list(self._labels.keys()) + list(self._slots.keys())
+            self._ctx_slots.clear()
         else:
             name = path.rsplit("/", 1)[-1]
             if name.endswith(".json"):
                 name = name[:-5]
+            if "@" in name:
+                # context override (enc-cw@home) — global, not layered
+                self._ctx_slots.pop(name.rsplit("@", 1)[-1], None)
+                return
             l = 0
             if "-" in name:
                 suffix = name.rsplit("-", 1)[-1]
@@ -355,6 +426,7 @@ class Ui:
         self._labels.clear()
         self._speeds.clear()
         self._slots.clear()
+        self._ctx_slots.clear()
         self.sel_key = 0
         self.sel_mode = False
         if self.state not in (S_HOST, S_PLAYING):
@@ -404,12 +476,92 @@ class Ui:
         while self.nav.events.get():
             pass
 
-    def _play_slot(self, slot):
-        path = self.slots(self.app.layer).get(slot)
-        if path:
-            self.app.play_file(path, trigger=None)
-            return True
-        return False
+    def _toggle_sel_mode(self):
+        self.sel_mode = not self.sel_mode
+        if self.state == S_SELECT:
+            self._draw_grid()
+
+    def _resolve_nav(self, key, has_double, has_hold, hold_s, double_s):
+        """Blocking tap/double/hold pick for a nav button — the counterpart
+        of App.resolve_variant, fed by keypad events instead of Buttons.
+        Zero added latency when only a tap exists (callers skip this)."""
+        t0 = time.monotonic()
+        while True:
+            if has_hold and time.monotonic() - t0 >= hold_s:
+                return "hold"
+            ev = self.nav.events.get()
+            if ev and ev.key_number == key and not ev.pressed:
+                break
+            self.app.led.tick()
+            time.sleep(0.002)
+        if not has_double:
+            return "tap"
+        t1 = time.monotonic()
+        while time.monotonic() - t1 < double_s:
+            ev = self.nav.events.get()
+            if ev and ev.key_number == key and ev.pressed:
+                return "double"
+            self.app.led.tick()
+            time.sleep(0.002)
+        return "tap"
+
+    def _run_node(self, node, meta, choice, now, default, dflt):
+        """Fire one resolved slot gesture. A "menu"-kind assignment drives
+        the BUILT-IN navigation (never another custom slot — no recursion);
+        its "default" action means whatever this input does out of the box."""
+        if node[0] == "menu":
+            act = node[1]
+            if act == "left":
+                default(now, -1, None)
+            elif act == "right":
+                default(now, 1, None)
+            elif act == "confirm":
+                default(now, 0, K_CONFIRM)
+            elif act == "back":
+                default(now, 0, K_BACK)
+            else:
+                dflt()
+        else:
+            self.app.play_file(meta["path"], trigger=None, variant=choice)
+
+    def _custom_input(self, now, d, press, slots, default):
+        """Layer a context's custom slot assignments over its built-in
+        (now, d, press) handler. Select mode bypasses every assignment;
+        injected menu actions (macro keys) resolve as plain taps — there
+        is no physical press whose release could be waited on."""
+        if d:
+            cw = ccw = None
+            if not self.sel_mode:
+                cw = slots.get("enc-cw")
+                ccw = slots.get("enc-ccw")
+            if cw or ccw:
+                meta = cw if d > 0 else ccw
+                if meta:  # other direction of a half-assigned wheel: no-op
+                    step = 1 if d > 0 else -1
+                    for _ in range(min(abs(d), 4)):  # cap a fast spin burst
+                        self._run_node(meta["tap"], meta, "tap", now, default,
+                                       lambda: default(now, step, None))
+            else:
+                default(now, d, None)
+        if press is None:
+            return
+        meta = None if self.sel_mode else slots.get(NAV_SLOTS.get(press))
+        if not meta:
+            default(now, 0, press)
+            return
+        esc = press == K_PSH and not self._injecting  # PSH hold escape
+        has_hold = bool(meta["hold"]) or esc
+        choice = "tap"
+        if not self._injecting and (has_hold or meta["double"]):
+            choice = self._resolve_nav(press, bool(meta["double"]), has_hold,
+                                       meta["hold_s"] if meta["hold"]
+                                       else ESC_HOLD_S, meta["double_s"])
+        if choice == "hold" and not meta["hold"]:
+            self._toggle_sel_mode()  # the escape, not an assignment
+            return
+        node = meta.get(choice) or meta["tap"]
+        self._run_node(node, meta, choice, now, default,
+                       lambda: default(now, 0, press))
 
     # --- drawing shortcuts ---
     def _draw_home(self):
@@ -435,13 +587,22 @@ class Ui:
 
     def _draw_grid(self):
         l = self.app.layer
-        invert = self.sel_mode or not self._grid_custom()
+        invert = self.sel_mode or not self._enc_custom()
         self.oled.show_grid(self.labels(l), self.sel_key, invert,
                             band=self._band())
 
-    def _grid_custom(self):
+    def _enc_custom(self):
+        """Wheel rotation is customized — the selection highlight rests."""
         s = self.slots(self.app.layer)
         return bool(s.get("enc-cw") or s.get("enc-ccw"))
+
+    def _grid_custom(self):
+        """Any grid slot assigned: PSH becomes the select-mode toggle."""
+        s = self.slots(self.app.layer)
+        for k in UI_SLOTS:
+            if s.get(k):
+                return True
+        return False
 
     def _enter_grid(self):
         self.sel_mode = False
@@ -478,14 +639,18 @@ class Ui:
         if self.state in (S_HOST, S_PLAYING):
             return  # menu nav is meaningless while playing / app-owned
         now = time.monotonic()
-        if action == "left":
-            self._dispatch(now, -1, None)
-        elif action == "right":
-            self._dispatch(now, 1, None)
-        elif action == "confirm":
-            self._dispatch(now, 0, K_CONFIRM)
-        elif action == "back":
-            self._dispatch(now, 0, K_BACK)
+        self._injecting += 1
+        try:
+            if action == "left":
+                self._dispatch(now, -1, None)
+            elif action == "right":
+                self._dispatch(now, 1, None)
+            elif action == "confirm":
+                self._dispatch(now, 0, K_CONFIRM)
+            elif action == "back":
+                self._dispatch(now, 0, K_BACK)
+        finally:
+            self._injecting -= 1
 
     def _dispatch(self, now, d, press):
         if d or press is not None:
@@ -526,6 +691,12 @@ class Ui:
                                  "down": bool(ev.pressed)})
 
     def _st_home(self, now, d, press):
+        self._custom_input(now, d, press, self.ctx_slots("home"),
+                           self._home_default)
+        if not d and press is None and now - self.activity_at > self.idle_secs:
+            self._enter_grid()  # idle returns to the confirmed layer's grid
+
+    def _home_default(self, now, d, press):
         c = self.app.config["layer_count"]
         if d:
             self.home_pos = clamp(self.home_pos + (1 if d > 0 else -1), 0, c)
@@ -541,54 +712,38 @@ class Ui:
                 self._enter_grid()
         elif press == K_BACK:
             self._enter_grid()
-        elif now - self.activity_at > self.idle_secs:
-            self._enter_grid()  # idle returns to the confirmed layer's grid
 
     def _go_home(self):
-        self.sel_mode = False
+        # sel_mode survives into home/menus: entered as the escape from a
+        # customized grid, it must keep navigation default until the user
+        # lands back on the grid (issue #19)
         self.home_pos = self.app.layer
         self.state = S_HOME
         self._draw_home()
 
     def _st_select(self, now, d, press):
-        slots = self.slots(self.app.layer)
-        custom = self._grid_custom()  # any slot assigned on this layer
-        nav_live = self.sel_mode or not custom
+        self._custom_input(now, d, press, self.slots(self.app.layer),
+                           self._select_default)
+        if (not d and press is None and self.sel_mode
+                and now - self.activity_at > self.idle_secs):
+            self.sel_mode = False  # back to the customized resting grid
+            self._draw_grid()
+
+    def _select_default(self, now, d, press):
         if d:
-            enc_custom = (not nav_live) and (slots.get("enc-cw")
-                                             or slots.get("enc-ccw"))
-            if enc_custom:
-                # custom encoder: one play per detent, direction-mapped
-                slot = "enc-cw" if d > 0 else "enc-ccw"
-                for _ in range(min(abs(d), 4)):  # cap a fast spin burst
-                    if not self._play_slot(slot):
-                        break
-            else:
-                self.sel_key = clamp(self.sel_key + (1 if d > 0 else -1), 0, 5)
-                self._draw_grid()
-        if press is None:
-            if self.sel_mode and now - self.activity_at > self.idle_secs:
-                self.sel_mode = False  # back to the customized resting grid
-                self._draw_grid()
-            return
+            self.sel_key = clamp(self.sel_key + (1 if d > 0 else -1), 0, 5)
+            self._draw_grid()
         if press == K_PSH:
-            if custom:
+            if self._grid_custom():
                 # PSH is the guaranteed menu key on a customized grid:
                 # toggles the temporary default-navigation "select mode"
-                self.sel_mode = not self.sel_mode
-                self._draw_grid()
+                self._toggle_sel_mode()
             else:
                 self._enter_speed()
         elif press == K_CONFIRM:
-            if nav_live:
-                self._enter_speed()
-            elif not self._play_slot("btn-confirm"):
-                self._enter_speed()
+            self._enter_speed()
         elif press == K_BACK:
-            if nav_live:
-                self._go_home()
-            elif not self._play_slot("btn-back"):
-                self._go_home()
+            self._go_home()
 
     def _st_speed(self, now, d, press):
         if d:
@@ -618,6 +773,12 @@ class Ui:
             self._enter_grid()
 
     def _st_set_menu(self, now, d, press):
+        self._custom_input(now, d, press, self.ctx_slots("menu"),
+                           self._set_menu_default)
+        if not d and press is None and now - self.activity_at > self.idle_secs:
+            self._enter_grid()
+
+    def _set_menu_default(self, now, d, press):
         if d:
             self.set_menu_sel = clamp(self.set_menu_sel + (1 if d > 0 else -1),
                                       0, len(self._set_items()) - 1)
@@ -656,10 +817,14 @@ class Ui:
             self.home_pos = self.app.config["layer_count"]
             self.state = S_HOME
             self._draw_home()
-        elif now - self.activity_at > self.idle_secs:
-            self._enter_grid()
 
     def _st_font(self, now, d, press):
+        self._custom_input(now, d, press, self.ctx_slots("menu"),
+                           self._font_default)
+        if not d and press is None and now - self.activity_at > self.idle_secs:
+            self._enter_grid()
+
+    def _font_default(self, now, d, press):
         if d:
             self.font_sel = clamp(self.font_sel + (1 if d > 0 else -1),
                                   0, len(FONTS) - 1)
@@ -675,8 +840,6 @@ class Ui:
         elif press == K_BACK:
             self.state = S_SET_MENU
             self.oled.show_menu(tr("settings"), self._set_items(), self.set_menu_sel)
-        elif now - self.activity_at > self.idle_secs:
-            self._enter_grid()
 
     def persist_cfg(self, updates):
         """Merge updates into config.json (and the live config) so the app
@@ -718,6 +881,12 @@ class Ui:
         return res
 
     def _st_lang(self, now, d, press):
+        self._custom_input(now, d, press, self.ctx_slots("menu"),
+                           self._lang_default)
+        if not d and press is None and now - self.activity_at > self.idle_secs:
+            self._enter_grid()
+
+    def _lang_default(self, now, d, press):
         if d:
             self.lang_sel = clamp(self.lang_sel + (1 if d > 0 else -1),
                                   0, len(i18n.LANGS) - 1)
@@ -735,10 +904,14 @@ class Ui:
         elif press == K_BACK:
             self.state = S_SET_MENU
             self.oled.show_menu(tr("settings"), self._set_items(), self.set_menu_sel)
-        elif now - self.activity_at > self.idle_secs:
-            self._enter_grid()
 
     def _st_timeout(self, now, d, press):
+        self._custom_input(now, d, press, self.ctx_slots("menu"),
+                           self._timeout_default)
+        if not d and press is None and now - self.activity_at > self.idle_secs:
+            self._enter_grid()
+
+    def _timeout_default(self, now, d, press):
         if d:
             dt = now - self.last_move
             self.last_move = now
@@ -753,5 +926,3 @@ class Ui:
         elif press == K_BACK:
             self.state = S_SET_MENU
             self.oled.show_menu(tr("settings"), self._set_items(), self.set_menu_sel)
-        elif now - self.activity_at > self.idle_secs:
-            self._enter_grid()

@@ -65,13 +65,36 @@ describe("slot file naming", () => {
   });
 
   it("parseMacroFileName inverts key and slot names", () => {
-    expect(parseMacroFileName(macroFileName(3, 0))).toEqual({ slot: 3, layer: 0 });
-    expect(parseMacroFileName(macroFileName(12, 4))).toEqual({ slot: 12, layer: 4 });
-    expect(parseMacroFileName(slotFileName("enc-ccw", 0))).toEqual({ slot: "enc-ccw", layer: 0 });
+    expect(parseMacroFileName(macroFileName(3, 0))).toEqual({ slot: 3, layer: 0, ctx: "grid" });
+    expect(parseMacroFileName(macroFileName(12, 4))).toEqual({ slot: 12, layer: 4, ctx: "grid" });
+    expect(parseMacroFileName(slotFileName("enc-ccw", 0))).toEqual({
+      slot: "enc-ccw",
+      layer: 0,
+      ctx: "grid",
+    });
     expect(parseMacroFileName(slotFileName("btn-confirm", 1))).toEqual({
       slot: "btn-confirm",
       layer: 1,
+      ctx: "grid",
     });
+  });
+
+  it("per-context overrides are global files (issue #19)", () => {
+    expect(slotFileName("enc-cw", 0, "home")).toBe("macros/enc-cw@home.json");
+    expect(slotFileName("enc-cw", 3, "home")).toBe("macros/enc-cw@home.json"); // layer ignored
+    expect(slotFileName("btn-psh", 0, "menu")).toBe("macros/btn-psh@menu.json");
+    expect(slotFileName("btn-psh", 2)).toBe("macros/btn-psh-c.json");
+    expect(parseMacroFileName("macros/enc-cw@home.json")).toEqual({
+      slot: "enc-cw",
+      layer: 0,
+      ctx: "home",
+    });
+    expect(parseMacroFileName("/macros/btn-psh@menu.json")).toEqual({
+      slot: "btn-psh",
+      layer: 0,
+      ctx: "menu",
+    });
+    expect(parseMacroFileName("macros/enc-cw@nope.json")).toBeNull();
   });
 
   it("profile macros cover key numbers and module slots (issue #17)", () => {
@@ -83,8 +106,12 @@ describe("slot file naming", () => {
   });
 
   it("accepts device-style absolute paths (macro_changed messages)", () => {
-    expect(parseMacroFileName("/macros/key3-b.json")).toEqual({ slot: 3, layer: 1 });
-    expect(parseMacroFileName("/macros/enc-cw.json")).toEqual({ slot: "enc-cw", layer: 0 });
+    expect(parseMacroFileName("/macros/key3-b.json")).toEqual({ slot: 3, layer: 1, ctx: "grid" });
+    expect(parseMacroFileName("/macros/enc-cw.json")).toEqual({
+      slot: "enc-cw",
+      layer: 0,
+      ctx: "grid",
+    });
   });
 
   it("rejects aux part files, profile macros and junk", () => {

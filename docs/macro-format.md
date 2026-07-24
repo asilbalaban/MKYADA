@@ -65,6 +65,11 @@ own `events` (and optional `settings`):
   one the tap fires with **zero added latency**.
 - **Graceful degradation:** firmware older than 0.3.0 ignores `variants` and
   simply plays the tap.
+- **Vision 6 module slots** (`btn-back` / `btn-confirm` / `btn-psh` files,
+  fw ≥ 0.9.0) carry the same `variants`; the menu module resolves the
+  gesture from its own buttons. A variant may itself be a `menu` action —
+  it then drives the built-in navigation (`key_action` is announced with
+  `"key": null`). Encoder rotation files have no gestures to resolve.
 
 ## Multi actions — `kind: "sequence"`
 
@@ -104,7 +109,12 @@ Every event has `delay` — milliseconds to wait **before** executing it.
 
 **`kind: "menu"`** (screen models) has no HID events. `"menu"` is one of
 `left` / `right` / `confirm` / `back`, and the firmware feeds it to the
-on-screen menu so a normal key acts like the encoder / CONFIRM / BACK.
+on-screen menu so a normal key acts like the encoder / CONFIRM / BACK —
+including any custom slot assignments, so a key can fully stand in for a
+broken wheel. `"default"` (fw ≥ 0.9.0, module-slot files only) means "this
+control's built-in action" — the carrier for slot files whose tap stays
+stock while `variants` customize double/long press; on a normal key it is
+a no-op.
 
 ## Stream layout — v4 (firmware ≥ 0.5.0, proto ≥ 4)
 

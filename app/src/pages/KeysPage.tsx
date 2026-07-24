@@ -6,15 +6,16 @@ import { Play, RefreshCw, SquarePen, Usb } from "lucide-react";
 import { useDevice } from "../lib/device";
 import { useNav } from "../lib/nav";
 import { ipc } from "../lib/ipc";
-import type { Assignment, DeviceConfig, ModuleSlot } from "../lib/types";
+import type { Assignment, DeviceConfig, ModuleSlot, SlotContext } from "../lib/types";
 import { MODULE_SLOTS, MODULE_SLOT_LABELS, deviceModel, layerLabel } from "../lib/types";
 import {
   AUX_FILE_RE,
   assignmentComplete,
   compileAssignment,
   compileSequenceParts,
+  compileSlotAssignment,
   defaultConfig,
-  describeAssignment,
+  describeSlotAssignment,
   effectiveLayers,
   macroFileName,
   migrateMacro,
@@ -36,13 +37,51 @@ import { AssignmentEditor } from "../components/AssignmentEditor";
 /** What can hold a macro: a numbered key, or a Vision 6 module control. */
 type SlotId = number | ModuleSlot;
 
-function fileFor(slot: SlotId, layer: number): string {
-  return typeof slot === "number" ? macroFileName(slot, layer) : slotFileName(slot, layer);
+function fileFor(slot: SlotId, layer: number, ctx: SlotContext = "grid"): string {
+  return typeof slot === "number" ? macroFileName(slot, layer) : slotFileName(slot, layer, ctx);
+}
+
+/** Cache/state key: keys ignore ctx; module slots are per-ctx (issue #19). */
+function keyOf(slot: SlotId, layer: number, ctx: SlotContext = "grid"): string {
+  return typeof slot === "number" ? slotKey(slot, layer) : slotKey(slot, layer, ctx);
 }
 
 function slotTitle(slot: SlotId): string {
   return typeof slot === "number" ? `Key ${slot}` : MODULE_SLOT_LABELS[slot];
 }
+
+/** Where a module-control assignment applies, and what the device does there
+ * out of the box — shown so the default programming is visible and every
+ * piece of it reads as customizable (issue #19). */
+const CTX_META: { id: SlotContext; label: string; hint: string }[] = [
+  { id: "grid", label: "Key grid", hint: "the resting screen — per-layer" },
+  { id: "home", label: "Layer screen", hint: "the layer picker — one setting for all layers" },
+  { id: "menu", label: "Settings menu", hint: "settings and its sub-menus — one setting for all layers" },
+];
+
+const SLOT_DEFAULTS: Record<SlotContext, Record<ModuleSlot, string>> = {
+  grid: {
+    "enc-cw": "moves the selection right",
+    "enc-ccw": "moves the selection left",
+    "btn-back": "opens the layer screen",
+    "btn-confirm": "opens the selected key's speed editor",
+    "btn-psh": "speed editor; once anything is customized: toggles select mode",
+  },
+  home: {
+    "enc-cw": "scrolls toward SETTINGS",
+    "enc-ccw": "scrolls toward layer A",
+    "btn-back": "returns to the key grid",
+    "btn-confirm": "activates the highlighted layer",
+    "btn-psh": "activates the highlighted layer",
+  },
+  menu: {
+    "enc-cw": "moves down / increases",
+    "enc-ccw": "moves up / decreases",
+    "btn-back": "goes back one level",
+    "btn-confirm": "confirms the entry",
+    "btn-psh": "confirms the entry",
+  },
+};
 
 export function KeysPage() {
   const { hello, drive, send, onMsg } = useDevice();
@@ -52,10 +91,16 @@ export function KeysPage() {
   const [cfg, setCfg] = useState<DeviceConfig | null>(null);
   const [layer, setLayer] = useState(0);
   const [selected, setSelected] = useState<SlotId | null>(null);
+  // Which context of a module control is being edited (keys are always grid).
+  const [slotCtx, setSlotCtx] = useState<SlotContext>("grid");
   const [assignments, setAssignments] = useState<Map<string, Assignment>>(new Map());
   // A macro's settings were edited on the device while that slot had unsaved
   // edits here — offer a reload instead of silently clobbering either side.
-  const [changedNotice, setChangedNotice] = useState<{ slot: SlotId; layer: number } | null>(null);
+  const [changedNotice, setChangedNotice] = useState<{
+    slot: SlotId;
+    layer: number;
+    ctx: SlotContext;
+  } | null>(null);
   // Draft edits are undoable (⌘Z); switching key/layer or saving resets the stack.
   const draftHistory = useHistory<Assignment | null>(null);
   const draft = draftHistory.present;
@@ -116,22 +161,31 @@ export function KeysPage() {
     const layers = effectiveLayers(config);
     const existing = new Set(await ipc.driveList(drive.path, "macros").catch(() => [] as string[]));
     if (seq !== reloadSeq.current) return;
-    const slots: { k: SlotId; l: number; file: string }[] = [];
+    const slots: { k: SlotId; l: number; file: string; ctx: SlotContext }[] = [];
     for (let l = 0; l < layers; l++) {
       for (let k = 1; k <= config.key_count; k++) {
         if (config.layer_key === k) continue;
         const file = macroFileName(k, l);
-        if (existing.has(file.split("/").pop()!)) slots.push({ k, l, file });
+        if (existing.has(file.split("/").pop()!)) slots.push({ k, l, file, ctx: "grid" });
       }
       if (deviceModel(config) === "vision6") {
         for (const s of MODULE_SLOTS) {
           const file = slotFileName(s, l);
-          if (existing.has(file.split("/").pop()!)) slots.push({ k: s, l, file });
+          if (existing.has(file.split("/").pop()!)) slots.push({ k: s, l, file, ctx: "grid" });
+        }
+      }
+    }
+    if (deviceModel(config) === "vision6") {
+      // per-context nav overrides (layer screen / settings menu) are global
+      for (const ctx of ["home", "menu"] as const) {
+        for (const s of MODULE_SLOTS) {
+          const file = slotFileName(s, 0, ctx);
+          if (existing.has(file.split("/").pop()!)) slots.push({ k: s, l: 0, file, ctx });
         }
       }
     }
     setAssignments(new Map());
-    setPending(new Set(slots.map((s) => slotKey(s.k, s.l))));
+    setPending(new Set(slots.map((s) => keyOf(s.k, s.l, s.ctx))));
     setLoadTotal(slots.length);
     setStatus("");
     const snapshot = new Map<string, Assignment>();
@@ -149,12 +203,12 @@ export function KeysPage() {
       if (seq !== reloadSeq.current) return;
       const loaded = a;
       if (loaded) {
-        snapshot.set(slotKey(s.k, s.l), loaded);
-        setAssignments((prev) => new Map(prev).set(slotKey(s.k, s.l), loaded));
+        snapshot.set(keyOf(s.k, s.l, s.ctx), loaded);
+        setAssignments((prev) => new Map(prev).set(keyOf(s.k, s.l, s.ctx), loaded));
       }
       setPending((prev) => {
         const next = new Set(prev);
-        next.delete(slotKey(s.k, s.l));
+        next.delete(keyOf(s.k, s.l, s.ctx));
         return next;
       });
     }
@@ -174,21 +228,23 @@ export function KeysPage() {
   // Re-read one slot from the drive (the device rewrote it) and fold the
   // fresh assignment into state + cache.
   const refreshSlot = useCallback(
-    async (slot: SlotId, l: number) => {
+    async (slot: SlotId, l: number, ctx: SlotContext = "grid") => {
       if (!drive) return;
       let a: Assignment | null = null;
       try {
-        a = parseAssignment(parseDeviceMacro(await ipc.driveRead(drive.path, fileFor(slot, l))));
+        a = parseAssignment(
+          parseDeviceMacro(await ipc.driveRead(drive.path, fileFor(slot, l, ctx))),
+        );
       } catch {
         a = null; // deleted or unreadable — treat as unassigned
       }
       setAssignments((prev) => {
         const next = new Map(prev);
-        if (a) next.set(slotKey(slot, l), a);
-        else next.delete(slotKey(slot, l));
+        if (a) next.set(keyOf(slot, l, ctx), a);
+        else next.delete(keyOf(slot, l, ctx));
         return next;
       });
-      keysCache.setAssignment(drive.path, slotKey(slot, l), a);
+      keysCache.setAssignment(drive.path, keyOf(slot, l, ctx), a);
     },
     [drive],
   );
@@ -196,8 +252,13 @@ export function KeysPage() {
   // The device can rewrite a macro itself (Vision 6's on-screen speed menu
   // sends macro_changed). Keep our copy fresh — unless that very slot is
   // open with unsaved edits, in which case ask instead of clobbering.
-  const editStateRef = useRef({ selected: null as SlotId | null, layer: 0, dirty: false });
-  editStateRef.current = { selected, layer, dirty: draft !== null };
+  const editStateRef = useRef({
+    selected: null as SlotId | null,
+    layer: 0,
+    ctx: "grid" as SlotContext,
+    dirty: false,
+  });
+  editStateRef.current = { selected, layer, ctx: slotCtx, dirty: draft !== null };
   useEffect(
     () =>
       onMsg((m) => {
@@ -205,11 +266,16 @@ export function KeysPage() {
         const parsed = parseMacroFileName(String((m as { file?: unknown }).file ?? ""));
         if (!parsed) return;
         const cur = editStateRef.current;
-        if (cur.selected === parsed.slot && cur.layer === parsed.layer && cur.dirty) {
+        if (
+          cur.selected === parsed.slot &&
+          cur.layer === parsed.layer &&
+          cur.ctx === parsed.ctx &&
+          cur.dirty
+        ) {
           setChangedNotice(parsed);
           return;
         }
-        void refreshSlot(parsed.slot, parsed.layer);
+        void refreshSlot(parsed.slot, parsed.layer, parsed.ctx);
       }),
     [onMsg, refreshSlot],
   );
@@ -266,12 +332,19 @@ export function KeysPage() {
 
   const layers = effectiveLayers(cfg);
   const isVision = deviceModel(cfg.model ? cfg : hello) === "vision6";
-  const current = selected !== null ? assignments.get(slotKey(selected, layer)) : undefined;
+  const isSlot = selected !== null && typeof selected !== "number";
+  const ctx: SlotContext = isSlot ? slotCtx : "grid";
+  const current = selected !== null ? assignments.get(keyOf(selected, layer, ctx)) : undefined;
+  const fwOk = (() => {
+    const [maj = 0, min = 0] = (hello?.fw ?? "0.0").split(".").map((n) => parseInt(n) || 0);
+    return maj > 0 || min >= 9; // slot contexts / variants / PSH: firmware 0.9.0
+  })();
 
   async function saveDraft() {
     if (selected === null || !draft || !cfg || !drive) return;
-    const file = fileFor(selected, layer);
-    const macro = compileAssignment(draft);
+    const file = fileFor(selected, layer, ctx);
+    // module slots may save "built-in tap + custom hold/double" (issue #19)
+    const macro = isSlot ? compileSlotAssignment(draft) : compileAssignment(draft);
     setSaving(true);
     try {
       // The whole save runs under the blocking write modal (issue #15): the
@@ -318,9 +391,9 @@ export function KeysPage() {
         // macro, so remove the file and leave the slot unassigned (issue #15)
         await ipc.driveDelete(drive.path, file).catch(() => {});
         const next = new Map(assignments);
-        next.delete(slotKey(selected, layer));
+        next.delete(keyOf(selected, layer, ctx));
         setAssignments(next);
-        keysCache.setAssignment(drive.path, slotKey(selected, layer), null);
+        keysCache.setAssignment(drive.path, keyOf(selected, layer, ctx), null);
         toast.info("Save cancelled", `${slotTitle(selected)} was left unassigned.`);
         return;
       }
@@ -332,14 +405,10 @@ export function KeysPage() {
     }
     setSaving(false);
     const next = new Map(assignments);
-    if (macro && draft.kind !== "none") next.set(slotKey(selected, layer), draft);
-    else next.delete(slotKey(selected, layer));
+    if (macro) next.set(keyOf(selected, layer, ctx), draft);
+    else next.delete(keyOf(selected, layer, ctx));
     setAssignments(next);
-    keysCache.setAssignment(
-      drive.path,
-      slotKey(selected, layer),
-      macro && draft.kind !== "none" ? draft : null,
-    );
+    keysCache.setAssignment(drive.path, keyOf(selected, layer, ctx), macro ? draft : null);
     setDraft(null);
     setChangedNotice(null);
     if (macro) {
@@ -353,7 +422,7 @@ export function KeysPage() {
   }
 
   async function testPlay(slot: SlotId) {
-    await send({ t: "play", file: fileFor(slot, layer) });
+    await send({ t: "play", file: fileFor(slot, layer, ctx) });
   }
 
   const visibleAssignments = new Map<number, Assignment>();
@@ -403,6 +472,7 @@ export function KeysPage() {
             if (cfg.layer_key === n) return;
             if (pendingKeys.has(n)) return; // still streaming in — not editable yet
             setSelected(n);
+            setSlotCtx("grid");
             setDraft(null);
           }}
           assignments={visibleAssignments}
@@ -416,6 +486,9 @@ export function KeysPage() {
             <div className="grid grid-cols-2 gap-2">
               {MODULE_SLOTS.map((s) => {
                 const a = assignments.get(slotKey(s, layer));
+                const overrides = (["home", "menu"] as const).filter((c) =>
+                  assignments.get(slotKey(s, layer, c)),
+                );
                 const isLoading = pending.has(slotKey(s, layer));
                 const isSelected = selected === s;
                 return (
@@ -424,6 +497,7 @@ export function KeysPage() {
                     onClick={() => {
                       if (isLoading) return;
                       setSelected(s);
+                      setSlotCtx("grid");
                       setDraft(null);
                     }}
                     aria-pressed={isSelected}
@@ -435,10 +509,11 @@ export function KeysPage() {
                     <span className="text-[10px] text-fg-muted leading-tight">
                       {isLoading ? (
                         <Spinner size={12} className="text-fg-faint" />
-                      ) : a ? (
-                        describeAssignment(a)
                       ) : (
-                        "device menu"
+                        (a ? describeSlotAssignment(a) : `Default: ${SLOT_DEFAULTS.grid[s]}`) +
+                        (overrides.length
+                          ? ` · +${overrides.map((c) => (c === "home" ? "layer screen" : "settings")).join(", ")}`
+                          : "")
                       )}
                     </span>
                   </button>
@@ -446,8 +521,10 @@ export function KeysPage() {
               })}
             </div>
             <p className="text-xs text-fg-faint mt-2">
-              Empty slots keep the built-in menu navigation on the device.
-              {layers > 1 && " A layer without its own assignment falls back to Layer A's."}{" "}
+              This is the device's whole default programming — every control can be reassigned,
+              per context (key grid / layer screen / settings menu) and per gesture (tap, double
+              press, long press). Empty slots keep the built-in menu navigation.
+              {layers > 1 && " A layer without its own grid assignment falls back to Layer A's."}{" "}
               Keystroke/media/mouse assignments work standalone; open/command/sound/webhook ones
               run only while the MKYADA app is connected.
             </p>
@@ -469,7 +546,9 @@ export function KeysPage() {
         title={
           selected === null
             ? "Select a key"
-            : `${slotTitle(selected)}${layers > 1 ? ` · Layer ${layerLabel(layer)}` : ""}`
+            : ctx !== "grid"
+              ? `${slotTitle(selected)} · ${CTX_META.find((c) => c.id === ctx)!.label}`
+              : `${slotTitle(selected)}${layers > 1 ? ` · Layer ${layerLabel(layer)}` : ""}`
         }
         actions={
           selected !== null &&
@@ -503,7 +582,43 @@ export function KeysPage() {
           </p>
         ) : (
           <div className="flex flex-col gap-4">
-            {changedNotice && changedNotice.slot === selected && changedNotice.layer === layer && (
+            {isSlot && (
+              <div className="flex flex-col gap-1.5">
+                <div className="flex gap-1">
+                  {CTX_META.map((c) => {
+                    const has = !!assignments.get(keyOf(selected, layer, c.id));
+                    return (
+                      <Button
+                        key={c.id}
+                        variant={ctx === c.id ? "primary" : "default"}
+                        onClick={() => {
+                          setSlotCtx(c.id);
+                          setDraft(null);
+                          setChangedNotice(null);
+                        }}
+                      >
+                        {c.label}
+                        {has ? " •" : ""}
+                      </Button>
+                    );
+                  })}
+                </div>
+                <p className="text-xs text-fg-faint">
+                  {CTX_META.find((c) => c.id === ctx)!.hint}. Default here:{" "}
+                  {SLOT_DEFAULTS[ctx][selected as ModuleSlot]}.
+                </p>
+                {!fwOk && (
+                  <p className="text-xs text-warning">
+                    Per-context overrides, PSH assignments and slot key logic need firmware
+                    0.9.0 — update on the Devices page.
+                  </p>
+                )}
+              </div>
+            )}
+            {changedNotice &&
+              changedNotice.slot === selected &&
+              changedNotice.layer === layer &&
+              changedNotice.ctx === ctx && (
               <div className="flex items-center gap-3 bg-warning-bg border border-warning-line rounded-lg px-3 py-2">
                 <span className="text-sm text-fg flex-1">
                   This macro's speed was changed on the device — reload it here? Your unsaved
@@ -513,7 +628,7 @@ export function KeysPage() {
                   onClick={() => {
                     setDraft(null);
                     setChangedNotice(null);
-                    void refreshSlot(selected, layer);
+                    void refreshSlot(selected, layer, ctx);
                   }}
                 >
                   Reload
@@ -526,9 +641,12 @@ export function KeysPage() {
             <AssignmentEditor
               value={draft ?? current ?? { kind: "none" }}
               onChange={draftHistory.set}
-              // device-menu nav only makes sense on a screen model, and only
-              // for a physical key (module slots already ARE the menu controls)
-              allowMenu={isVision && typeof selected === "number"}
+              // device-menu nav only exists on a screen model; on module
+              // slots it drives the BUILT-IN navigation (issue #19)
+              allowMenu={isVision}
+              slotMode={isSlot}
+              // rotation has no press to double/hold on
+              allowVariants={!isSlot || (selected as string).startsWith("btn-")}
               fwVersion={hello?.fw}
             />
             {(draft ?? current) && (draft ?? current)!.kind !== "none" && (

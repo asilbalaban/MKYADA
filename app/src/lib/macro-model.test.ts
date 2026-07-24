@@ -6,8 +6,10 @@ import {
   assignmentComplete,
   compileAssignment,
   compileSequenceParts,
+  compileSlotAssignment,
   compileVariantParts,
   describeAssignment,
+  describeSlotAssignment,
   holdRepeatDefault,
   kindRequiresHost,
   migrateMacro,
@@ -333,5 +335,58 @@ describe("legacy migration", () => {
     expect(m.format).toBe("mkyada-macro");
     expect(m.version).toBe(2);
     expect(m.kind).toBe("recorded");
+  });
+});
+
+describe("module-slot assignments (issue #19)", () => {
+  it("kind none + variants compiles to a menu:default carrier", () => {
+    const a: Assignment = {
+      kind: "none",
+      variants: { hold: { kind: "menu", action: "back" } },
+    };
+    const file = compileSlotAssignment(a);
+    expect(file).not.toBeNull();
+    expect(file!.kind).toBe("menu");
+    expect(file!.menu).toBe("default");
+    expect(file!.variants?.hold?.kind).toBe("menu");
+    expect(file!.variants?.hold?.menu).toBe("back");
+    // and parses back to the same editing shape (tap = built-in)
+    const back = parseAssignment(JSON.parse(JSON.stringify(file)) as MacroFile);
+    expect(back.kind).toBe("none");
+    expect(back.variants?.hold).toEqual({ kind: "menu", action: "back" });
+    expect(back.label).toBeUndefined();
+  });
+
+  it("kind none without variants stays unassigned (deletes the file)", () => {
+    expect(compileSlotAssignment({ kind: "none" })).toBeNull();
+  });
+
+  it("a real tap with a hold variant compiles like a key assignment", () => {
+    const a: Assignment = {
+      kind: "scroll",
+      dir: "up",
+      variants: { hold: { kind: "menu", action: "back" } },
+    };
+    const file = compileSlotAssignment(a);
+    expect(file!.kind).toBe("scroll");
+    expect(file!.variants?.hold?.menu).toBe("back");
+    const back = parseAssignment(JSON.parse(JSON.stringify(file)) as MacroFile);
+    expect(back.kind).toBe("scroll");
+  });
+
+  it("describeSlotAssignment lists tap and gestures", () => {
+    expect(
+      describeSlotAssignment({
+        kind: "scroll",
+        dir: "up",
+        variants: { hold: { kind: "menu", action: "back" } },
+      }),
+    ).toBe("Scroll ↑ · Hold: Menu back");
+    expect(
+      describeSlotAssignment({
+        kind: "none",
+        variants: { double: { kind: "media", usage: "mute" } },
+      }),
+    ).toBe("2×: mute");
   });
 });

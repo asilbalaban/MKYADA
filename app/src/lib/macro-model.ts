@@ -12,6 +12,7 @@ import type {
   ModuleSlot,
   ScrollDir,
   SequenceStep,
+  SlotContext,
   WebhookRequest,
 } from "./types";
 import { deviceModel, LAYER_NAMES, MODULE_SLOTS } from "./types";
@@ -106,27 +107,37 @@ export function macroFileName(keyNo: number, layerIndex: number): string {
   return `macros/key${keyNo}${suffix}.json`;
 }
 
-/** File name for a Vision 6 encoder/nav slot macro — same layer-suffix rule
- * as key files (layer 0 unsuffixed). An absent file keeps the device's
- * built-in menu navigation for that control. */
-export function slotFileName(slot: ModuleSlot, layerIndex: number): string {
+/** File name for a Vision 6 encoder/nav slot macro. Grid context: same
+ * layer-suffix rule as key files (layer 0 unsuffixed). The home (layer
+ * picker) and menu (settings) contexts are global — one file, no layers
+ * (issue #19). An absent file keeps the device's built-in navigation. */
+export function slotFileName(slot: ModuleSlot, layerIndex: number, ctx: SlotContext = "grid"): string {
+  if (ctx !== "grid") return `macros/${slot}@${ctx}.json`;
   const suffix = layerIndex > 0 ? `-${LAYER_NAMES[layerIndex]}` : "";
   return `macros/${slot}${suffix}.json`;
 }
 
-/** Reverse of macroFileName/slotFileName: which slot + layer a device macro
- * path (e.g. from a `macro_changed` message) belongs to. Null for aux part
- * files, profile macros and anything else. */
+/** Reverse of macroFileName/slotFileName: which slot + layer (+ context for
+ * module slots) a device macro path (e.g. from a `macro_changed` message)
+ * belongs to. Null for aux part files, profile macros and anything else. */
 export function parseMacroFileName(
   path: string,
-): { slot: number | ModuleSlot; layer: number } | null {
+): { slot: number | ModuleSlot; layer: number; ctx: SlotContext } | null {
   const base = path.replace(/^\/?(macros\/)?/, "");
   if (base.includes("/") || AUX_FILE_RE.test(base)) return null;
   const key = base.match(/^key(\d+)(?:-([a-h]))?\.json$/);
-  if (key) return { slot: Number(key[1]), layer: key[2] ? LAYER_NAMES.indexOf(key[2]) : 0 };
-  const mod = base.match(/^(enc-ccw|enc-cw|btn-back|btn-confirm)(?:-([a-h]))?\.json$/);
+  if (key) {
+    return { slot: Number(key[1]), layer: key[2] ? LAYER_NAMES.indexOf(key[2]) : 0, ctx: "grid" };
+  }
+  const mod = base.match(
+    /^(enc-ccw|enc-cw|btn-back|btn-confirm|btn-psh)(?:@(home|menu))?(?:-([a-h]))?\.json$/,
+  );
   if (mod && (MODULE_SLOTS as readonly string[]).includes(mod[1])) {
-    return { slot: mod[1] as ModuleSlot, layer: mod[2] ? LAYER_NAMES.indexOf(mod[2]) : 0 };
+    return {
+      slot: mod[1] as ModuleSlot,
+      layer: mod[3] ? LAYER_NAMES.indexOf(mod[3]) : 0,
+      ctx: (mod[2] as SlotContext | undefined) ?? "grid",
+    };
   }
   return null;
 }
@@ -310,6 +321,7 @@ const MENU_LABEL: Record<MenuAction, string> = {
   right: "Menu →",
   confirm: "Menu confirm",
   back: "Menu back",
+  default: "Built-in action",
 };
 
 function scrollName(dir: ScrollDir, mods: string[]): string {
@@ -512,9 +524,40 @@ function hasVariants(a: Assignment): boolean {
   return !!((d && d.kind !== "none") || (h && h.kind !== "none"));
 }
 
+/** Compile a MODULE-SLOT assignment (issue #19). Same as compileAssignment,
+ * with one extra shape: kind "none" WITH double/hold variants — "the tap
+ * keeps the control's built-in menu action, only the extra gestures are
+ * customized" (e.g. wheel long-press = menu back). That compiles to a
+ * menu:"default" carrier file the firmware falls through on tap. */
+export function compileSlotAssignment(a: Assignment): MacroFile | null {
+  if (a.kind === "none" && hasVariants(a)) {
+    return compileAssignment({
+      kind: "menu",
+      action: "default",
+      variants: a.variants,
+      label: a.label,
+    });
+  }
+  return compileAssignment(a);
+}
+
+/** Card text for a module slot: the tap action plus any double/hold extras
+ * ("Built-in" tap is elided — the gestures are the interesting part). */
+export function describeSlotAssignment(a: Assignment): string {
+  const parts: string[] = [];
+  if (a.kind !== "none") parts.push(describeAssignment(a));
+  const d = a.variants?.double;
+  const h = a.variants?.hold;
+  if (d && d.kind !== "none") parts.push(`2×: ${describeAssignment(d)}`);
+  if (h && h.kind !== "none") parts.push(`Hold: ${describeAssignment(h)}`);
+  return parts.join(" · ");
+}
+
 /** Parse a macro file back into an editable assignment via its kind metadata. */
 export function parseAssignment(m: MacroFile): Assignment {
-  const a = parseAssignmentBase(m);
+  let a = parseAssignmentBase(m);
+  // a menu:"default" carrier (module slots) edits as "built-in tap" = none
+  if (a.kind === "menu" && a.action === "default") a = { kind: "none" };
   if (m.variants && (m.variants.double || m.variants.hold)) {
     a.variants = {
       ...(m.variants.double ? { double: parseAssignmentBase(m.variants.double) } : {}),
@@ -524,7 +567,7 @@ export function parseAssignment(m: MacroFile): Assignment {
   // A stored name that differs from what we'd auto-generate is a user
   // override — surface it as the editable label. (Recorded macros carry
   // their name in the assignment itself.)
-  if (m.name && a.kind !== "recorded" && compileAssignment(a)?.name !== m.name) {
+  if (m.name && a.kind !== "recorded" && a.kind !== "none" && compileAssignment(a)?.name !== m.name) {
     a.label = m.name;
   }
   return a;

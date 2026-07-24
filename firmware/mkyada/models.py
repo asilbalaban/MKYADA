@@ -50,8 +50,12 @@ DEFAULT_MODEL = "core6"
 # Encoder / module-button virtual slots (vision6): each may carry a macro
 # file just like a key, named macros/<slot>.json (+ "-<layer>" suffix).
 # When a layer assigns enc-cw/enc-ccw, rotating on the resting grid plays
-# them instead of moving the selection; btn-back/btn-confirm likewise.
-UI_SLOTS = ("enc-cw", "enc-ccw", "btn-back", "btn-confirm")
+# them instead of moving the selection; btn-back/btn-confirm/btn-psh
+# likewise. Each menu context can also be overridden on its own via
+# macros/<slot>@<ctx>.json ("home" = the layer picker, "menu" = settings)
+# — global files, no layer suffix (issue #19).
+UI_SLOTS = ("enc-cw", "enc-ccw", "btn-back", "btn-confirm", "btn-psh")
+UI_CONTEXTS = ("home", "menu")
 
 
 def resolve_pins(names):

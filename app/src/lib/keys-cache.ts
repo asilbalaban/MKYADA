@@ -12,9 +12,11 @@ export interface KeysSnapshot {
 }
 
 /** Slot identifier shared by the Keys page and the cache: "key:layer".
- * Keys are numbers; Vision 6 module slots use their name ("enc-cw", …). */
-export function slotKey(slot: number | string, layerIndex: number): string {
-  return `${slot}:${layerIndex}`;
+ * Keys are numbers; Vision 6 module slots use their name ("enc-cw", …).
+ * A module slot's home/menu context override is global (no layer):
+ * "enc-cw@home". */
+export function slotKey(slot: number | string, layerIndex: number, ctx = "grid"): string {
+  return ctx !== "grid" ? `${slot}@${ctx}` : `${slot}:${layerIndex}`;
 }
 
 const cache = new Map<string, KeysSnapshot>();

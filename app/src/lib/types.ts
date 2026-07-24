@@ -110,8 +110,9 @@ export function defaultPins(model: DeviceModel, keyCount: number): string[] {
   return assignablePins("core6").slice(0, keyCount); // GP0..GP15 then GP26..GP29
 }
 
-/** Vision 6 encoder/nav slots that can carry macros like keys do. */
-export const MODULE_SLOTS = ["enc-cw", "enc-ccw", "btn-back", "btn-confirm"] as const;
+/** Vision 6 encoder/nav slots that can carry macros like keys do.
+ * btn-psh (the wheel's own push switch) needs firmware 0.9.0. */
+export const MODULE_SLOTS = ["enc-cw", "enc-ccw", "btn-back", "btn-confirm", "btn-psh"] as const;
 export type ModuleSlot = (typeof MODULE_SLOTS)[number];
 
 export const MODULE_SLOT_LABELS: Record<ModuleSlot, string> = {
@@ -119,7 +120,16 @@ export const MODULE_SLOT_LABELS: Record<ModuleSlot, string> = {
   "enc-ccw": "Encoder ←",
   "btn-back": "BACK button",
   "btn-confirm": "CONFIRM button",
+  "btn-psh": "Encoder press (PSH)",
 };
+
+/** Where a Vision 6 module-control assignment applies (issue #19): the
+ * resting key grid (per-layer, the classic behavior), the layer-picker
+ * screen, or the settings menu. Grid files are macros/<slot>[-<layer>].json;
+ * the menu contexts are global: macros/<slot>@home.json / <slot>@menu.json.
+ * An absent file keeps that context's built-in navigation. Firmware 0.9.0. */
+export const SLOT_CONTEXTS = ["grid", "home", "menu"] as const;
+export type SlotContext = (typeof SLOT_CONTEXTS)[number];
 
 export type MacroEvent = (
   | { delay: number; type: "key"; action: "down" | "up"; key: string; vk?: number | null }
@@ -233,8 +243,10 @@ export type ScrollDir = "up" | "down" | "left" | "right";
 
 /** A device-menu navigation action a normal key can drive on the Vision 6:
  * the same effect as turning the encoder (left/right) or the CONFIRM / BACK
- * buttons. Handled on the device itself, so it only means anything there. */
-export type MenuAction = "left" | "right" | "confirm" | "back";
+ * buttons. Handled on the device itself, so it only means anything there.
+ * "default" (module slots only, firmware 0.9.0) keeps the control's built-in
+ * action — the carrier for "tap stays stock, hold/double do something". */
+export type MenuAction = "left" | "right" | "confirm" | "back" | "default";
 
 /** Per-key behavior options shared by every assignment kind. */
 export interface AssignmentBehavior {

@@ -236,6 +236,12 @@ class App:
             return "/macros/%s.json" % slot
         return "/macros/%s-%s.json" % (slot, LAYER_NAMES[layer_idx])
 
+    def slot_ctx_path(self, slot, ctx):
+        """Macro file overriding a nav control inside a menu context
+        ("home" = the layer picker, "menu" = settings). Global — menus are
+        not layered, so no layer suffix (issue #19)."""
+        return "/macros/%s@%s.json" % (slot, ctx)
+
     def set_layer_idx(self, i):
         """Single path for layer changes: serial set_layer, the layer key,
         and the vision6 encoder menu all land here."""
@@ -649,7 +655,8 @@ class App:
         finally:
             self.engine.key_up(events[1])
 
-    def play_file(self, path, trigger=None, speed=None, repeat=None, hold=False):
+    def play_file(self, path, trigger=None, speed=None, repeat=None,
+                  hold=False, variant=None):
         f = None
         try:
             gc.collect()
@@ -684,6 +691,38 @@ class App:
             self.proto.send({"t": "err", "re": "play", "code": "bad_format", "msg": path})
             return
 
+        # key logic: standalone presses pick tap/double/hold themselves; a
+        # Vision 6 nav slot passes the gesture it already resolved as
+        # `variant` (mkyada/ui.py). The chosen variant is announced so the
+        # app can run host-side variants (launch/command/sound compile to
+        # empty events on the device). Runs BEFORE the menu-kind check so a
+        # variant can swap in a different kind — e.g. tap drives the menu,
+        # hold plays a real macro, or the other way around.
+        # Stream files carry no variants (the app never writes that combo);
+        # a stray "variants" in a stream header is ignored and plays as tap.
+        variants = data.get("variants") if stream_pos is None else None
+        if isinstance(variants, dict) and variants and (
+                trigger is not None or variant in ("double", "hold")):
+            if trigger is not None:
+                choice = self.resolve_variant(trigger, variants,
+                                              data.get("settings") or {})
+            else:
+                choice = variant if isinstance(variants.get(variant), dict) else "tap"
+            if self.proto.connected:
+                self.proto.send({"t": "key_action", "file": path,
+                                 "key": (self.config["key_map"][trigger]
+                                         if trigger is not None else None),
+                                 "layer": LAYER_NAMES[self.layer],
+                                 "variant": choice})
+            if choice != "tap":
+                v = variants.get(choice) or {}
+                data["events"] = v.get("events") or []
+                data["kind"] = v.get("kind")
+                data["menu"] = v.get("menu")
+                s = dict(data.get("settings") or {})
+                s.update(v.get("settings") or {})
+                data["settings"] = s
+
         # A "menu" macro drives the on-screen menu instead of the HID engine:
         # a normal key acts like the encoder / CONFIRM / BACK. No-op without a
         # display (core6 has no UI to steer), but harmless.
@@ -694,27 +733,6 @@ class App:
             self.ui_call("inject", data.get("menu"))
             self.proto.send({"t": "play_done", "file": path, "stopped": False})
             return
-
-        # key logic: standalone presses pick tap/double/hold themselves; the
-        # chosen variant is announced so the app can run host-side variants
-        # (launch/command/sound compile to empty events on the device).
-        # Stream files carry no variants (the app never writes that combo);
-        # a stray "variants" in a stream header is ignored and plays as tap.
-        variants = data.get("variants") if stream_pos is None else None
-        if trigger is not None and isinstance(variants, dict) and variants:
-            choice = self.resolve_variant(trigger, variants,
-                                          data.get("settings") or {})
-            if self.proto.connected:
-                self.proto.send({"t": "key_action", "file": path,
-                                 "key": self.config["key_map"][trigger],
-                                 "layer": LAYER_NAMES[self.layer],
-                                 "variant": choice})
-            if choice != "tap":
-                v = variants.get(choice) or {}
-                data["events"] = v.get("events") or []
-                s = dict(data.get("settings") or {})
-                s.update(v.get("settings") or {})
-                data["settings"] = s
 
         settings = data.get("settings") or {}
         if speed is None:
