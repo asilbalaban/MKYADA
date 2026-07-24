@@ -11,16 +11,17 @@
 #     dedicated scroll report leaves the cursor where the user has it.
 #   HID consumer control (stock, report ID 3) — media keys
 #   CDC serial: console (debug/REPL) + data (app protocol)
-#   Mass storage: CIRCUITPY drive enabled by default; `"usb_drive": false` in
-#     config.json hides it (finished-product mode: the app manages all files
-#     over serial — see the fs_* commands in docs/serial-protocol.md).
-#     Recovery: hold key 1 while plugging in to force the drive back on —
+#   Mass storage: CIRCUITPY drive HIDDEN by default (finished-product mode:
+#     the app manages all files over serial — see the fs_* commands in
+#     docs/serial-protocol.md). Only `"usb_drive": true` in config.json shows
+#     it. Recovery: hold key 1 while plugging in to force the drive back on —
 #     GP0 on Core 6; GP29 (macro key 1) on Vision 6, whose GP0 is OLED SDA.
 #
 # Model comes from config.json "model" only — boot.py never probes hardware
-# (must stay fast and dependency-light). An unreadable config falls back to
-# core6 defaults, which are safe on both boards: GP0 idles high on Vision 6,
-# so the drive simply stays visible, the default for a config-less board.
+# (must stay fast and dependency-light). An unreadable/absent config falls
+# back to core6 defaults with the drive hidden — the same finished-product
+# default a fresh firmware install gets; hold key 1 at power-on to recover
+# the drive (GP0 idles high on Vision 6, so the pull-up read is reliable).
 
 import json
 
@@ -99,9 +100,11 @@ abs_mouse = usb_hid.Device(
 )
 
 def usb_drive_wanted():
-    """config.json `usb_drive` (default: visible). Holding key 1 (active
-    low) during power-on overrides to visible — the escape hatch if the app
-    is unavailable while the drive is hidden."""
+    """config.json `usb_drive` — the drive is shown ONLY when this is
+    explicitly true; absent/unreadable config keeps it hidden (the
+    finished-product default). Holding key 1 (active low) during power-on
+    overrides to visible — the escape hatch if the app is unavailable while
+    the drive is hidden."""
     try:
         io = digitalio.DigitalInOut(RECOVERY_PIN)
         io.direction = digitalio.Direction.INPUT
@@ -112,7 +115,7 @@ def usb_drive_wanted():
             return True
     except Exception:
         pass
-    return CFG.get("usb_drive") is not False
+    return CFG.get("usb_drive") is True
 
 
 # Auto-reload is a development convenience and a field hazard: a multi-file

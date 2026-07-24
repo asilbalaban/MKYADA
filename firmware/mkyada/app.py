@@ -128,8 +128,10 @@ DEFAULT_CONFIG = {
     "busy_other": "ignore",  # another macro key pressed while playing:
                              # "ignore" it, or "switch" (stop + play the new one)
     "screen": {"width": 1920, "height": 1080},
-    "usb_drive": True,   # false = hide the CIRCUITPY drive from the host;
-                         # the app manages files over serial instead (boot.py)
+    "usb_drive": False,  # CIRCUITPY drive hidden by default (finished-product
+                         # mode: the app manages files over serial). Only an
+                         # explicit true shows it — same rule as boot.py. Hold
+                         # key 1 at power-on to force the drive back on.
     "watchdog": True,    # hardware watchdog: a hung firmware hard-resets
                          # itself instead of bricking (false only for bench
                          # debugging — a paused debugger trips it)
@@ -290,7 +292,7 @@ class App:
         cfg["key_map"] = km
         if cfg.get("busy_other") not in ("ignore", "switch"):
             cfg["busy_other"] = "ignore"
-        cfg["usb_drive"] = cfg.get("usb_drive") is not False  # same rule as boot.py
+        cfg["usb_drive"] = cfg.get("usb_drive") is True  # same rule as boot.py
         cfg["show_layer"] = cfg.get("show_layer") is True
         cfg["show_profile"] = cfg.get("show_profile") is True
         self.config = cfg

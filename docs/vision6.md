@@ -130,7 +130,8 @@ the app.
 
 ## Recovery
 
-Finished-product devices ship with the CIRCUITPY drive hidden
-(`usb_drive: false`); the app manages all files over serial. To force the
-drive back for one session (app unavailable, broken config…): unplug, hold
-**macro key 1 (GP29)**, plug in.
+The CIRCUITPY drive is hidden by default (finished-product mode) — a fresh
+firmware install, or any config without an explicit `"usb_drive": true`,
+comes up with the drive hidden and the app managing all files over serial.
+To force the drive back for one session (app unavailable, broken config…):
+unplug, hold **macro key 1 (GP29)**, plug in.

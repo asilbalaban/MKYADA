@@ -158,12 +158,14 @@ STANDALONE ──(host_enter)──► HOST ──(host_leave | CDC disconnect |
 
 ## Hidden-drive mode (v3)
 
-`config.json` may set `"usb_drive": false`: boot.py then hides the CIRCUITPY
-drive from the host (finished-product mode) and remounts the filesystem
-writable for the firmware, which is what makes `fs_write`/`fs_delete`
-possible. The app manages every file over the `fs_*` commands and passes a
-`serial:<uid>` sentinel instead of a mount path internally. `hello` reports
-the state as `usb_drive` (absent on firmware < 0.4.0). Recovery without the
+The CIRCUITPY drive is **hidden by default** (finished-product mode) — it is
+shown to the host only when `config.json` sets `"usb_drive": true`. When
+hidden, boot.py remounts the filesystem writable for the firmware, which is
+what makes `fs_write`/`fs_delete` possible. The app manages every file over
+the `fs_*` commands and passes a `serial:<uid>` sentinel instead of a mount
+path internally. `hello` reports the state as `usb_drive` (absent on firmware
+< 0.4.0). An absent/unreadable config keeps the drive hidden — the same
+default a fresh firmware install gets. Recovery without the
 app: hold key 1 while plugging the keypad in — GP0 on Core 6, GP29 (macro
 key 1) on Vision 6, whose GP0 belongs to the OLED. The drive comes back for
 that session.
