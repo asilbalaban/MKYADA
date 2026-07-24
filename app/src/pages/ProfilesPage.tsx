@@ -207,6 +207,8 @@ export function ProfilesPage() {
                       <AssignmentEditor
                         value={draft ?? selected.keys[String(editKey)] ?? { kind: "none" }}
                         onChange={setDraft}
+                        // rotation has no press to double/hold on
+                        allowVariants={typeof editKey === "number" || editKey.startsWith("btn-")}
                       />
                       <div className="flex justify-end gap-2">
                         <Button onClick={() => setDraft(null)} disabled={!draft}>Revert</Button>
