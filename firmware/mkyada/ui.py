@@ -860,18 +860,23 @@ class Ui:
     def on_test_key(self, key_no, pin):
         if self.state != S_TEST:
             return
+        if getattr(self, "test_ui", "wiring") == "keys":
+            # Keys tab: the static "macros paused" warning is already up, so
+            # don't repaint per press. Building the label (which reads the
+            # macro file for its name and lazily loads BDF glyphs) plus the
+            # blocking OLED refresh would stall the button scan long enough
+            # that the release edge is reported late — the app's live key
+            # highlight then lingers, looking like the key "kept running its
+            # macro" even though playback is suppressed. Nothing to show here.
+            return
+        # Setup wiring test: showing the pressed key + pin IS the point.
         try:
             a, b = self.labels(self.app.layer)[key_no - 1]
             name = (a + " " + b).strip()
         except Exception:
             name = ""
-        if getattr(self, "test_ui", "wiring") == "keys":
-            # echo the pressed key but keep the "macros paused" reminder
-            self.oled.show_toast(tr("keys_test"), name or ("K%d" % key_no),
-                                 tr("keys_test_paused"))
-        else:
-            self.oled.show_toast(tr("setup_test"), name or ("K%d" % key_no),
-                                 "K%d  %s" % (key_no, pin))
+        self.oled.show_toast(tr("setup_test"), name or ("K%d" % key_no),
+                             "K%d  %s" % (key_no, pin))
 
     def on_test_leave(self):
         if self.state == S_TEST:
