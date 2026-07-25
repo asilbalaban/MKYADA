@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>MKYADA Vision 6 — OLED mockups</title>
+    <style>
+      /* 128×64 SH1106 OLED, rendered ×4 (512×256) for crisp docs images.
+         Monochrome white-on-black, condensed monospace to evoke the bitmap
+         font. Screen contents mirror the Vision 6 app fixture (layer A =
+         "Stream": Go Live / Record / Push-to-talk / Discord / Mute / Now live!). */
+      :root {
+        --scale: 4;
+        --w: calc(128px * var(--scale));
+        --h: calc(64px * var(--scale));
+        --px: var(--scale); /* one logical OLED pixel */
+        --ink: #eaf2ff; /* OLED lit pixel (faint cool white) */
+        --dim: #7f97b8; /* half-lit, for hints */
+      }
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      body {
+        background: #14161c;
+        font-family: "DejaVu Sans Mono", "Menlo", "Consolas", monospace;
+        padding: 40px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 40px;
+      }
+      .oled {
+        width: var(--w);
+        height: var(--h);
+        background: #05070c;
+        border-radius: 10px;
+        box-shadow: 0 0 0 3px #23262f, 0 0 24px rgba(120, 170, 255, 0.12);
+        color: var(--ink);
+        position: relative;
+        overflow: hidden;
+        /* nudge everything to a crisp pixel grid feel */
+        font-size: calc(9px * var(--scale) / 4);
+        line-height: 1.15;
+      }
+      .pad {
+        position: absolute;
+        inset: calc(4px * var(--scale) / 4);
+      }
+      /* top inverted band: names the active layer + app profile */
+      .band {
+        background: var(--ink);
+        color: #05070c;
+        font-weight: 700;
+        letter-spacing: 0.5px;
+        display: flex;
+        justify-content: space-between;
+        padding: calc(2px * var(--scale) / 4) calc(3px * var(--scale) / 4);
+        border-radius: 2px;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: calc(2px * var(--scale) / 4) calc(4px * var(--scale) / 4);
+        margin-top: calc(4px * var(--scale) / 4);
+      }
+      .cell {
+        display: flex;
+        align-items: center;
+        gap: calc(2px * var(--scale) / 4);
+        padding: calc(1px * var(--scale) / 4) calc(2px * var(--scale) / 4);
+        border-radius: 2px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .cell .n {
+        color: var(--dim);
+      }
+      .sel {
+        background: var(--ink);
+        color: #05070c;
+      }
+      .sel .n {
+        color: #05070c;
+      }
+      .list {
+        display: flex;
+        flex-direction: column;
+        gap: calc(1px * var(--scale) / 4);
+      }
+      .row {
+        display: flex;
+        justify-content: space-between;
+        padding: calc(1.5px * var(--scale) / 4) calc(3px * var(--scale) / 4);
+        border-radius: 2px;
+      }
+      .row .v {
+        color: var(--dim);
+      }
+      .row.sel .v {
+        color: #05070c;
+      }
+      .title {
+        letter-spacing: 1px;
+        opacity: 0.85;
+      }
+      .center {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: calc(3px * var(--scale) / 4);
+      }
+      .big {
+        font-size: calc(22px * var(--scale) / 4);
+        font-weight: 700;
+        letter-spacing: 1px;
+      }
+      .bar {
+        width: 70%;
+        height: calc(4px * var(--scale) / 4);
+        border: 1px solid var(--ink);
+        border-radius: 2px;
+        position: relative;
+      }
+      .bar > i {
+        position: absolute;
+        left: 0;
+        top: 0;
+        bottom: 0;
+        width: 46%;
+        background: var(--ink);
+      }
+      .muted {
+        color: var(--dim);
+      }
+      .cap {
+        margin-top: 10px;
+        color: #8a93a6;
+        font-family: system-ui, sans-serif;
+        font-size: 13px;
+        width: var(--w);
+        text-align: center;
+      }
+      figure {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- HOME / layer picker -->
+    <figure>
+      <div class="oled" id="oled-home">
+        <div class="pad">
+          <div class="title band" style="justify-content: center">HOME</div>
+          <div class="list" style="margin-top: calc(3px * var(--scale) / 4)">
+            <div class="row sel"><span>A · Stream</span><span class="v">›</span></div>
+            <div class="row"><span>B · Edit</span><span class="v"></span></div>
+            <div class="row"><span>C · Dev</span><span class="v"></span></div>
+            <div class="row"><span>SETTINGS</span><span class="v">⚙</span></div>
+          </div>
+        </div>
+      </div>
+      <figcaption class="cap">Home — turn the wheel to pick a layer</figcaption>
+    </figure>
+
+    <!-- GRID / resting screen with layer + profile band -->
+    <figure>
+      <div class="oled" id="oled-grid">
+        <div class="pad">
+          <div class="band"><span>(A) STREAM</span><span>OBS</span></div>
+          <div class="grid">
+            <div class="cell sel"><span class="n">1</span><span>Go Live</span></div>
+            <div class="cell"><span class="n">2</span><span>Record</span></div>
+            <div class="cell"><span class="n">3</span><span>Push-to-talk</span></div>
+            <div class="cell"><span class="n">4</span><span>Discord</span></div>
+            <div class="cell"><span class="n">5</span><span>Mute</span></div>
+            <div class="cell"><span class="n">6</span><span>Now live!</span></div>
+          </div>
+        </div>
+      </div>
+      <figcaption class="cap">Grid — the active layer's six macros</figcaption>
+    </figure>
+
+    <!-- SPEED editor -->
+    <figure>
+      <div class="oled" id="oled-speed">
+        <div class="pad">
+          <div class="title band" style="justify-content: center">SPEED · Go Live</div>
+        </div>
+        <div class="center">
+          <div class="big">1.4×</div>
+          <div class="bar"><i></i></div>
+          <div class="muted" style="font-size: calc(8px * var(--scale) / 4)">
+            CONFIRM to save · BACK to cancel
+          </div>
+        </div>
+      </div>
+      <figcaption class="cap">Speed editor — 0.1×–10.0× per macro</figcaption>
+    </figure>
+
+    <!-- SETTINGS menu -->
+    <figure>
+      <div class="oled" id="oled-settings">
+        <div class="pad">
+          <div class="title band" style="justify-content: center">SETTINGS</div>
+          <div class="list" style="margin-top: calc(3px * var(--scale) / 4)">
+            <div class="row sel"><span>Font</span><span class="v">Medium</span></div>
+            <div class="row"><span>Auto-return</span><span class="v">10 s</span></div>
+            <div class="row"><span>Language</span><span class="v">EN</span></div>
+            <div class="row"><span>Layer band</span><span class="v">On</span></div>
+            <div class="row"><span>Profile band</span><span class="v">On</span></div>
+            <div class="row"><span>About</span><span class="v">›</span></div>
+          </div>
+        </div>
+      </div>
+      <figcaption class="cap">Settings — tuned on the device or in the app</figcaption>
+    </figure>
+
+    <!-- ABOUT -->
+    <figure>
+      <div class="oled" id="oled-about">
+        <div class="pad">
+          <div class="title band" style="justify-content: center">ABOUT</div>
+        </div>
+        <div class="center">
+          <div class="big" style="font-size: calc(13px * var(--scale) / 4)">MKYADA Vision 6</div>
+          <div class="muted">Firmware 0.17.9</div>
+          <div class="muted">6 keys · 3 layers</div>
+          <div style="font-size: calc(8px * var(--scale) / 4)">macro keypad you always dream about</div>
+        </div>
+      </div>
+      <figcaption class="cap">About — firmware &amp; hardware at a glance</figcaption>
+    </figure>
+  </body>
+</html>
