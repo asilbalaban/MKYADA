@@ -4,6 +4,8 @@
 import { Fragment, useEffect, useState } from "react";
 import { Disc3, Pencil, Usb } from "lucide-react";
 import { useDevice } from "../lib/device";
+import { useTestMode } from "../lib/focus";
+import { TestModeBanner } from "../components/TestModeBanner";
 import { useNav } from "../lib/nav";
 import { ipc } from "../lib/ipc";
 import { Button, Card, EmptyState, Field, Input, Select, Spinner, Stepper } from "../components/ui";
@@ -197,6 +199,7 @@ export function SetupPage({ onDone }: { onDone: () => void }) {
 
         <Card title="Live key test — press your physical keys">
           <div className="flex flex-col gap-4">
+            <TestCardNotice send={send} />
             {pinDetecting ? (
               <p className="text-sm text-fg-muted">
                 Key test paused while pin detection is running below.
@@ -210,12 +213,7 @@ export function SetupPage({ onDone }: { onDone: () => void }) {
                 <TestPad cfg={cfg} send={send} />
               </>
             )}
-            {model === "vision6" && (
-              <>
-                <VisionControls />
-                <VisionTestBanner send={send} />
-              </>
-            )}
+            {model === "vision6" && <VisionControls />}
             <div className="flex justify-end">
               <Button variant="primary" onClick={() => nav("keys")}>
                 Assign keys
@@ -417,6 +415,7 @@ export function SetupPage({ onDone }: { onDone: () => void }) {
         <>
           <Card title="Live key test — press your physical keys">
             <div className="flex flex-col gap-4">
+              <TestCardNotice send={send} />
               {pinDetecting ? (
                 <p className="text-sm text-fg-muted">
                   Key test paused while pin detection is running below.
@@ -430,12 +429,7 @@ export function SetupPage({ onDone }: { onDone: () => void }) {
                   <TestPad cfg={cfg} send={send} />
                 </>
               )}
-              {model === "vision6" && (
-                <>
-                  <VisionControls />
-                  <VisionTestBanner send={send} />
-                </>
-              )}
+              {model === "vision6" && <VisionControls />}
               <div className="flex justify-end">
                 <Button
                   variant="primary"
@@ -988,27 +982,17 @@ function TestPad({ cfg }: { cfg: DeviceConfig; send: (m: Record<string, unknown>
 }
 
 /**
- * Vision 6 only: while the Setup tab is open, put the keypad in test mode
- * (issue #24) — its macro keys stop firing and the screen shows the pressed
- * key + its pin instead, so wiring can be checked without side effects. Core 6
- * has no screen and keeps working, so this isn't rendered for it. Leaving the
- * tab unmounts this and hands the keys back (the firmware also clears test mode
- * if the app disconnects).
+ * While a Live-key-test card is open (and the app window focused), hold the
+ * keypad in test mode on EVERY model (issue #33): macro keys stop firing so
+ * wiring can be checked without side effects. On Vision 6 the screen shows the
+ * pressed key + its pin; Core 6 has no screen, so the banner explains it in the
+ * app. Losing focus leaves test mode at once (so a backgrounded app still runs
+ * macros); unmounting the card does too. The mount lives at the TOP of the card
+ * so the banner sits above the key test.
  */
-function VisionTestBanner({ send }: { send: (m: Record<string, unknown>) => Promise<void> }) {
-  useEffect(() => {
-    void send({ t: "test_enter" });
-    return () => {
-      void send({ t: "test_leave" });
-    };
-  }, [send]);
-  return (
-    <p className="text-xs text-fg-faint border-t border-line pt-3">
-      While this tab is open the keypad is in <span className="text-fg-muted">test mode</span> —
-      pressing a key shows its name and pin on the keypad's screen instead of running the macro.
-      Leave this tab to use the keypad normally.
-    </p>
-  );
+function TestCardNotice({ send }: { send: (m: Record<string, unknown>) => Promise<void> }) {
+  useTestMode(send, "wiring");
+  return <TestModeBanner what="wiring" />;
 }
 
 // Vision 6 nav-button slot names the firmware streams over serial (t:"btn"

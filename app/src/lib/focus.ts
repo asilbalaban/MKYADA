@@ -41,3 +41,25 @@ export function useHostMode(send: (msg: Record<string, unknown>) => Promise<void
     };
   }, [focused, send]);
 }
+
+/**
+ * Hold the keypad in "test mode" (macro playback suppressed on EVERY model —
+ * issue #33) while the calling component is mounted AND the app window is
+ * focused. Losing focus leaves test mode at once so keys fire their macros
+ * again; regaining focus re-enters. `ui` picks the on-screen hint the Vision 6
+ * shows ("keys" = Keys tab, "wiring" = Setup). No-op until `connected`.
+ */
+export function useTestMode(
+  send: (msg: Record<string, unknown>) => Promise<void>,
+  ui: "keys" | "wiring",
+  connected = true,
+) {
+  const focused = useWindowFocused();
+  useEffect(() => {
+    if (!connected || !focused) return;
+    void send({ t: "test_enter", ui });
+    return () => {
+      void send({ t: "test_leave" });
+    };
+  }, [connected, focused, ui, send]);
+}

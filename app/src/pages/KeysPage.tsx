@@ -4,7 +4,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Play, RefreshCw, SquarePen, Usb } from "lucide-react";
 import { useDevice } from "../lib/device";
-import { useWindowFocused } from "../lib/focus";
+import { useTestMode } from "../lib/focus";
+import { TestModeBanner } from "../components/TestModeBanner";
 import { useNav } from "../lib/nav";
 import { ipc } from "../lib/ipc";
 import type { Assignment, DeviceConfig, ModuleSlot, SlotContext } from "../lib/types";
@@ -30,7 +31,7 @@ import { serializeForDevice } from "../lib/recorder-model";
 import { keysCache, slotKey } from "../lib/keys-cache";
 import { stashRecorderEdit } from "../lib/recorder-handoff";
 import { undoRedoFromEvent, useHistory } from "../lib/history";
-import { Button, Card, EmptyState, Spinner } from "../components/ui";
+import { Button, Card, EmptyState, Input, Spinner } from "../components/ui";
 import { isWriteCancelled, useWriteGate, writeCancelledError } from "../components/WriteProgress";
 import { useToast } from "../components/toast";
 import { Keypad } from "../components/Keypad";
@@ -87,7 +88,7 @@ const SLOT_BUILTINS: Record<SlotContext, Record<ModuleSlot, string>> = {
 };
 
 export function KeysPage() {
-  const { hello, drive, send, onMsg } = useDevice();
+  const { hello, drive, send, onMsg, writeAndReload } = useDevice();
   const nav = useNav();
   const toast = useToast();
   const { writeToKeypad } = useWriteGate();
@@ -114,6 +115,9 @@ export function KeysPage() {
   // their keys show a spinner and unlock one by one as reads complete.
   const [pending, setPending] = useState<Set<string>>(new Set());
   const [loadTotal, setLoadTotal] = useState(0);
+  // Draft of the currently-edited layer's on-screen nickname (Vision 6). Kept
+  // in sync with the active layer; committed on blur.
+  const [layerNameDraft, setLayerNameDraft] = useState("");
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -283,25 +287,19 @@ export function KeysPage() {
     [onMsg, refreshSlot],
   );
 
-  // The Keys tab is a key TEST screen: while it's the frontmost view, a
-  // physical key press must NOT fire its macro on any model (issue #33) —
-  // otherwise trying keys here would trigger real macros. We put the device
-  // in test mode, which suppresses playback and (Vision 6) shows a "macros
-  // paused" warning; core6 has no screen so it just goes quiet. The live-
-  // press highlight still rides the standalone btn stream, so keys keep
-  // lighting up. Crucially this is gated on window focus: if the app is
-  // backgrounded (e.g. Chrome in front), we drop test mode so the keypad
-  // keeps working even with this tab open — no "why aren't my keys firing"
-  // surprise when the app is only in the tray.
-  const focused = useWindowFocused();
+  // The Keys tab is a key TEST screen (issue #33): while it's open and the
+  // window is focused, a physical press must NOT fire its macro on any model —
+  // otherwise trying keys here would trigger real macros. The device goes into
+  // test mode (playback suppressed; Vision 6 shows a warning, core6 goes quiet
+  // and TestModeBanner explains it on screen). Gated on focus: a backgrounded
+  // app (e.g. Chrome in front) drops test mode so the keypad keeps working.
   const connected = hello != null;
+  useTestMode(send, "keys", connected);
+
+  // Keep the layer-name field showing the active layer's saved nickname.
   useEffect(() => {
-    if (!connected || !focused) return;
-    void send({ t: "test_enter", ui: "keys" });
-    return () => {
-      void send({ t: "test_leave" });
-    };
-  }, [connected, focused, send]);
+    setLayerNameDraft(cfg?.layer_names?.[layer] ?? "");
+  }, [cfg, layer]);
 
   // Surface playback / error feedback from the device.
   useEffect(
@@ -358,6 +356,37 @@ export function KeysPage() {
     const [maj = 0, min = 0] = (hello?.fw ?? "0.0").split(".").map((n) => parseInt(n) || 0);
     return maj > 0 || min >= 9; // slot contexts / variants / PSH: firmware 0.9.0
   })();
+  // firmware < 0.17.6 has no per-layer nicknames (layer_names)
+  const namesSupported = hello?.layer_names !== undefined;
+
+  // Persist the active layer's on-screen nickname. Device-display only — the
+  // app keeps labelling layers A/B/C/D; only the Vision 6 band shows the name
+  // as "(A) NAME". Blank on every layer stores null. Writes config.json and
+  // reloads the firmware so the band updates.
+  async function saveLayerName(next: string) {
+    if (!cfg || !drive) return;
+    const trimmed = next.trim();
+    if (trimmed === (cfg.layer_names?.[layer] ?? "")) return; // unchanged
+    const names = Array.from(
+      { length: cfg.layer_count },
+      (_, i) => ((i === layer ? trimmed : cfg.layer_names?.[i]?.trim()) || null),
+    );
+    const value = names.some(Boolean) ? names : null;
+    try {
+      let raw: Record<string, unknown> = {};
+      try {
+        raw = JSON.parse(await ipc.driveRead(drive.path, "config.json"));
+      } catch {
+        // no config yet — the firmware defaults the rest
+      }
+      await writeAndReload([
+        { path: "config.json", content: JSON.stringify({ ...raw, layer_names: value }, null, 2) },
+      ]);
+      setCfg({ ...cfg, layer_names: value });
+    } catch (e) {
+      toast.error("Could not save the layer name", String(e));
+    }
+  }
 
   async function saveDraft() {
     if (selected === null || !draft || !cfg || !drive) return;
@@ -456,7 +485,9 @@ export function KeysPage() {
   }
 
   return (
-    <div className="grid grid-cols-[1fr_1fr] gap-4 items-start">
+    <div className="flex flex-col gap-4">
+      <TestModeBanner what="key" />
+      <div className="grid grid-cols-[1fr_1fr] gap-4 items-start">
       <Card
         title="Keypad"
         actions={
@@ -487,6 +518,23 @@ export function KeysPage() {
           </div>
         }
       >
+        {isVision && namesSupported && layers > 1 && (
+          <div className="mb-3 flex items-center gap-2">
+            <label htmlFor="layer-name" className="text-xs font-medium text-fg-muted shrink-0">
+              Layer {layerLabel(layer)} name
+            </label>
+            <Input
+              id="layer-name"
+              value={layerNameDraft}
+              maxLength={20}
+              placeholder={`Layer ${layerLabel(layer)}`}
+              className="flex-1"
+              aria-label={`On-screen name for layer ${layerLabel(layer)}`}
+              onChange={(e) => setLayerNameDraft(e.target.value)}
+              onBlur={() => void saveLayerName(layerNameDraft)}
+            />
+          </div>
+        )}
         <Keypad
           config={cfg}
           selected={typeof selected === "number" ? selected : null}
@@ -694,6 +742,7 @@ export function KeysPage() {
         )}
         {status && <p className="text-xs text-fg-faint mt-3">{status}</p>}
       </Card>
+      </div>
     </div>
   );
 }
