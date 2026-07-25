@@ -767,6 +767,24 @@ fn firmware_write_verified(
     rel: &str,
     content: &[u8],
 ) -> Result<(), String> {
+    // Don't rewrite a font the device already has byte-for-byte. The running
+    // firmware keeps /fonts/*.bdf OPEN the whole time (adafruit_bitmap_font
+    // rasterizes glyphs lazily off disk), and FAT can't os.remove/rename a
+    // file that's open — so overwriting the in-use font (spleen, the UI font)
+    // failed the transfer at that stage. Fonts don't change between versions,
+    // so skipping the identical write sidesteps the collision even on firmware
+    // that doesn't release its fonts on update_begin. A read failure (missing
+    // file / transient) just falls through to a normal write.
+    if rel.starts_with("fonts/") {
+        let existing = if serialfs::is_serial(drive) {
+            serialfs::read_file(&app.state::<DeviceManager>(), rel).ok()
+        } else {
+            drive::read_file_bytes(drive, rel).ok()
+        };
+        if existing.as_deref() == Some(content) {
+            return Ok(());
+        }
+    }
     write_to_device_bytes(app, drive, rel, content)?;
     if !serialfs::is_serial(drive) {
         let back = drive::read_file_bytes(drive, rel)?;

@@ -157,6 +157,25 @@ class Oled:
         except Exception as e:
             print("ui font missing:", e)
 
+    def release_fonts(self):
+        """Close every loaded BDF font's file handle and fall back to the
+        built-in font. adafruit_bitmap_font keeps a BDF's file OPEN for the
+        whole runtime (glyphs rasterize lazily from disk), so /fonts/*.bdf are
+        live handles. A firmware update overwrites those exact files, and FAT
+        can't os.remove/rename a file that's still open — the transfer died at
+        the open font (spleen, the ui font). Dropping the handles here lets the
+        fonts be replaced; the update screen just renders in terminalio, and
+        the board reboots into the new fonts when the update ends."""
+        for f in self._font_cache.values():
+            try:
+                f.file.close()
+            except Exception:
+                pass
+        self._font_cache = {}
+        self.grid_font, self.grid_cpx, self.grid_tr_ok = terminalio.FONT, 6, False
+        self.hero_font, self.hero_scale = terminalio.FONT, 3
+        self.ui_font = terminalio.FONT
+
     def load_grid_font(self, idx, glyphs=""):
         """Apply grid font #idx; glyphs = every character the labels use
         (BDF fonts rasterize lazily, so preload exactly what's needed)."""
