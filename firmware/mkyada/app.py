@@ -421,6 +421,23 @@ class App:
         self.announce_layer()
         self.ui_call("on_layer")
 
+    def menu_layer_jump(self, menu):
+        """Resolve a layer-jump device-menu action (layer_next / layer_prev /
+        layer_a..layer_h) to an absolute layer and switch to it. Used on core6,
+        which has no menu UI but must still honor a "go to layer X" key
+        (issue #30); vision6 routes these through the menu instead."""
+        if not menu:
+            return
+        n = self.config["layer_count"]
+        if menu == "layer_next":
+            self.set_layer_idx((self.layer + 1) % n)
+        elif menu == "layer_prev":
+            self.set_layer_idx((self.layer - 1) % n)
+        elif menu[:6] == "layer_" and len(menu) == 7:
+            i = LAYER_NAMES.find(menu[6])
+            if 0 <= i < n:
+                self.set_layer_idx(i)
+
     def set_profile(self, pid):
         """Switch the active per-app profile (or None). The set of macro
         files behind the grid changes, so the UI must drop its cached
@@ -1062,8 +1079,14 @@ class App:
         if data.get("kind") == "menu":
             if f:
                 f.close()
+            menu = data.get("menu")
             self.proto.send({"t": "play_start", "file": path})
-            self.ui_call("inject", data.get("menu"))
+            if self.ui:
+                self.ui_call("inject", menu)
+            else:
+                # core6 has no menu UI, but a "go to layer X" key must still
+                # switch layers (issue #30). Other menu actions stay no-ops.
+                self.menu_layer_jump(menu)
             self.proto.send({"t": "play_done", "file": path, "stopped": False})
             return
 

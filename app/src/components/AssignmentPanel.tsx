@@ -23,6 +23,7 @@ export function AssignmentPanel({
   builtinDesc,
   allowVariants = true,
   fwVersion,
+  layerCount = 0,
 }: {
   /** Effective assignment being edited (draft ?? current ?? { kind:"none" }). */
   value: Assignment;
@@ -42,6 +43,7 @@ export function AssignmentPanel({
   builtinDesc?: string;
   allowVariants?: boolean;
   fwVersion?: string;
+  layerCount?: number;
 }) {
   const showLabel = !["none", "nothing"].includes(value.kind);
   return (
@@ -54,6 +56,7 @@ export function AssignmentPanel({
         builtinDesc={builtinDesc}
         allowVariants={allowVariants}
         fwVersion={fwVersion}
+        layerCount={layerCount}
       />
       {showLabel && (
         <label className="flex flex-col gap-1 text-sm">

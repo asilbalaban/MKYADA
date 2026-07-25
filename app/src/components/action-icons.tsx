@@ -87,6 +87,15 @@ export const MENU_ICON: Partial<Record<MenuAction, string>> = {
   grid: "menu-grid",
   layer_next: "menu-layer-next",
   layer_prev: "menu-layer-prev",
+  // absolute "go to layer X" jumps reuse the layer-screen glyph
+  layer_a: "menu-layer-screen",
+  layer_b: "menu-layer-screen",
+  layer_c: "menu-layer-screen",
+  layer_d: "menu-layer-screen",
+  layer_e: "menu-layer-screen",
+  layer_f: "menu-layer-screen",
+  layer_g: "menu-layer-screen",
+  layer_h: "menu-layer-screen",
   // "default" / "none" render without an icon
 };
 

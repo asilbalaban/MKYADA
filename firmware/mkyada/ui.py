@@ -604,6 +604,8 @@ class Ui:
                 self._jump_layer(1)
             elif act == "layer_prev":
                 self._jump_layer(-1)
+            elif act[:6] == "layer_" and len(act) == 7:
+                self._goto_layer(LAYER_NAMES.find(act[6]))
             elif act == "select":
                 self._toggle_sel_mode()  # built-in PSH-hold escape, now assignable (issue #26)
             elif act == "none":
@@ -770,6 +772,8 @@ class Ui:
                 self._jump_layer(1)
             elif action == "layer_prev":
                 self._jump_layer(-1)
+            elif action[:6] == "layer_" and len(action) == 7:
+                self._goto_layer(LAYER_NAMES.find(action[6]))
         finally:
             self._injecting -= 1
 
@@ -914,12 +918,19 @@ class Ui:
         self.oled.show_menu(tr("settings"), self._set_items(), 0)
 
     def _jump_layer(self, step):
-        """Switch the active layer directly (menu action "layer_next" /
-        "layer_prev") — same flow as confirming a layer on the home screen."""
+        """Switch the active layer by a relative step (menu action "layer_next"
+        / "layer_prev")."""
         c = self.app.config["layer_count"]
-        self.app.set_layer_idx((self.app.layer + step) % c)
-        self._nvm_save()
-        self._enter_grid()
+        self._goto_layer((self.app.layer + step) % c)
+
+    def _goto_layer(self, idx):
+        """Jump straight to an absolute layer index (menu action "layer_a"..)
+        — same flow as confirming a layer on the home screen. Ignores an index
+        past this device's layer_count."""
+        if 0 <= idx < self.app.config["layer_count"]:
+            self.app.set_layer_idx(idx)
+            self._nvm_save()
+            self._enter_grid()
 
     def _st_select(self, now, d, press):
         self._custom_input(now, d, press, self.slots(self.app.layer),

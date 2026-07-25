@@ -151,6 +151,7 @@ export function AssignmentEditor({
   builtinDesc,
   allowVariants = true,
   fwVersion,
+  layerCount = 0,
 }: {
   value: Assignment;
   onChange: (a: Assignment) => void;
@@ -176,6 +177,9 @@ export function AssignmentEditor({
   /** Connected keypad's firmware version — used to warn when key logic
    * needs a firmware update (variants shipped with 0.3.0). */
   fwVersion?: string;
+  /** How many layers this device has — offers "Go to layer A..X" device-menu
+   * actions for exactly the layers that exist (0 = don't offer them). */
+  layerCount?: number;
 }) {
   const [importError, setImportError] = useState("");
   // On a module slot, "Not assigned" reads as "keep the control's built-in
@@ -418,6 +422,11 @@ export function AssignmentEditor({
               { value: "grid", label: "Open the key grid", icon: MENU_ICON.grid },
               { value: "layer_next", label: "Switch to the next layer", icon: MENU_ICON.layer_next },
               { value: "layer_prev", label: "Switch to the previous layer", icon: MENU_ICON.layer_prev },
+              // absolute "go to layer X" — one row per layer that exists
+              ...Array.from({ length: Math.min(Math.max(layerCount, 0), 8) }, (_, i) => {
+                const a = `layer_${"abcdefgh"[i]}` as typeof value.action;
+                return { value: a, label: `Go to layer ${"ABCDEFGH"[i]}`, icon: MENU_ICON[a] };
+              }),
               { value: "select", label: "Toggle select mode", icon: MENU_ICON.select },
               // legacy configs only: new slots carry the concrete built-in
               // action directly, so the abstract "default" row is gone (issue #26)
@@ -631,6 +640,7 @@ export function AssignmentEditor({
             hint="A quick tap then waits a moment before firing — only when this is set."
             value={value.variants?.double}
             allowMenu={allowMenu}
+            layerCount={layerCount}
             onChange={(v) => onChange({ ...value, variants: setVariant(value.variants, "double", v) })}
           />
           <VariantSlot
@@ -638,6 +648,7 @@ export function AssignmentEditor({
             hint="Fires after holding the key ~0.4 s. Replaces the hold-to-repeat option."
             value={value.variants?.hold}
             allowMenu={allowMenu}
+            layerCount={layerCount}
             onChange={(v) => onChange({ ...value, variants: setVariant(value.variants, "hold", v) })}
           />
         </div>
@@ -938,6 +949,7 @@ function VariantSlot({
   hint,
   value,
   allowMenu = false,
+  layerCount = 0,
   onChange,
 }: {
   label: string;
@@ -945,6 +957,8 @@ function VariantSlot({
   value?: Assignment;
   /** Offer device-menu actions inside this variant (Vision 6). */
   allowMenu?: boolean;
+  /** Layer count for the "Go to layer X" device-menu actions. */
+  layerCount?: number;
   onChange: (a: Assignment | undefined) => void;
 }) {
   if (!value) {
@@ -964,7 +978,7 @@ function VariantSlot({
           <Trash2 size={13} aria-hidden />
         </Button>
       </div>
-      <AssignmentEditor nested allowMenu={allowMenu} value={value} onChange={onChange} />
+      <AssignmentEditor nested allowMenu={allowMenu} layerCount={layerCount} value={value} onChange={onChange} />
       <p className="text-xs text-fg-faint">{hint}</p>
     </div>
   );

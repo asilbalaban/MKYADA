@@ -685,6 +685,10 @@ export function KeysPage() {
               // rotation has no press to double/hold on
               allowVariants={!isSlot || (selected as string).startsWith("btn-")}
               fwVersion={hello?.fw}
+              // offer "Go to layer X" for every configured layer — raw
+              // layer_count, not effectiveLayers: a "go to layer B" key is
+              // itself a way to reach layers without a dedicated layer key
+              layerCount={cfg.layer_count}
             />
           </div>
         )}

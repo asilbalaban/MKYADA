@@ -335,10 +335,15 @@ export type ScrollDir = "up" | "down" | "left" | "right";
  * "layer_next" / "layer_prev" switch the active layer immediately —
  * all assignable to any key or control.
  * "select" (firmware 0.17.0) toggles select mode — the built-in behavior that
- * was previously only reachable via the PSH long-press escape (issue #26). */
+ * was previously only reachable via the PSH long-press escape (issue #26).
+ * "layer_a".."layer_h" (firmware 0.17.7) jump straight to that layer — an
+ * absolute counterpart to layer_next/prev, assignable to any key incl. core6
+ * (issue #30). The app only offers the layers that actually exist. */
 export type MenuAction =
   | "left" | "right" | "confirm" | "back"
   | "home" | "settings" | "grid" | "layer_next" | "layer_prev" | "select"
+  | "layer_a" | "layer_b" | "layer_c" | "layer_d"
+  | "layer_e" | "layer_f" | "layer_g" | "layer_h"
   | "default" | "none";
 
 /** Per-key behavior options shared by every assignment kind. */

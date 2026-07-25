@@ -300,6 +300,8 @@ export function ProfilesPage() {
                         // rotation has no press to double/hold on
                         allowVariants={typeof editKey === "number" || editKey.startsWith("btn-")}
                         fwVersion={hello?.fw}
+                        // offer "Go to layer X" only for the layers this device has
+                        layerCount={hello?.layer_count ?? 0}
                       />
                     </div>
                   )}
