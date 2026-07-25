@@ -1,25 +1,30 @@
 import { useEffect, useState } from "react";
 import { getVersion } from "@tauri-apps/api/app";
+import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { AppWindow, Gauge, HardDrive, Layers, Monitor, Moon, Pin, Power, Rocket, Sun, Type } from "lucide-react";
+import { AppWindow, Gauge, HardDrive, Layers, Monitor, Moon, Pin, Power, Rocket, Sun, Type, Video } from "lucide-react";
 import { ipc } from "../lib/ipc";
 import { keysCache } from "../lib/keys-cache";
 import { useDevice } from "../lib/device";
-import { deviceModel, type UpdateInfo } from "../lib/types";
+import { deviceModel, type ObsSnapshot, type UpdateInfo } from "../lib/types";
 import {
+  type ObsConfig,
   setAlwaysOnTop,
   setAutostart,
+  setObsConfig,
   setRunInBackground,
   setThemePref,
   setWheelAccel,
   ThemePref,
   useAlwaysOnTop,
   useAutostart,
+  useObsConfig,
   useRunInBackground,
   useThemePref,
   useWheelAccel,
 } from "../lib/settings";
-import { Badge, Button, Card, Select, Spinner } from "../components/ui";
+import { Badge, Button, Card, Field, Input, Select, Spinner } from "../components/ui";
 import { PermissionsCard } from "../components/Permissions";
 import { useToast } from "../components/toast";
 import { useConfirm } from "../components/dialog";
@@ -118,6 +123,102 @@ function WindowCard() {
             {autostart ? "On" : "Off"}
           </Button>
         </div>
+      </div>
+    </Card>
+  );
+}
+
+/** OBS Studio connection (obs-websocket). Keys with an "OBS" action drive
+ * scenes / recording / streaming; when connected the keypad OLED band shows
+ * the live scene + REC/LIVE status. */
+function ObsCard() {
+  const cfg = useObsConfig();
+  const [form, setForm] = useState<ObsConfig>(cfg);
+  const [status, setStatus] = useState<ObsSnapshot | null>(null);
+
+  // reflect stored config into the form when it loads / changes elsewhere
+  useEffect(() => setForm(cfg), [cfg]);
+
+  // live connection status from the Rust client
+  useEffect(() => {
+    void invoke<ObsSnapshot>("obs_state").then(setStatus).catch(() => {});
+    const un = listen("obs:changed", (e) => setStatus(e.payload as ObsSnapshot));
+    return () => {
+      un.then((f) => f());
+    };
+  }, []);
+
+  const set = (patch: Partial<ObsConfig>) => setForm((f) => ({ ...f, ...patch }));
+  const save = (enabled: boolean) => setObsConfig({ ...form, enabled });
+
+  const statusBadge = !cfg.enabled ? (
+    <Badge>Off</Badge>
+  ) : status?.connected ? (
+    <Badge tone="green">Connected{status.currentScene ? ` · ${status.currentScene}` : ""}</Badge>
+  ) : status?.error ? (
+    <Badge tone="red">{status.error}</Badge>
+  ) : (
+    <Badge tone="amber">Connecting…</Badge>
+  );
+
+  return (
+    <Card title="OBS Studio">
+      <div className="flex flex-col gap-4">
+        <div className="flex items-center justify-between gap-4">
+          <div className="flex flex-col gap-0.5 text-sm">
+            <span className="text-fg font-medium flex items-center gap-2">
+              <Video size={15} aria-hidden /> obs-websocket
+            </span>
+            <span className="text-xs text-fg-faint">
+              Control OBS from the keypad — scene switch, record/stream, mic mute — and
+              show the live scene on the Vision 6 screen. Enable it in OBS under
+              Tools → WebSocket Server Settings.
+            </span>
+          </div>
+          {statusBadge}
+        </div>
+
+        <div className="grid grid-cols-[1fr_auto] gap-3">
+          <Field label="Host">
+            <Input
+              value={form.host}
+              placeholder="localhost"
+              onChange={(e) => set({ host: e.target.value })}
+            />
+          </Field>
+          <Field label="Port">
+            <Input
+              type="number"
+              className="w-24"
+              value={form.port}
+              onChange={(e) => set({ port: Number(e.target.value) || 4455 })}
+            />
+          </Field>
+        </div>
+        <Field label="Password">
+          <Input
+            type="password"
+            value={form.password}
+            placeholder="from OBS WebSocket settings"
+            onChange={(e) => set({ password: e.target.value })}
+          />
+        </Field>
+
+        <div className="flex items-center gap-2">
+          <Button variant="primary" onClick={() => save(true)}>
+            {cfg.enabled ? "Reconnect" : "Connect"}
+          </Button>
+          {cfg.enabled && (
+            <Button variant="default" onClick={() => save(false)}>
+              Disconnect
+            </Button>
+          )}
+        </div>
+
+        <p className="text-xs text-fg-faint">
+          The live scene / REC / LIVE status shows on the keypad band — turn on
+          "Show profile band" (Keypad settings) for it to appear.
+        </p>
       </div>
     </Card>
   );
@@ -450,6 +551,7 @@ export function SettingsPage() {
     <div className="flex flex-col gap-4 max-w-3xl mx-auto w-full">
       <AppearanceCard />
       <WindowCard />
+      <ObsCard />
       <KeypadCard />
       <PermissionsCard />
       <Card title="About">

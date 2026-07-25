@@ -7,13 +7,14 @@ import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, FolderOpen, Keyboard, Mic, P
 import { open } from "@tauri-apps/plugin-dialog";
 import { SOUND_EXTENSIONS, playSound } from "../lib/sound";
 import { readTextFile } from "../lib/fs";
-import type { Assignment, AssignmentVariants, MacroFile, MicMode, SequenceStep, SoundHoldAction } from "../lib/types";
+import type { Assignment, AssignmentVariants, MacroFile, MicMode, ObsAction, SequenceStep, SoundHoldAction } from "../lib/types";
 import {
   IS_MAC,
   MEDIA_USAGES,
   MIC_MODE_LABELS,
   MODIFIERS,
   MODIFIER_CODE_TO_KEY,
+  OBS_ACTION_LABELS,
   SCROLL_DEFAULT_AMOUNT,
   compileAssignment,
   describeAssignment,
@@ -23,6 +24,7 @@ import {
   migrateMacro,
   modifierDisplay,
   modsFromEvent,
+  obsActionToRequest,
   sequenceIsPureHid,
   stepIsHid,
 } from "../lib/macro-model";
@@ -61,6 +63,7 @@ const KINDS: { value: Assignment["kind"]; label: string }[] = [
   { value: "command", label: "Run terminal command" },
   { value: "sound", label: "Play a sound" },
   { value: "webhook", label: "Call a webhook (HTTP request)" },
+  { value: "obs", label: "Control OBS Studio" },
   { value: "nothing", label: "Do nothing (turn this control off)" },
 ];
 
@@ -233,6 +236,7 @@ export function AssignmentEditor({
               else if (kind === "sound") onChange({ kind: "sound", file: "" });
               else if (kind === "mic") onChange({ kind: "mic", mode: "toggle" });
               else if (kind === "webhook") onChange({ kind: "webhook", url: "" });
+              else if (kind === "obs") onChange({ kind: "obs", action: "setScene", sceneName: "" });
               else if (kind === "sequence")
                 onChange({ kind: "sequence", steps: [{ a: { kind: "keystroke", key: "" }, delayMs: 0 }] });
               else importMacro();
@@ -553,6 +557,8 @@ export function AssignmentEditor({
 
       {value.kind === "webhook" && <WebhookFields value={value} onChange={onChange} />}
 
+      {value.kind === "obs" && <ObsFields value={value} onChange={onChange} />}
+
       {value.kind === "recorded" && (
         <div className="flex items-center gap-2 text-sm">
           <span className="text-fg inline-flex items-center gap-1"><Play size={13} aria-hidden /> {value.name}</span>
@@ -762,6 +768,144 @@ function WebhookFields({
       <div className="flex items-center gap-2">
         <Button disabled={!value.url} onClick={() => void sendTest()}>
           <Send size={14} aria-hidden /> Send test request
+        </Button>
+        {test && (
+          <span className={`text-xs ${test.ok ? "text-success" : "text-danger"}`}>{test.text}</span>
+        )}
+      </div>
+    </>
+  );
+}
+
+function ObsFields({
+  value,
+  onChange,
+}: {
+  value: Extract<Assignment, { kind: "obs" }>;
+  onChange: (a: Assignment) => void;
+}) {
+  const [scenes, setScenes] = useState<string[]>([]);
+  const [inputs, setInputs] = useState<string[]>([]);
+  const [test, setTest] = useState<{ ok: boolean; text: string } | null>(null);
+
+  // Best-effort: if OBS is connected, offer live scene / input names as
+  // suggestions. When it isn't, the fields stay free-text so keys can still be
+  // configured offline.
+  useEffect(() => {
+    void invoke<{ scenes?: { sceneName: string }[] }>("obs_request", {
+      requestType: "GetSceneList",
+      requestData: {},
+    })
+      .then((r) => setScenes((r.scenes ?? []).map((s) => s.sceneName)))
+      .catch(() => {});
+    void invoke<{ inputs?: { inputName: string }[] }>("obs_request", {
+      requestType: "GetInputList",
+      requestData: {},
+    })
+      .then((r) => setInputs((r.inputs ?? []).map((i) => i.inputName)))
+      .catch(() => {});
+  }, []);
+
+  async function sendTest() {
+    setTest(null);
+    try {
+      const { requestType, requestData } = obsActionToRequest(value);
+      await invoke("obs_action", { requestType, requestData });
+      setTest({ ok: true, text: "Sent to OBS." });
+    } catch (e) {
+      setTest({ ok: false, text: String(e) });
+    }
+  }
+
+  return (
+    <>
+      <ControlField label="OBS action">
+        <Select
+          className="w-full"
+          aria-label="OBS action"
+          value={value.action}
+          onChange={(e) => onChange({ ...value, action: e.target.value as ObsAction })}
+        >
+          {(Object.keys(OBS_ACTION_LABELS) as ObsAction[]).map((a) => (
+            <option key={a} value={a}>
+              {OBS_ACTION_LABELS[a]}
+            </option>
+          ))}
+        </Select>
+      </ControlField>
+
+      {value.action === "setScene" && (
+        <Field label="Scene">
+          <Input
+            list="obs-scene-list"
+            value={value.sceneName ?? ""}
+            placeholder="Scene name"
+            onChange={(e) => onChange({ ...value, sceneName: e.target.value })}
+          />
+        </Field>
+      )}
+
+      {value.action === "micToggle" && (
+        <Field label="Audio input (mic)">
+          <Input
+            list="obs-input-list"
+            value={value.inputName ?? ""}
+            placeholder="e.g. Mic/Aux"
+            onChange={(e) => onChange({ ...value, inputName: e.target.value })}
+          />
+        </Field>
+      )}
+
+      {value.action === "sourceToggle" && (
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Scene">
+            <Input
+              list="obs-scene-list"
+              value={value.sourceScene ?? ""}
+              placeholder="Scene holding the source"
+              onChange={(e) => onChange({ ...value, sourceScene: e.target.value })}
+            />
+          </Field>
+          <Field label="Source">
+            <Input
+              value={value.sourceName ?? ""}
+              placeholder="Source name"
+              onChange={(e) => onChange({ ...value, sourceName: e.target.value })}
+            />
+          </Field>
+        </div>
+      )}
+
+      {value.action === "hotkey" && (
+        <Field label="OBS hotkey name">
+          <Input
+            value={value.hotkeyName ?? ""}
+            placeholder="e.g. OBSBasic.StartRecording"
+            onChange={(e) => onChange({ ...value, hotkeyName: e.target.value })}
+          />
+        </Field>
+      )}
+
+      {/* suggestion sources, populated when OBS is connected */}
+      <datalist id="obs-scene-list">
+        {scenes.map((s) => (
+          <option key={s} value={s} />
+        ))}
+      </datalist>
+      <datalist id="obs-input-list">
+        {inputs.map((i) => (
+          <option key={i} value={i} />
+        ))}
+      </datalist>
+
+      <p className="text-fg-faint text-xs">
+        Runs while the MKYADA app is connected to OBS (Settings → OBS Studio). The
+        keypad screen can show the live scene / REC / LIVE status.
+      </p>
+
+      <div className="flex items-center gap-2">
+        <Button onClick={() => void sendTest()}>
+          <Send size={14} aria-hidden /> Test in OBS
         </Button>
         {test && (
           <span className={`text-xs ${test.ok ? "text-success" : "text-danger"}`}>{test.text}</span>

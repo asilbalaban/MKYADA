@@ -10,6 +10,8 @@ import type {
   MenuAction,
   MicMode,
   ModuleSlot,
+  ObsAction,
+  ObsRequest,
   ScrollDir,
   SequenceStep,
   SlotContext,
@@ -177,7 +179,8 @@ export function kindRequiresHost(kind: Assignment["kind"]): boolean {
     kind === "command" ||
     kind === "sound" ||
     kind === "mic" ||
-    kind === "webhook"
+    kind === "webhook" ||
+    kind === "obs"
   );
 }
 
@@ -358,6 +361,8 @@ export function assignmentComplete(a: Assignment): boolean {
       return true;
     case "webhook":
       return a.url.length > 0;
+    case "obs":
+      return obsActionComplete(a);
     case "sequence":
       return (
         a.steps.length > 0 &&
@@ -458,6 +463,23 @@ export function compileAssignment(a: Assignment, name?: string): MacroFile | nul
           name: name ?? `Webhook ${a.url.slice(0, 40)}`,
           kind: "webhook",
           webhook: req,
+          events: [],
+        };
+      }
+      case "obs": {
+        const req: ObsRequest = {
+          action: a.action,
+          ...(a.sceneName ? { sceneName: a.sceneName } : {}),
+          ...(a.inputName ? { inputName: a.inputName } : {}),
+          ...(a.sourceScene ? { sourceScene: a.sourceScene } : {}),
+          ...(a.sourceName ? { sourceName: a.sourceName } : {}),
+          ...(a.hotkeyName ? { hotkeyName: a.hotkeyName } : {}),
+        };
+        return {
+          ...base,
+          name: name ?? obsActionName(a),
+          kind: "obs",
+          obs: req,
           events: [],
         };
       }
@@ -674,6 +696,17 @@ function parseAssignmentBase(m: MacroFile): Assignment {
         ...(m.webhook?.body ? { body: m.webhook.body } : {}),
         ...behavior,
       };
+    case "obs":
+      return {
+        kind: "obs",
+        action: m.obs?.action ?? "setScene",
+        ...(m.obs?.sceneName ? { sceneName: m.obs.sceneName } : {}),
+        ...(m.obs?.inputName ? { inputName: m.obs.inputName } : {}),
+        ...(m.obs?.sourceScene ? { sourceScene: m.obs.sourceScene } : {}),
+        ...(m.obs?.sourceName ? { sourceName: m.obs.sourceName } : {}),
+        ...(m.obs?.hotkeyName ? { hotkeyName: m.obs.hotkeyName } : {}),
+        ...behavior,
+      };
     case "sequence":
       return { kind: "sequence", steps: m.seq ?? [], ...behavior };
     default:
@@ -752,6 +785,8 @@ export function describeAssignment(a: Assignment): string {
       const host = a.url.replace(/^[a-z]+:\/\//i, "").split(/[/?#]/)[0];
       return `⇄ ${a.method ?? "GET"} ${host.length > 18 ? host.slice(0, 18) + "…" : host}`;
     }
+    case "obs":
+      return `◉ ${obsActionName(a)}`;
     case "sequence":
       return `⧉ ${a.steps.length} step${a.steps.length === 1 ? "" : "s"}`;
   }
@@ -766,6 +801,99 @@ export const MIC_MODE_LABELS: Record<MicMode, string> = {
 
 function micActionName(mode?: MicMode): string {
   return MIC_MODE_LABELS[mode ?? "toggle"];
+}
+
+/** Human labels for each OBS action (shown in the editor and the key summary). */
+export const OBS_ACTION_LABELS: Record<ObsAction, string> = {
+  setScene: "Switch scene",
+  recordStart: "Start recording",
+  recordStop: "Stop recording",
+  recordToggle: "Toggle recording",
+  streamStart: "Start streaming",
+  streamStop: "Stop streaming",
+  streamToggle: "Toggle streaming",
+  micToggle: "Toggle mic mute",
+  virtualCamToggle: "Toggle virtual cam",
+  replayBufferToggle: "Toggle replay buffer",
+  sourceToggle: "Show/hide source",
+  hotkey: "Trigger OBS hotkey",
+};
+
+/** The obs-websocket requestType each action maps to (`obsActionToRequest`
+ * supplies the matching requestData). Actions with an empty-object request
+ * (record/stream/vcam/replay toggles) carry no extra fields. */
+const OBS_REQUEST_TYPE: Record<ObsAction, string> = {
+  setScene: "SetCurrentProgramScene",
+  recordStart: "StartRecord",
+  recordStop: "StopRecord",
+  recordToggle: "ToggleRecord",
+  streamStart: "StartStream",
+  streamStop: "StopStream",
+  streamToggle: "ToggleStream",
+  micToggle: "ToggleInputMute",
+  virtualCamToggle: "ToggleVirtualCam",
+  replayBufferToggle: "ToggleReplayBuffer",
+  sourceToggle: "ToggleSceneItemEnabled",
+  hotkey: "TriggerHotkeyByName",
+};
+
+/** A short label for a specific obs assignment, e.g. `Switch scene · Kamera 2`. */
+export function obsActionName(a: ObsRequest): string {
+  const base = OBS_ACTION_LABELS[a.action];
+  const arg =
+    a.action === "setScene"
+      ? a.sceneName
+      : a.action === "micToggle"
+        ? a.inputName
+        : a.action === "sourceToggle"
+          ? a.sourceName
+          : a.action === "hotkey"
+            ? a.hotkeyName
+            : undefined;
+  return arg ? `${base} · ${arg}` : base;
+}
+
+/** True when an obs assignment has the field its action needs. Toggles that
+ * take no argument are always complete. */
+export function obsActionComplete(a: ObsRequest): boolean {
+  switch (a.action) {
+    case "setScene":
+      return !!a.sceneName?.trim();
+    case "micToggle":
+      return !!a.inputName?.trim();
+    case "sourceToggle":
+      return !!a.sourceScene?.trim() && !!a.sourceName?.trim();
+    case "hotkey":
+      return !!a.hotkeyName?.trim();
+    default:
+      return true;
+  }
+}
+
+/** Compile an obs assignment into the obs-websocket `{requestType, requestData}`
+ * pair handed to the Rust `obs_action` command. `ToggleSceneItemEnabled` is a
+ * two-step case handled host-side (the app resolves the sceneItemId), so here
+ * it only carries the names; everything else is a direct request. */
+export function obsActionToRequest(a: ObsRequest): {
+  requestType: string;
+  requestData: Record<string, unknown>;
+} {
+  const requestType = OBS_REQUEST_TYPE[a.action];
+  switch (a.action) {
+    case "setScene":
+      return { requestType, requestData: { sceneName: a.sceneName ?? "" } };
+    case "micToggle":
+      return { requestType, requestData: { inputName: a.inputName ?? "" } };
+    case "sourceToggle":
+      return {
+        requestType,
+        requestData: { sceneName: a.sourceScene ?? "", sourceName: a.sourceName ?? "" },
+      };
+    case "hotkey":
+      return { requestType, requestData: { hotkeyName: a.hotkeyName ?? "" } };
+    default:
+      return { requestType, requestData: {} };
+  }
 }
 
 /** File name for a profile-scoped macro synced to the device drive. */

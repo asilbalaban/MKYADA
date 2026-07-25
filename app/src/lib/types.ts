@@ -184,6 +184,7 @@ export interface MacroFile {
     | "sound"
     | "mic"
     | "webhook"
+    | "obs"
     | "sequence";
   combo?: { mods: string[]; key: string };
   text?: string;
@@ -204,6 +205,9 @@ export interface MacroFile {
   mic_mode?: MicMode;
   /** webhook kind: HTTP request performed by the desktop app */
   webhook?: WebhookRequest;
+  /** obs kind: an OBS Studio action performed by the desktop app over
+   * obs-websocket (scene switch, record/stream/mic toggle, …) */
+  obs?: ObsRequest;
   /** sequence kind: the editable steps. Pure-HID sequences also compile
    * their steps into `events` (standalone); mixed ones leave `events` empty
    * and the desktop app orchestrates the steps. */
@@ -250,6 +254,54 @@ export interface WebhookRequest {
   headers?: { name: string; value: string }[];
   /** raw request body — add a Content-Type header for JSON etc. */
   body?: string;
+}
+
+/**
+ * An OBS Studio control action, performed by the desktop app over
+ * obs-websocket v5 (OBS 28+). HID can't speak WebSocket, so — like webhook —
+ * the key compiles to a no-op macro that travels to the device but is executed
+ * host-side while the app is connected. Each action maps to one obs-websocket
+ * requestType (see obsActionToRequest in macro-model).
+ */
+export type ObsAction =
+  | "setScene"
+  | "recordStart"
+  | "recordStop"
+  | "recordToggle"
+  | "streamStart"
+  | "streamStop"
+  | "streamToggle"
+  | "micToggle"
+  | "virtualCamToggle"
+  | "replayBufferToggle"
+  | "sourceToggle"
+  | "hotkey";
+
+/** Live OBS state pushed from the Rust obs-websocket client (`obs:changed`
+ * event / `obs_state` command). Mirrors `obs::ObsSnapshot`. */
+export interface ObsSnapshot {
+  connected: boolean;
+  currentScene?: string | null;
+  recording: boolean;
+  streaming: boolean;
+  virtualCam: boolean;
+  replayBuffer: boolean;
+  error?: string | null;
+}
+
+/** An OBS key action: one action plus the fields that action needs. */
+export interface ObsRequest {
+  action: ObsAction;
+  /** setScene: the scene to switch the program output to */
+  sceneName?: string;
+  /** micToggle: the audio input to mute/unmute (an OBS input name) */
+  inputName?: string;
+  /** sourceToggle: the scene that holds the source item to show/hide */
+  sourceScene?: string;
+  /** sourceToggle: the source (scene item) name to show/hide */
+  sourceName?: string;
+  /** hotkey: the OBS hotkey name for TriggerHotkeyByName */
+  hotkeyName?: string;
 }
 
 /**
@@ -310,6 +362,8 @@ export type Assignment = (
   | { kind: "sound"; file: string; holdAction?: SoundHoldAction }
   | { kind: "mic"; mode?: MicMode }
   | ({ kind: "webhook" } & WebhookRequest)
+  // control OBS Studio over obs-websocket (scene, record, stream, mic, …)
+  | ({ kind: "obs" } & ObsRequest)
   // Stream Deck-style multi action: run several actions with one press
   | { kind: "sequence"; steps: SequenceStep[] }
 ) & {

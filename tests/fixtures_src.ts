@@ -38,6 +38,7 @@ export const CANONICAL: Record<string, Assignment> = {
     headers: [{ name: "Content-Type", value: "application/json" }],
     body: '{"on":true}',
   },
+  obs_scene: { kind: "obs", action: "setScene", sceneName: "Kamera 2" },
   keystroke_restart_hold: {
     kind: "keystroke",
     key: "a",

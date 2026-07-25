@@ -1,5 +1,6 @@
 mod device;
 mod layout;
+mod obs;
 #[cfg(target_os = "windows")]
 mod overlay_win;
 mod permissions;
@@ -1065,6 +1066,7 @@ pub fn run() {
         })
         .manage(DeviceManager::default())
         .manage(Preview::default())
+        .manage(obs::ObsManager::default())
         .invoke_handler(tauri::generate_handler![
             scan_devices,
             connect_device,
@@ -1082,6 +1084,11 @@ pub fn run() {
             open_target,
             mic_action,
             http_request,
+            obs::obs_connect,
+            obs::obs_disconnect,
+            obs::obs_action,
+            obs::obs_request,
+            obs::obs_state,
             read_local_bytes,
             check_update,
             read_local_file,

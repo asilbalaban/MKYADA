@@ -61,6 +61,7 @@ export const KIND_ICON: Record<Assignment["kind"], string> = {
   sound: "play-sound",
   mic: "microphone",
   webhook: "webhook",
+  obs: "obs",
   sequence: "multi-action",
 };
 

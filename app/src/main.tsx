@@ -5,6 +5,7 @@ import App from "./App";
 import {
   initAlwaysOnTop,
   initAutostart,
+  initObs,
   initRunInBackground,
   initTheme,
   initWheelAccel,
@@ -32,6 +33,7 @@ if (isOverlay) {
   initRunInBackground();
   initAutostart();
   initWheelAccel();
+  initObs();
 }
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(

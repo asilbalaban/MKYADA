@@ -1,0 +1,11 @@
+{
+  "format": "mkyada-macro",
+  "version": 2,
+  "name": "Switch scene · Kamera 2",
+  "kind": "obs",
+  "obs": {
+    "action": "setScene",
+    "sceneName": "Kamera 2"
+  },
+  "events": []
+}

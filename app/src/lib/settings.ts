@@ -173,6 +173,66 @@ export function useWheelAccel(): boolean {
   );
 }
 
+// ------------------------------------------------------------------ OBS ---
+// OBS Studio control over obs-websocket. A single persistent connection config
+// (the Rust obs.rs client owns the socket + reconnection); when enabled we
+// connect at boot and on every change. Stored as one JSON object.
+
+export interface ObsConfig {
+  enabled: boolean;
+  host: string;
+  port: number;
+  password: string;
+}
+
+export const OBS_DEFAULT: ObsConfig = {
+  enabled: false,
+  host: "localhost",
+  port: 4455,
+  password: "",
+};
+
+let obsConfig: ObsConfig = OBS_DEFAULT;
+const obsListeners = new Set<() => void>();
+
+function applyObs(cfg: ObsConfig) {
+  if (cfg.enabled) {
+    void invoke("obs_connect", {
+      host: cfg.host,
+      port: cfg.port,
+      password: cfg.password,
+    }).catch(() => {});
+  } else {
+    void invoke("obs_disconnect").catch(() => {});
+  }
+}
+
+/** Call once at boot — connects to OBS if the stored config is enabled. */
+export function initObs() {
+  void getSetting<ObsConfig>("obs", OBS_DEFAULT).then((stored) => {
+    obsConfig = { ...OBS_DEFAULT, ...stored };
+    obsListeners.forEach((l) => l());
+    if (obsConfig.enabled) applyObs(obsConfig);
+  });
+}
+
+export function setObsConfig(cfg: ObsConfig) {
+  obsConfig = cfg;
+  void setSetting("obs", cfg);
+  obsListeners.forEach((l) => l());
+  applyObs(cfg);
+}
+
+export function useObsConfig(): ObsConfig {
+  return useSyncExternalStore(
+    (cb) => {
+      obsListeners.add(cb);
+      return () => obsListeners.delete(cb);
+    },
+    () => obsConfig,
+  );
+}
+
 /** Call once at boot — re-applies the stored preference to the window. */
 export function initAlwaysOnTop() {
   void getSetting("alwaysOnTop", false).then((stored) => {

@@ -89,6 +89,14 @@ const CASES: [string, Assignment][] = [
       body: '{"content":"key pressed"}',
     },
   ],
+  ["obs scene switch", { kind: "obs", action: "setScene", sceneName: "Kamera 2" }],
+  ["obs record toggle (no arg)", { kind: "obs", action: "recordToggle" }],
+  ["obs mic toggle", { kind: "obs", action: "micToggle", inputName: "Mic/Aux" }],
+  [
+    "obs source toggle",
+    { kind: "obs", action: "sourceToggle", sourceScene: "Sahne 1", sourceName: "Webcam" },
+  ],
+  ["obs hotkey", { kind: "obs", action: "hotkey", hotkeyName: "OBSBasic.StartRecording" }],
   ["keystroke with restart", { kind: "keystroke", key: "a", behavior: { on_repress: "restart" } }],
   ["keystroke opted out of hold-repeat", { kind: "keystroke", key: "a", behavior: { hold_repeat: false } }],
   ["combo with hold_repeat", { kind: "combo", mods: ["ALT"], key: "tab", behavior: { hold_repeat: true } }],
@@ -190,6 +198,14 @@ describe("assignment round-trip", () => {
     expect(f.events).toEqual([]);
     expect(kindRequiresHost("menu")).toBe(false);
     expect(kindRequiresHost("scroll")).toBe(false);
+  });
+
+  it("obs assignment is host-side with no HID events", () => {
+    const f = compileAssignment({ kind: "obs", action: "setScene", sceneName: "Cam" })!;
+    expect(f.kind).toBe("obs");
+    expect(f.obs).toEqual({ action: "setScene", sceneName: "Cam" });
+    expect(f.events).toEqual([]);
+    expect(kindRequiresHost("obs")).toBe(true);
   });
 
   it("a user label overrides the auto name and survives the round-trip", () => {

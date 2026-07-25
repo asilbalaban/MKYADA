@@ -24,6 +24,19 @@ import { useDevice } from "./device";
 /** Holding a sound key this long stops all playing sounds instead of playing. */
 const SOUND_HOLD_STOP_MS = 400;
 
+/** One short line for the keypad OLED band from the live OBS state: recording /
+ * streaming flags plus the active scene name. Empty when OBS is disconnected so
+ * the band falls back to the profile name. The firmware trims to 24 chars. */
+function formatObsStatus(s: ObsSnapshot | null): string {
+  if (!s?.connected) return "";
+  const flags: string[] = [];
+  if (s.streaming) flags.push("● CANLI");
+  if (s.recording) flags.push("● REC");
+  const scene = s.currentScene ?? "";
+  const prefix = flags.join(" ");
+  return prefix && scene ? `${prefix} · ${scene}` : prefix || scene;
+}
+
 import { ipc } from "./ipc";
 import type {
   Assignment,
@@ -31,6 +44,8 @@ import type {
   ForegroundInfo,
   Hello,
   ModuleSlot,
+  ObsRequest,
+  ObsSnapshot,
   Profile,
   SequenceStep,
   SoundHoldAction,
@@ -43,6 +58,7 @@ import {
   compileSequenceParts,
   compileVariantParts,
   macroFileName,
+  obsActionToRequest,
   parseDeviceMacro,
   profileKeySlot,
   profileMacroFileName,
@@ -70,6 +86,13 @@ function runHostAction(a: {
   headers?: { name: string; value: string }[];
   body?: string;
   webhook?: WebhookRequest;
+  obs?: ObsRequest;
+  action?: string;
+  sceneName?: string;
+  inputName?: string;
+  sourceScene?: string;
+  sourceName?: string;
+  hotkeyName?: string;
 }) {
   if (a.kind === "launch" && a.target) {
     // open_target handles URLs and paths alike (plugin-opener's openPath
@@ -94,6 +117,15 @@ function runHostAction(a: {
         headers: w.headers ?? null,
         body: w.body ?? null,
       }).catch((e) => console.warn("webhook failed:", e));
+    }
+  } else if (a.kind === "obs") {
+    // Assignment inlines the ObsRequest fields; a MacroFile nests them in `obs`.
+    const req = (a.obs ?? a) as ObsRequest;
+    if (req.action) {
+      const { requestType, requestData } = obsActionToRequest(req);
+      void invoke("obs_action", { requestType, requestData }).catch((e) =>
+        console.warn("obs action failed:", e),
+      );
     }
   }
 }
@@ -134,6 +166,19 @@ export function ProfilesProvider({ children }: { children: ReactNode }) {
   pausedRef.current = paused;
   const activeRef = useRef<Profile | null>(null);
   const [activeProfile, setActiveProfile] = useState<Profile | null>(null);
+  const [obsStatus, setObsStatus] = useState("");
+
+  // Track live OBS state and turn it into a one-line band string. Shown on the
+  // keypad OLED (via the label below) so the device reports the active scene /
+  // REC / LIVE without the app window — the Stream Deck feedback loop.
+  useEffect(() => {
+    const un = listen("obs:changed", (e) =>
+      setObsStatus(formatObsStatus(e.payload as ObsSnapshot)),
+    );
+    return () => {
+      un.then((f) => f());
+    };
+  }, []);
 
   // load persisted state + start the foreground watcher
   useEffect(() => {
@@ -171,12 +216,14 @@ export function ProfilesProvider({ children }: { children: ReactNode }) {
           return (a && a.kind !== "none" && compileAssignment(a)?.name) || "";
         })
       : undefined;
+    // Live OBS status takes over the band while OBS is connected (Stream Deck
+    // feedback); otherwise the band names the active profile as before.
     void send({
       t: "label",
-      text: activeProfile?.name ?? "",
+      text: obsStatus || (activeProfile?.name ?? ""),
       ...(keys?.some(Boolean) ? { keys } : {}),
     }).catch(() => {});
-  }, [port, activeProfile, send, updating]);
+  }, [port, activeProfile, send, updating, obsStatus]);
 
   // Activate the profile on the device instead of holding host mode
   // (issue #23): the firmware redirects its macro paths to this profile's
@@ -315,7 +362,8 @@ export function ProfilesProvider({ children }: { children: ReactNode }) {
               node.kind === "launch" ||
               node.kind === "command" ||
               node.kind === "mic" ||
-              node.kind === "webhook"
+              node.kind === "webhook" ||
+              node.kind === "obs"
             ) {
               runHostAction(node);
             } else if (node.kind === "sequence" && !node.events?.length && node.seq?.length) {
@@ -423,7 +471,12 @@ export function ProfilesProvider({ children }: { children: ReactNode }) {
           // by the firmware as key_action (handled elsewhere).
           if (a.variants?.double || a.variants?.hold) return;
           if (a.kind === "sound") return armSound(keyId, a.file, a.holdAction);
-          if (a.kind === "launch" || a.kind === "command" || a.kind === "webhook") {
+          if (
+            a.kind === "launch" ||
+            a.kind === "command" ||
+            a.kind === "webhook" ||
+            a.kind === "obs"
+          ) {
             return runHostAction(a);
           }
           if (a.kind === "mic") {
@@ -493,7 +546,13 @@ export function ProfilesProvider({ children }: { children: ReactNode }) {
       // computer-side kinds fire once per rotation event; scroll/other HID is
       // played by the device natively, so there's nothing to do for those.
       if (a.kind === "sound") return void playSound(a.file).catch(() => {});
-      if (a.kind === "launch" || a.kind === "command" || a.kind === "mic" || a.kind === "webhook") {
+      if (
+        a.kind === "launch" ||
+        a.kind === "command" ||
+        a.kind === "mic" ||
+        a.kind === "webhook" ||
+        a.kind === "obs"
+      ) {
         return runHostAction(a);
       }
       if (a.kind === "sequence" && !sequenceIsPureHid(a.steps)) {
