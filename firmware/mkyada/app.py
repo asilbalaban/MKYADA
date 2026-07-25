@@ -205,6 +205,7 @@ class App:
     def __init__(self):
         self.fw_version = read_text("/VERSION") or "0.0.0"
         self.model = MODEL
+        self.uid = uid_hex()  # stable per-board id, also shown on About
         self.engine = Engine()
         self.proto = Proto()
         self.led = Led()

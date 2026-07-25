@@ -424,6 +424,24 @@ class Oled:
             g.append(self._txt(line2, self.CX, 42, font=self.ui_font))
         self.paint(g)
 
+    def show_about(self, rows):
+        """Device info screen: a title bar over left-aligned label: value
+        rows (model, firmware, device id). `rows` is a sequence of
+        (label, value) pairs."""
+        if not self.display:
+            return
+        g = displayio.Group()
+        self._top_bar(g, tr("about_title"))
+        y = 22
+        for label_s, value_s in rows:
+            g.append(self._txt("%s:" % label_s, 4, y, anchor=(0.0, 0.5),
+                               font=self.ui_font))
+            g.append(self._txt(value_s, self.W - 4, y, anchor=(1.0, 0.5),
+                               font=self.ui_font))
+            y += 12
+        self._bottom_bar(g, action=None)
+        self.paint(g)
+
     MENU_VIS = 3  # rows that fit between the top and bottom bars
 
     def show_menu(self, title, items, sel, marked=None, action=None):

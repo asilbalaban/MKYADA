@@ -63,10 +63,10 @@ NAV_SLOTS = {K_PSH: "btn-psh", K_BACK: "btn-back", K_CONFIRM: "btn-confirm"}
 ESC_HOLD_S = 1.2
 
 (S_HOME, S_SELECT, S_SPEED, S_SAVED, S_SET_MENU, S_FONT, S_TIMEOUT,
- S_PLAYING, S_HOST, S_TOAST, S_LANG, S_TEST) = range(12)
+ S_PLAYING, S_HOST, S_TOAST, S_LANG, S_TEST, S_ABOUT) = range(13)
 
 (SET_FONT, SET_TMO, SET_LANG, SET_BAND_LAYER, SET_BAND_PROFILE,
- SET_REBOOT) = range(6)
+ SET_ABOUT, SET_REBOOT) = range(7)
 
 SAVED_DWELL_S = 1.1
 TOAST_DWELL_S = 1.6
@@ -231,6 +231,7 @@ class Ui:
                             tr("on") if cfg["show_layer"] else tr("off")),
                 "%s: %s" % (tr("show_profile"),
                             tr("on") if cfg["show_profile"] else tr("off")),
+                tr("about"),
                 tr("restart"))
 
     def _split_name(self, name):
@@ -789,6 +790,8 @@ class Ui:
             self._st_timeout(now, d, press)
         elif self.state == S_LANG:
             self._st_lang(now, d, press)
+        elif self.state == S_ABOUT:
+            self._st_about(now, d, press)
 
     def _tick_host(self):
         """Forward encoder/nav to the app; it performs the assigned actions
@@ -991,12 +994,30 @@ class Ui:
                     self._toast(title, tr("usb_on"), tr("read_only"))
                 else:
                     self._toast(title, tr("save_fail"), "")
+            elif self.set_menu_sel == SET_ABOUT:
+                self.state = S_ABOUT
+                self.oled.show_about(self._about_lines())
             elif microcontroller:
                 microcontroller.reset()
         elif press == K_BACK:
             self.home_pos = self.app.config["layer_count"]
             self.state = S_HOME
             self._draw_home()
+
+    def _about_lines(self):
+        """(label, value) pairs for the About screen: model, firmware, UID."""
+        app = self.app
+        uid = getattr(app, "uid", None) or ""
+        return ((tr("model"), app.model),
+                (tr("firmware"), app.fw_version),
+                (tr("device_id"), uid[:12]))
+
+    def _st_about(self, now, d, press):
+        # read-only info screen; any nav (or BACK) returns to the menu
+        if press is not None or now - self.activity_at > self.idle_secs:
+            self.state = S_SET_MENU
+            self.oled.show_menu(tr("settings"), self._set_items(),
+                                self.set_menu_sel)
 
     def _st_font(self, now, d, press):
         self._custom_input(now, d, press, self.ctx_slots("menu"),
