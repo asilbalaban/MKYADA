@@ -36,6 +36,12 @@ and the OLED fonts (`fonts/`).
 
 ## Screens & controls
 
+Representative renders of the 128×64 OLED (layer A named "Stream"):
+
+| Home | Grid | Speed | Settings | About |
+|---|---|---|---|---|
+| ![Home](images/oled/home.png) | ![Grid](images/oled/grid.png) | ![Speed](images/oled/speed.png) | ![Settings](images/oled/settings.png) | ![About](images/oled/about.png) |
+
 - **Boot** — branded "MKYADA loading" screen from the first frame; no
   CircuitPython console text.
 - **Home** — turn the wheel to scroll layer letters (A…H, as many as

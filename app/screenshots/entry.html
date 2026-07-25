@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/png" href="/mkyada-logo.png" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MKYADA — screenshot harness</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <!-- The mock MUST evaluate before main.tsx: it installs window.__TAURI_INTERNALS__
+         that main.tsx's top-level getCurrentWindow() depends on. Static imports run
+         in source order, so the mock is fully applied before the app boots. -->
+    <script type="module">
+      import "./mock-tauri.ts";
+      import "/src/main.tsx";
+    </script>
+  </body>
+</html>
