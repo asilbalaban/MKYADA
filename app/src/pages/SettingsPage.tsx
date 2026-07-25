@@ -490,7 +490,7 @@ function KeypadCard() {
                   aria-label="Auto-return idle seconds"
                   onChange={(e) => void setKeypadField("timeout", Number(e.target.value))}
                 >
-                  {[5, 10, 15, 20, 30, 45, 60].map((s) => (
+                  {[3, 4, 5, 10, 15, 20, 30, 45, 60].map((s) => (
                     <option key={s} value={s}>
                       {s} seconds
                     </option>
