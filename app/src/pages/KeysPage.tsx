@@ -4,7 +4,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Play, RefreshCw, SquarePen, Usb } from "lucide-react";
 import { useDevice } from "../lib/device";
-import { useTestMode } from "../lib/focus";
+import { useTestMode, useWindowFocused } from "../lib/focus";
 import { TestModeBanner } from "../components/TestModeBanner";
 import { useNav } from "../lib/nav";
 import { ipc } from "../lib/ipc";
@@ -136,6 +136,11 @@ export function KeysPage() {
   // A reconnect or drive change can start a fresh reload while an old one is
   // still streaming reads — the stale one must stop touching state.
   const reloadSeq = useRef(0);
+  // reload() needs the current focus without being re-created on every focus
+  // flip (that would restart streaming), so read it through a ref.
+  const focused = useWindowFocused();
+  const focusedRef = useRef(focused);
+  focusedRef.current = focused;
 
   // Load config + existing assignments from the drive. One directory listing
   // tells us which slots exist (no blind reads on empty slots), then each
@@ -156,6 +161,15 @@ export function KeysPage() {
         setLoadTotal(0);
         return;
       }
+    }
+    // Put the keypad in test mode BEFORE streaming macros in — and await it so
+    // the device sees it first. Otherwise a key pressed mid-load fires its
+    // macro (issue: "cihaz içindeki tuşları yüklerken basınca macro oynuyor"),
+    // because test_enter would otherwise race the reads. Focus-gated so a
+    // backgrounded app still leaves the keypad working (useTestMode owns the
+    // steady state and will leave test mode on blur).
+    if (focusedRef.current) {
+      await send({ t: "test_enter", ui: "keys" }).catch(() => {});
     }
     let config = defaultConfig();
     try {
@@ -226,7 +240,7 @@ export function KeysPage() {
       );
     }
     keysCache.set(drive.path, { config, assignments: snapshot });
-  }, [drive]);
+  }, [drive, send]);
 
   useEffect(() => {
     void reload();
