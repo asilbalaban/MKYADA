@@ -116,9 +116,10 @@ Details: [docs/macro-format.md](docs/macro-format.md) · [docs/serial-protocol.m
 
 ## Quick start
 
-1. **Flash the firmware** — put CircuitPython on the RP2040-Zero, then copy the contents of the `mkyada-firmware-*.zip` from the [latest release](https://github.com/asilbalaban/MKYADA/releases/latest) onto the `CIRCUITPY` drive. Step-by-step: [docs/firmware-install.md](docs/firmware-install.md).
-2. **Install the app** from the [latest release](https://github.com/asilbalaban/MKYADA/releases/latest) (Windows `setup.exe`, macOS universal `.dmg`) and follow the setup wizard — **or** skip the app entirely and copy macro JSON files onto the drive by hand.
-3. **Press a key.**
+1. **Install the app** from the [latest release](https://github.com/asilbalaban/MKYADA/releases/latest) (Windows `setup.exe`, macOS universal `.dmg`).
+2. **Set up the board — one click.** Plug a blank RP2040-Zero in with **BOOT** held and open **Devices → Set up a new board**: the app flashes CircuitPython, installs the MKYADA firmware and writes a starter config for your model (Core 6 or Vision 6) — no manual UF2 copying, no tools. *(Already flashed, or prefer to do it by hand? The [manual steps](docs/firmware-install.md) still work — copy the `mkyada-firmware-*.zip` contents onto the `CIRCUITPY` drive.)*
+3. **Assign keys** in the setup wizard — **or** skip the app entirely and copy macro JSON files onto the drive by hand.
+4. **Press a key.**
 
 > **macOS:** the app is not notarized, so the first launch is blocked with
 > *"Apple could not verify MKYADA…"*. Clear the quarantine flag once and open
