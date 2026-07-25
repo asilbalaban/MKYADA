@@ -48,6 +48,9 @@ STRINGS = {
         "restarting": "restarting...",
         "setup_test": "SETUP - TEST",
         "press_key": "press a key",
+        "keys_test": "KEY TEST",
+        "keys_test_paused": "Macros paused",
+        "keys_test_switch": "Use another tab",
     },
     "tr": {
         "loading": "yukleniyor",
@@ -86,6 +89,9 @@ STRINGS = {
         "restarting": "yeniden baslatiliyor...",
         "setup_test": "KURULUM - TEST",
         "press_key": "bir tusa bas",
+        "keys_test": "TUS TESTI",
+        "keys_test_paused": "Makrolar durduruldu",
+        "keys_test_switch": "Baska sekme kullan",
     },
 }
 

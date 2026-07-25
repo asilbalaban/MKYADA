@@ -835,11 +835,17 @@ class Ui:
                 self.oled.show_toast(tr("setup_test"),
                                      NAV_SLOT[ev.key_number].upper(), pin)
 
-    # --- Setup test mode (issue #24) ---
-    def on_test_enter(self):
+    # --- Test mode: Setup wiring test (issue #24) / Keys tab (issue #33) ---
+    def on_test_enter(self, ui="wiring"):
         self.state = S_TEST
+        self.test_ui = ui
         self._drain_inputs()
-        self.oled.show_toast(tr("setup_test"), tr("press_key"), "")
+        if ui == "keys":
+            # Keys tab is open on the app: warn that macros are paused here.
+            self.oled.show_toast(tr("keys_test"), tr("keys_test_paused"),
+                                 tr("keys_test_switch"))
+        else:
+            self.oled.show_toast(tr("setup_test"), tr("press_key"), "")
 
     def on_test_key(self, key_no, pin):
         if self.state != S_TEST:
@@ -849,8 +855,13 @@ class Ui:
             name = (a + " " + b).strip()
         except Exception:
             name = ""
-        self.oled.show_toast(tr("setup_test"), name or ("K%d" % key_no),
-                             "K%d  %s" % (key_no, pin))
+        if getattr(self, "test_ui", "wiring") == "keys":
+            # echo the pressed key but keep the "macros paused" reminder
+            self.oled.show_toast(tr("keys_test"), name or ("K%d" % key_no),
+                                 tr("keys_test_paused"))
+        else:
+            self.oled.show_toast(tr("setup_test"), name or ("K%d" % key_no),
+                                 "K%d  %s" % (key_no, pin))
 
     def on_test_leave(self):
         if self.state == S_TEST:

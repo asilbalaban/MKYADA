@@ -229,12 +229,15 @@ class App:
         # editor — runs the profile's config natively instead of the app
         # holding host mode. Cleared when the app disconnects.
         self.profile_id = None
-        # Setup "test keys" mode (issue #24): while the app's Setup tab is open
-        # on a Vision 6, macro keys don't play — the screen shows the pressed
-        # key + its pin instead, so a user can verify wiring without firing
-        # macros. Core 6 has no screen, so keys keep working there. Cleared on
-        # {t:"test_leave"} and on app disconnect.
+        # "Test keys" mode: while the app's Setup or Keys tab is the frontmost
+        # view, macro keys don't play — the app still gets the btn stream to
+        # light up the pressed key, but on-device playback is suppressed on
+        # EVERY model (issue #33: previously only Vision 6 with a screen). The
+        # Vision 6 screen shows a hint ("wiring" = Setup pressed-key/pin,
+        # "keys" = Keys tab macros-paused warning); core6 has no screen so it
+        # goes quiet. Cleared on {t:"test_leave"} and on app disconnect.
         self.test_mode = False
+        self.test_ui = "wiring"  # which screen the active test tab wants
         self.inbox = []  # serial messages drained during blocking key logic
         self.updating = False  # locked update mode (update_begin..update_end)
         self.update_total = 0  # bytes announced by update_begin
@@ -529,10 +532,11 @@ class App:
             self.set_mode("standalone")
             self.proto.send({"t": "ok", "re": "host_leave"})
         elif t == "test_enter":
-            # Vision 6 only has a screen to show it; on core6 keys keep working.
-            self.test_mode = bool(OLED)
-            if self.test_mode:
-                self.ui_call("on_test_enter")
+            # Suppress macro playback on every model (issue #33). core6 has no
+            # screen, so ui_call is a harmless no-op there.
+            self.test_mode = True
+            self.test_ui = msg.get("ui") or "wiring"
+            self.ui_call("on_test_enter", self.test_ui)
             self.proto.send({"t": "ok", "re": "test_enter"})
         elif t == "test_leave":
             if self.test_mode:
@@ -1177,7 +1181,9 @@ class App:
                              "layer": LAYER_NAMES[self.layer],
                              "edge": "down" if pressed else "up"})
         if self.test_mode:
-            # Setup test: don't play the macro; show the pressed key + pin.
+            # Test mode (Setup or Keys tab): never play the macro. On a Vision 6
+            # the screen echoes the pressed key + pin so wiring/keys can be
+            # verified; core6 just swallows it.
             if pressed:
                 self.ui_call("on_test_key", key_no, self.key_pin_names()[i])
             return

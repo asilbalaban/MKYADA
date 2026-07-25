@@ -4,6 +4,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Play, RefreshCw, SquarePen, Usb } from "lucide-react";
 import { useDevice } from "../lib/device";
+import { useWindowFocused } from "../lib/focus";
 import { useNav } from "../lib/nav";
 import { ipc } from "../lib/ipc";
 import type { Assignment, DeviceConfig, ModuleSlot, SlotContext } from "../lib/types";
@@ -282,9 +283,25 @@ export function KeysPage() {
     [onMsg, refreshSlot],
   );
 
-  // No host mode: the live-press highlight rides the standalone btn stream
-  // (proto v2), so keys keep firing their macros even while this page is
-  // open — the keypad works the same on every screen.
+  // The Keys tab is a key TEST screen: while it's the frontmost view, a
+  // physical key press must NOT fire its macro on any model (issue #33) —
+  // otherwise trying keys here would trigger real macros. We put the device
+  // in test mode, which suppresses playback and (Vision 6) shows a "macros
+  // paused" warning; core6 has no screen so it just goes quiet. The live-
+  // press highlight still rides the standalone btn stream, so keys keep
+  // lighting up. Crucially this is gated on window focus: if the app is
+  // backgrounded (e.g. Chrome in front), we drop test mode so the keypad
+  // keeps working even with this tab open — no "why aren't my keys firing"
+  // surprise when the app is only in the tray.
+  const focused = useWindowFocused();
+  const connected = hello != null;
+  useEffect(() => {
+    if (!connected || !focused) return;
+    void send({ t: "test_enter", ui: "keys" });
+    return () => {
+      void send({ t: "test_leave" });
+    };
+  }, [connected, focused, send]);
 
   // Surface playback / error feedback from the device.
   useEffect(
