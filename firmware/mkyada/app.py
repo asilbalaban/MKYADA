@@ -151,6 +151,12 @@ DEFAULT_CONFIG = {
                          # solder; null = the model's default nav (models.py)
     "enc_swap": False,   # vision6: encoder soldered backwards (CW/CCW flipped);
                          # true swaps the two encoder pins in ui.py
+    "layer_names": None, # vision6: optional per-layer nickname shown in the
+                         # grid top bar as "(A) NICKNAME". The app/software
+                         # still labels layers A/B/C/D everywhere; only the
+                         # device band uses the nickname. A list aligned to
+                         # layers (index 0 = layer A); null/"" entries keep the
+                         # plain "Layer A"; null = no custom names at all.
 }
 
 
@@ -334,6 +340,18 @@ class App:
         cfg["timeout"] = tmo if isinstance(tmo, int) and 3 <= tmo <= 60 else None
         cfg["nav"] = validate_nav_pins(cfg.get("nav"), MODEL)
         cfg["enc_swap"] = cfg.get("enc_swap") is True
+        # layer_names: per-layer nicknames for the band, aligned to layers.
+        # Keep only up to layer_count entries; blanks become None; strings are
+        # capped so an over-long name can't blow past the OLED width.
+        names = cfg.get("layer_names")
+        if isinstance(names, list):
+            clean = []
+            for v in names[:cfg["layer_count"]]:
+                clean.append(v.strip()[:20] if isinstance(v, str) and v.strip()
+                             else None)
+            cfg["layer_names"] = clean if any(clean) else None
+        else:
+            cfg["layer_names"] = None
         self.config = cfg
         self.engine.set_screen(cfg["screen"].get("width", 1920),
                                cfg["screen"].get("height", 1080))
@@ -440,7 +458,7 @@ class App:
                 "pins": self.key_pin_names(), "nav": self.nav_pin_names(),
                 "show_layer": c["show_layer"], "show_profile": c["show_profile"],
                 "font": c.get("font"), "timeout": c.get("timeout"),
-                "enc_swap": c.get("enc_swap"),
+                "enc_swap": c.get("enc_swap"), "layer_names": c.get("layer_names"),
                 "layer": LAYER_NAMES[self.layer], "mode": self.mode}
 
     def handle_msg(self, msg, in_playback=False):

@@ -7,7 +7,7 @@ import { AppWindow, Gauge, HardDrive, Layers, Monitor, Moon, Pin, Power, Rocket,
 import { ipc } from "../lib/ipc";
 import { keysCache } from "../lib/keys-cache";
 import { useDevice } from "../lib/device";
-import { deviceModel, type ObsSnapshot, type UpdateInfo } from "../lib/types";
+import { deviceModel, layerLabel, type ObsSnapshot, type UpdateInfo } from "../lib/types";
 import {
   type ObsConfig,
   setAlwaysOnTop,
@@ -248,6 +248,16 @@ function KeypadCard() {
   const [fieldBusy, setFieldBusy] = useState<string | null>(null);
   // firmware < 0.14.0 doesn't mirror font/timeout into config.json
   const prefsSupported = hello?.font !== undefined;
+  // firmware < 0.17.6 has no per-layer nicknames (layer_names)
+  const namesSupported = hello?.layer_names !== undefined;
+  // Local draft of the per-layer nicknames; committed on blur so we don't
+  // reboot the keypad on every keystroke. Re-synced whenever hello changes.
+  const [layerNames, setLayerNames] = useState<string[]>([]);
+  useEffect(() => {
+    if (!hello) return;
+    const cur = hello.layer_names ?? [];
+    setLayerNames(Array.from({ length: hello.layer_count }, (_, i) => cur[i] ?? ""));
+  }, [hello]);
 
   /** Merge one field into the keypad's config.json and reload the firmware. */
   async function setKeypadField(key: string, value: unknown) {
@@ -290,6 +300,13 @@ function KeypadCard() {
     } finally {
       setBandBusy(null);
     }
+  }
+
+  /** Commit the per-layer nickname drafts to the keypad (device band only —
+   * the app keeps labelling layers A/B/C/D). Blank everywhere sends null. */
+  async function commitLayerNames(next: string[]) {
+    const cleaned = next.map((s) => s.trim() || null);
+    await setKeypadField("layer_names", cleaned.some(Boolean) ? cleaned : null);
   }
 
   async function setHidden(hide: boolean) {
@@ -415,6 +432,48 @@ function KeypadCard() {
                   <Layers size={14} aria-hidden />
                   {hello?.show_layer ? "On" : "Off"}
                 </Button>
+              )}
+            </div>
+
+            <div className="flex flex-col gap-2">
+              <div className="flex flex-col gap-0.5 text-sm">
+                <span className="text-fg font-medium">Custom layer names on screen</span>
+                <span className="text-xs text-fg-faint">
+                  Give a layer a nickname and the keypad's band shows it as
+                  "(A) NAME" while that layer is active. The app still calls
+                  layers A/B/C/D everywhere. Needs the layer band on; leave
+                  blank to keep the plain letter.
+                </span>
+              </div>
+              {!namesSupported ? (
+                <Badge tone="amber">needs firmware ≥ 0.17.6</Badge>
+              ) : (
+                <div className="flex flex-col gap-1.5">
+                  {layerNames.map((name, i) => (
+                    <div key={i} className="flex items-center gap-2">
+                      <span className="w-6 shrink-0 text-sm font-medium text-fg-muted">
+                        {layerLabel(i)}
+                      </span>
+                      <Input
+                        value={name}
+                        maxLength={20}
+                        placeholder={`Layer ${layerLabel(i)}`}
+                        className="flex-1"
+                        disabled={!drive || fieldBusy !== null}
+                        aria-label={`Nickname for layer ${layerLabel(i)}`}
+                        onChange={(e) => {
+                          const next = layerNames.slice();
+                          next[i] = e.target.value;
+                          setLayerNames(next);
+                        }}
+                        onBlur={() => {
+                          const saved = (hello?.layer_names?.[i] ?? "").trim();
+                          if (name.trim() !== saved) void commitLayerNames(layerNames);
+                        }}
+                      />
+                    </div>
+                  ))}
+                </div>
               )}
             </div>
 

@@ -32,6 +32,9 @@ export interface Hello {
   timeout?: number;
   /** Vision 6 encoder wired backwards (CW/CCW flipped); absent on firmware < 0.14.0 */
   enc_swap?: boolean;
+  /** Vision 6 per-layer nicknames for the grid band (index 0 = layer A);
+   * null/"" entries keep "Layer A"; absent on firmware < 0.17.6 */
+  layer_names?: (string | null)[] | null;
   layer: string;
   /** "rescue": the main firmware failed to start and code.py's rescue
    * console answered instead — only file repair + reset are available */
@@ -85,6 +88,10 @@ export interface DeviceConfig {
   timeout?: number | null;
   /** Vision 6 encoder wired backwards — true flips the wheel's CW/CCW */
   enc_swap?: boolean;
+  /** Vision 6 per-layer nicknames shown only in the device's grid band as
+   * "(A) NAME". The app always labels layers A/B/C/D; null = no nicknames.
+   * Aligned to layers (index 0 = layer A); null/"" entries keep "Layer A". */
+  layer_names?: (string | null)[] | null;
   screen: { width: number; height: number };
 }
 

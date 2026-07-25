@@ -664,11 +664,17 @@ class Ui:
     def _band(self):
         """Status-strip text over the grid, or None. Layer part is always
         device-known; the profile part is whatever label the app last
-        pushed (t:"label") and vanishes with the app."""
+        pushed (t:"label") and vanishes with the app. A per-layer nickname
+        (config "layer_names") replaces the plain "Layer A" with "(A) NAME"."""
         cfg = self.app.config
         label = self.app.host_label if cfg["show_profile"] else None
         if cfg["show_layer"]:
-            letter = LAYER_NAMES[self.app.layer].upper()
+            idx = self.app.layer
+            letter = LAYER_NAMES[idx].upper()
+            names = cfg.get("layer_names")
+            nick = names[idx] if names and idx < len(names) else None
+            if nick:
+                return "(%s) %s" % (letter, nick)
             if label:
                 return "%s: %s" % (letter, label)
             return tr("layer_band") % letter

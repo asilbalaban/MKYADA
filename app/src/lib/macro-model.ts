@@ -933,6 +933,7 @@ export function defaultConfig(): DeviceConfig {
     lang: null,
     font: null,
     timeout: null,
+    layer_names: null,
     screen: { width: screen.width, height: screen.height },
   };
 }
