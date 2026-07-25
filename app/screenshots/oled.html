@@ -4,237 +4,170 @@
     <meta charset="UTF-8" />
     <title>MKYADA Vision 6 — OLED mockups</title>
     <style>
-      /* 128×64 SH1106 OLED, rendered ×4 (512×256) for crisp docs images.
-         Monochrome white-on-black, condensed monospace to evoke the bitmap
-         font. Screen contents mirror the Vision 6 app fixture (layer A =
-         "Stream": Go Live / Record / Push-to-talk / Discord / Mute / Now live!). */
-      :root {
-        --scale: 4;
-        --w: calc(128px * var(--scale));
-        --h: calc(64px * var(--scale));
-        --px: var(--scale); /* one logical OLED pixel */
-        --ink: #eaf2ff; /* OLED lit pixel (faint cool white) */
-        --dim: #7f97b8; /* half-lit, for hints */
-      }
-      * {
-        margin: 0;
-        padding: 0;
-        box-sizing: border-box;
-      }
+      /* Authentic SH1106 128×64 monochrome OLED. Each screen is DRAWN at true
+         128×64 on a canvas, then upscaled with image-rendering:pixelated so the
+         pixels are chunky and it reads like a real low-res display — not a
+         tiny terminal window. Every screen goes through the same draw helpers,
+         so they're pixel-consistent. The device bezel is baked into the
+         captured element (#oled-<id>) so it clearly reads as a screen. */
+      * { margin: 0; padding: 0; box-sizing: border-box; }
       body {
-        background: #14161c;
-        font-family: "DejaVu Sans Mono", "Menlo", "Consolas", monospace;
-        padding: 40px;
+        background: #0d0f14;
+        padding: 44px;
         display: flex;
         flex-wrap: wrap;
-        gap: 40px;
+        gap: 44px;
+        align-items: flex-start;
       }
-      .oled {
-        width: var(--w);
-        height: var(--h);
-        background: #05070c;
-        border-radius: 10px;
-        box-shadow: 0 0 0 3px #23262f, 0 0 24px rgba(120, 170, 255, 0.12);
-        color: var(--ink);
-        position: relative;
-        overflow: hidden;
-        /* nudge everything to a crisp pixel grid feel */
-        font-size: calc(9px * var(--scale) / 4);
-        line-height: 1.15;
+      figure { display: flex; flex-direction: column; align-items: center; }
+      /* device bezel around the screen */
+      .dev {
+        background: linear-gradient(#20242c, #171a20);
+        padding: 16px;
+        border-radius: 18px;
+        box-shadow:
+          inset 0 1px 0 rgba(255, 255, 255, 0.06),
+          0 10px 30px rgba(0, 0, 0, 0.5);
+        border: 1px solid #2c313b;
       }
-      .pad {
-        position: absolute;
-        inset: calc(4px * var(--scale) / 4);
+      canvas {
+        display: block;
+        width: 640px;   /* 128 × 5 */
+        height: 320px;  /* 64 × 5 */
+        image-rendering: pixelated;
+        image-rendering: crisp-edges;
+        border-radius: 6px;
+        box-shadow: 0 0 22px rgba(150, 200, 255, 0.10);
+        background: #000;
       }
-      /* top inverted band: names the active layer + app profile */
-      .band {
-        background: var(--ink);
-        color: #05070c;
-        font-weight: 700;
-        letter-spacing: 0.5px;
-        display: flex;
-        justify-content: space-between;
-        padding: calc(2px * var(--scale) / 4) calc(3px * var(--scale) / 4);
-        border-radius: 2px;
-      }
-      .grid {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: calc(2px * var(--scale) / 4) calc(4px * var(--scale) / 4);
-        margin-top: calc(4px * var(--scale) / 4);
-      }
-      .cell {
-        display: flex;
-        align-items: center;
-        gap: calc(2px * var(--scale) / 4);
-        padding: calc(1px * var(--scale) / 4) calc(2px * var(--scale) / 4);
-        border-radius: 2px;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-      }
-      .cell .n {
-        color: var(--dim);
-      }
-      .sel {
-        background: var(--ink);
-        color: #05070c;
-      }
-      .sel .n {
-        color: #05070c;
-      }
-      .list {
-        display: flex;
-        flex-direction: column;
-        gap: calc(1px * var(--scale) / 4);
-      }
-      .row {
-        display: flex;
-        justify-content: space-between;
-        padding: calc(1.5px * var(--scale) / 4) calc(3px * var(--scale) / 4);
-        border-radius: 2px;
-      }
-      .row .v {
-        color: var(--dim);
-      }
-      .row.sel .v {
-        color: #05070c;
-      }
-      .title {
-        letter-spacing: 1px;
-        opacity: 0.85;
-      }
-      .center {
-        position: absolute;
-        inset: 0;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        gap: calc(3px * var(--scale) / 4);
-      }
-      .big {
-        font-size: calc(22px * var(--scale) / 4);
-        font-weight: 700;
-        letter-spacing: 1px;
-      }
-      .bar {
-        width: 70%;
-        height: calc(4px * var(--scale) / 4);
-        border: 1px solid var(--ink);
-        border-radius: 2px;
-        position: relative;
-      }
-      .bar > i {
-        position: absolute;
-        left: 0;
-        top: 0;
-        bottom: 0;
-        width: 46%;
-        background: var(--ink);
-      }
-      .muted {
-        color: var(--dim);
-      }
-      .cap {
-        margin-top: 10px;
-        color: #8a93a6;
+      figcaption {
+        margin-top: 14px;
+        color: #9aa4b6;
         font-family: system-ui, sans-serif;
-        font-size: 13px;
-        width: var(--w);
+        font-size: 15px;
         text-align: center;
-      }
-      figure {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
       }
     </style>
   </head>
   <body>
-    <!-- HOME / layer picker -->
-    <figure>
-      <div class="oled" id="oled-home">
-        <div class="pad">
-          <div class="title band" style="justify-content: center">HOME</div>
-          <div class="list" style="margin-top: calc(3px * var(--scale) / 4)">
-            <div class="row sel"><span>A · Stream</span><span class="v">›</span></div>
-            <div class="row"><span>B · Edit</span><span class="v"></span></div>
-            <div class="row"><span>C · Dev</span><span class="v"></span></div>
-            <div class="row"><span>SETTINGS</span><span class="v">⚙</span></div>
-          </div>
-        </div>
-      </div>
-      <figcaption class="cap">Home — turn the wheel to pick a layer</figcaption>
-    </figure>
+    <figure><div class="dev" id="oled-home"><canvas width="128" height="64"></canvas></div><figcaption>Home — turn the wheel to pick a layer</figcaption></figure>
+    <figure><div class="dev" id="oled-grid"><canvas width="128" height="64"></canvas></div><figcaption>Grid — the active layer's six macros</figcaption></figure>
+    <figure><div class="dev" id="oled-speed"><canvas width="128" height="64"></canvas></div><figcaption>Speed editor — 0.1×–10.0× per macro</figcaption></figure>
+    <figure><div class="dev" id="oled-settings"><canvas width="128" height="64"></canvas></div><figcaption>Settings — tuned on the device or in the app</figcaption></figure>
+    <figure><div class="dev" id="oled-about"><canvas width="128" height="64"></canvas></div><figcaption>About — firmware &amp; hardware at a glance</figcaption></figure>
 
-    <!-- GRID / resting screen with layer + profile band -->
-    <figure>
-      <div class="oled" id="oled-grid">
-        <div class="pad">
-          <div class="band"><span>(A) STREAM</span><span>OBS</span></div>
-          <div class="grid">
-            <div class="cell sel"><span class="n">1</span><span>Go Live</span></div>
-            <div class="cell"><span class="n">2</span><span>Record</span></div>
-            <div class="cell"><span class="n">3</span><span>Push-to-talk</span></div>
-            <div class="cell"><span class="n">4</span><span>Discord</span></div>
-            <div class="cell"><span class="n">5</span><span>Mute</span></div>
-            <div class="cell"><span class="n">6</span><span>Now live!</span></div>
-          </div>
-        </div>
-      </div>
-      <figcaption class="cap">Grid — the active layer's six macros</figcaption>
-    </figure>
+    <script>
+      const INK = "#e9f4ff"; // OLED lit pixel (cool white)
+      const DIM = "#7f93b0"; // secondary text
+      const W = 128, H = 64;
 
-    <!-- SPEED editor -->
-    <figure>
-      <div class="oled" id="oled-speed">
-        <div class="pad">
-          <div class="title band" style="justify-content: center">SPEED · Go Live</div>
-        </div>
-        <div class="center">
-          <div class="big">1.4×</div>
-          <div class="bar"><i></i></div>
-          <div class="muted" style="font-size: calc(8px * var(--scale) / 4)">
-            CONFIRM to save · BACK to cancel
-          </div>
-        </div>
-      </div>
-      <figcaption class="cap">Speed editor — 0.1×–10.0× per macro</figcaption>
-    </figure>
+      // Shared pixel-font settings so every screen matches exactly.
+      const FONT = "7px 'Courier New', monospace";
+      const LH = 10; // line pitch
 
-    <!-- SETTINGS menu -->
-    <figure>
-      <div class="oled" id="oled-settings">
-        <div class="pad">
-          <div class="title band" style="justify-content: center">SETTINGS</div>
-          <div class="list" style="margin-top: calc(3px * var(--scale) / 4)">
-            <div class="row sel"><span>Font</span><span class="v">Medium</span></div>
-            <div class="row"><span>Auto-return</span><span class="v">10 s</span></div>
-            <div class="row"><span>Language</span><span class="v">EN</span></div>
-            <div class="row"><span>Layer band</span><span class="v">On</span></div>
-            <div class="row"><span>Profile band</span><span class="v">On</span></div>
-            <div class="row"><span>About</span><span class="v">›</span></div>
-          </div>
-        </div>
-      </div>
-      <figcaption class="cap">Settings — tuned on the device or in the app</figcaption>
-    </figure>
+      function ctxFor(id) {
+        const cv = document.querySelector("#" + id + " canvas");
+        const c = cv.getContext("2d");
+        c.imageSmoothingEnabled = false;
+        c.textBaseline = "top";
+        c.font = FONT;
+        c.fillStyle = "#000";
+        c.fillRect(0, 0, W, H);
+        return c;
+      }
+      function band(c, left, right) {
+        c.fillStyle = INK;
+        c.fillRect(0, 0, W, 11);
+        c.fillStyle = "#000";
+        c.fillText(left, 3, 2);
+        if (right) c.fillText(right, W - 3 - c.measureText(right).width, 2);
+      }
+      function text(c, x, y, s, color) {
+        c.fillStyle = color || INK;
+        c.fillText(s, x, y);
+      }
+      function rtext(c, xRight, y, s, color) {
+        c.fillStyle = color || INK;
+        c.fillText(s, xRight - c.measureText(s).width, y);
+      }
+      // a selectable list row; inv=selected (inverted strip)
+      function row(c, y, label, value, inv) {
+        if (inv) {
+          c.fillStyle = INK;
+          c.fillRect(1, y - 1, W - 2, LH);
+        }
+        text(c, 4, y, label, inv ? "#000" : INK);
+        if (value) rtext(c, W - 4, y, value, inv ? "#000" : DIM);
+      }
 
-    <!-- ABOUT -->
-    <figure>
-      <div class="oled" id="oled-about">
-        <div class="pad">
-          <div class="title band" style="justify-content: center">ABOUT</div>
-        </div>
-        <div class="center">
-          <div class="big" style="font-size: calc(13px * var(--scale) / 4)">MKYADA Vision 6</div>
-          <div class="muted">Firmware 0.17.9</div>
-          <div class="muted">6 keys · 3 layers</div>
-          <div style="font-size: calc(8px * var(--scale) / 4)">macro keypad you always dream about</div>
-        </div>
-      </div>
-      <figcaption class="cap">About — firmware &amp; hardware at a glance</figcaption>
-    </figure>
+      function drawHome(c) {
+        band(c, "", null);
+        // center the title
+        c.fillStyle = "#000";
+        c.fillText("HOME", (W - c.measureText("HOME").width) / 2, 2);
+        let y = 17;
+        row(c, y, "A  Stream", ">", true); y += 12;
+        row(c, y, "B  Edit"); y += 12;
+        row(c, y, "C  Dev"); y += 12;
+        row(c, y, "SETTINGS");
+      }
+      function drawGrid(c) {
+        band(c, "(A) STREAM", "OBS");
+        const cells = [
+          ["1", "Go Live"], ["2", "Record"], ["3", "Push-to-talk"],
+          ["4", "Discord"], ["5", "Mute"], ["6", "Now live!"],
+        ];
+        const cols = [2, 65], rowsY = [15, 31, 47];
+        cells.forEach(([n, name], i) => {
+          const x = cols[i % 2], y = rowsY[(i / 2) | 0], sel = i === 0;
+          if (sel) { c.fillStyle = INK; c.fillRect(x - 1, y - 1, 62, 14); }
+          text(c, x, y, n, sel ? "#000" : DIM);
+          text(c, x + 8, y, name, sel ? "#000" : INK);
+        });
+      }
+      function drawSpeed(c) {
+        band(c, "SPEED", "Go Live");
+        // big value, centered
+        c.font = "18px 'Courier New', monospace";
+        const v = "1.4x";
+        text(c, (W - c.measureText(v).width) / 2, 20, v, INK);
+        c.font = FONT;
+        // slider bar
+        c.strokeStyle = INK; c.lineWidth = 1;
+        c.strokeRect(18.5, 44.5, 91, 5);
+        c.fillStyle = INK; c.fillRect(19, 45, 42, 4);
+        text(c, 18, 54, "CONFIRM save", DIM);
+        rtext(c, W - 4, 54, "BACK", DIM);
+      }
+      function drawSettings(c) {
+        band(c, "", null);
+        c.fillStyle = "#000";
+        c.fillText("SETTINGS", (W - c.measureText("SETTINGS").width) / 2, 2);
+        const rows = [
+          ["Font", "Medium", true], ["Auto-return", "10s"], ["Language", "EN"],
+          ["Layer band", "On"], ["Profile band", "On"], ["About", ">"],
+        ];
+        let y = 14;
+        rows.forEach(([l, v, sel]) => { row(c, y, l, v, sel); y += 8.5; });
+      }
+      function drawAbout(c) {
+        band(c, "", null);
+        c.fillStyle = "#000";
+        c.fillText("ABOUT", (W - c.measureText("ABOUT").width) / 2, 2);
+        c.font = "9px 'Courier New', monospace";
+        const t = "MKYADA Vision 6";
+        text(c, (W - c.measureText(t).width) / 2, 18, t, INK);
+        c.font = FONT;
+        const l2 = "Firmware 0.17.9", l3 = "6 keys - 3 layers";
+        text(c, (W - c.measureText(l2).width) / 2, 34, l2, DIM);
+        text(c, (W - c.measureText(l3).width) / 2, 46, l3, DIM);
+      }
+
+      drawHome(ctxFor("oled-home"));
+      drawGrid(ctxFor("oled-grid"));
+      drawSpeed(ctxFor("oled-speed"));
+      drawSettings(ctxFor("oled-settings"));
+      drawAbout(ctxFor("oled-about"));
+    </script>
   </body>
 </html>

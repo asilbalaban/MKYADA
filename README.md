@@ -82,11 +82,11 @@ Unlike most DIY macro pads that just remap keys, MKYADA plays back **full record
 The Vision 6's own OLED screens (Home · Grid · Speed · Settings · About):
 
 <p align="center">
-  <img src="docs/images/oled/home.png" alt="Vision 6 Home" width="150">
-  <img src="docs/images/oled/grid.png" alt="Vision 6 Grid" width="150">
-  <img src="docs/images/oled/speed.png" alt="Vision 6 Speed editor" width="150">
-  <img src="docs/images/oled/settings.png" alt="Vision 6 Settings" width="150">
-  <img src="docs/images/oled/about.png" alt="Vision 6 About" width="150">
+  <img src="docs/images/oled/home.png" alt="Vision 6 Home" width="170">
+  <img src="docs/images/oled/grid.png" alt="Vision 6 Grid" width="170">
+  <img src="docs/images/oled/speed.png" alt="Vision 6 Speed editor" width="170">
+  <img src="docs/images/oled/settings.png" alt="Vision 6 Settings" width="170">
+  <img src="docs/images/oled/about.png" alt="Vision 6 About" width="170">
 </p>
 
 ## Hardware
