@@ -31,12 +31,46 @@ DEFAULT_FONT_IDX = 0
 SPLEEN = "/fonts/spleen-5x8.bdf"
 UI_GLYPHS = "Mgpy0123456789.xds<> abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ%"
 
+# Grid fonts that actually render Turkish glyphs (real, non-blank bitmaps). Only
+# the 4x6 font qualifies today; text on any other font is folded to ASCII.
+FULL_TURKISH_FONTS = ("/fonts/4x6.bdf",)
+
 INIT_TRIES = 3
 
 WHITE = displayio.Palette(1)
 WHITE[0] = 0xFFFFFF
 BLACK = displayio.Palette(1)
 BLACK[0] = 0x000000
+
+# Turkish letters and their ASCII fallback. Only the 4x6 font ships real
+# Turkish glyphs; spleen's Turkish glyphs are blank bitmaps (ç ö ü) or absent
+# (ğ ı İ ş), and the built-in Large font is ASCII. So Turkish is kept as-is on
+# the 4x6 font and folded to ASCII on every other font (see FULL_TURKISH_FONTS).
+_TR_FOLD = {
+    "ç": "c", "Ç": "C",  # ç Ç
+    "ğ": "g", "Ğ": "G",  # ğ Ğ
+    "ı": "i", "İ": "I",  # ı İ
+    "ö": "o", "Ö": "O",  # ö Ö
+    "ş": "s", "Ş": "S",  # ş Ş
+    "ü": "u", "Ü": "U",  # ü Ü
+}
+
+
+def fold_ascii(s, keep_turkish=False):
+    """Transliterate Turkish letters to ASCII. keep_turkish=True leaves them
+    as-is — used only for the one font that ships real Turkish glyphs. Every
+    other font either has blank glyphs for them (spleen) or is ASCII (the
+    built-in Large font), where an un-folded Turkish letter renders as a
+    missing/dropped character, so it must be folded."""
+    if not s or keep_turkish:
+        return s
+    out = None  # copy lazily, only if something actually needs folding
+    for i, ch in enumerate(s):
+        if ch in _TR_FOLD:
+            if out is None:
+                out = list(s)
+            out[i] = _TR_FOLD[ch]
+    return "".join(out) if out is not None else s
 
 
 def fmt_speed(t):
@@ -88,6 +122,7 @@ class Oled:
         self._font_cache = {}
         self.grid_font = terminalio.FONT
         self.grid_cpx = 6
+        self.grid_tr_ok = False  # grid font renders real Turkish glyphs?
         self.font_idx = 2
         self.hero_font = terminalio.FONT
         self.hero_scale = 3
@@ -129,18 +164,22 @@ class Oled:
         _name, path = FONTS[idx]
         if path is None or not bitmap_font:
             self.grid_font, self.grid_cpx = terminalio.FONT, 6
+            self.grid_tr_ok = False
             return
         try:
             f = self._bdf(path, glyphs)
             self.grid_font = f
             self.grid_cpx = f.get_bounding_box()[0]
+            self.grid_tr_ok = path in FULL_TURKISH_FONTS
         except Exception as e:
             print("grid font missing:", path, e)
             self.grid_font, self.grid_cpx = terminalio.FONT, 6
+            self.grid_tr_ok = False
 
     def ensure_glyphs(self, text):
         """Preload label characters after labels change on the fly."""
         f = self.grid_font
+        text = fold_ascii(text, self.grid_tr_ok)
         if f is not terminalio.FONT and text:
             try:
                 f.load_glyphs(set(text))
@@ -149,13 +188,16 @@ class Oled:
 
     # --- draw helpers ---
     def _txt(self, s, x, y, scale=1, color=0xFFFFFF, anchor=(0.5, 0.5), font=None):
-        l = label.Label(font or terminalio.FONT, text=s, scale=scale, color=color)
+        # _txt always draws with the UI/built-in fonts, which don't render
+        # Turkish — so it always folds.
+        l = label.Label(font or terminalio.FONT, text=fold_ascii(s), scale=scale, color=color)
         l.anchor_point = anchor
         l.anchored_position = (x, y)
         return l
 
     def _gtxt(self, s, x, y, color=0xFFFFFF):
-        l = label.Label(self.grid_font, text=s, color=color)
+        # the grid font may render Turkish (4x6); fold only when it can't
+        l = label.Label(self.grid_font, text=fold_ascii(s, self.grid_tr_ok), color=color)
         l.anchor_point = (0.5, 0.5)
         l.anchored_position = (x, y)
         return l
@@ -317,6 +359,7 @@ class Oled:
         g = displayio.Group()
         top = 0
         if band:
+            band = fold_ascii(band)  # band uses the UI font (no Turkish)
             top = self.BAND_H
             g.append(_rect(0, 0, self.W, top))
             if self.ui_font is not terminalio.FONT:
