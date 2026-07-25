@@ -6,8 +6,11 @@
 
 **M**acro **K**eypad **Y**ou **A**lways **D**ream **A**bout — an open-source, DIY **macro keypad** (6 keys in the reference build, up to 20 supported) built on the Waveshare **RP2040-Zero**, with a cross-platform desktop configurator. It records your mouse and keyboard, then replays them as **real hardware HID input** — so your macros work even in games that ignore software automation.
 
+**Two models, one firmware and one app:** the **Core 6** is the clean screenless keypad (RGB LED + a layer key); the **Vision 6** adds a 128×64 OLED and an EC11 rotary wheel so you can read macro names, switch layers and tune settings right on the device. See [docs/models.md](docs/models.md).
+
 <p align="center">
-  <img src="docs/images/mkyada-topview-1800.jpg" alt="MKYADA — 6-key macro keypad with backlit mechanical keys and USB-C" width="560">
+  <img src="docs/images/devices/core6.png" alt="MKYADA Core 6" width="270">
+  <img src="docs/images/devices/vision6.png" alt="MKYADA Vision 6 with OLED and encoder" width="270">
 </p>
 
 ```
@@ -45,16 +48,21 @@ Unlike most DIY macro pads that just remap keys, MKYADA plays back **full record
 - **Standalone playback** — macros live as JSON files on the board's own USB drive. Drop `macros/key1.json` on, press the key. Works on any PC, no software installed.
 - **Everything is JSON** — even a plain Ctrl+A binding is a tiny macro file. Copy it to another board and it behaves identically.
 - **Tap · double-press · hold** — one key, three independently assignable actions. The firmware resolves the gesture itself, so it still works with no app running. No double-press assigned? Zero added latency on the tap.
-- **Layers** — dedicate one key as a layer switch (toggle or hold): 4 keys become 3×3 = 9 macros (`key1.json`, `key1-b.json`, `key1-c.json`). A live layer badge in the app always shows which one is active.
+- **Layers** — dedicate one key as a layer switch (toggle or hold): 4 keys become 3×3 = 9 macros (`key1.json`, `key1-b.json`, `key1-c.json`). A live layer badge in the app always shows which one is active. An assignable **"Go to layer X"** action jumps straight to a layer (works on the Core 6 too); the Vision 6 switches layers with the wheel, no key spent.
 - **Loop mode** — `repeat: 0` plays a macro until you press its key again (grinding, fishing, inventory runs…). Same key also **panic-stops** any running macro.
 - **Status LED** — the onboard RGB LED shows the active layer, playback (fast blink; slow blink while looping), host mode and errors — and can mirror app-side state like "mic muted".
 - **Absolute mouse positioning** — clicks land on screen coordinates, not relative nudges, via a custom HID descriptor proven in-game.
 - **Self-healing connection** — dead/reset serial ports and read-only drives are detected and recovered from automatically; nicknames are stored on the device itself so they follow it between computers.
 - **Finished-product mode** — an optional setting (app → *Settings → Keypad*) hides the keypad's USB drive entirely: no flash drive, no raw JSON in sight. The app keeps full access over the serial connection. Hold key 1 while plugging in to bring the drive back.
 
+**On the Vision 6 (screen model):**
+- **On-device menu system** — a 128×64 OLED shows your six live macro names, a layer picker, a per-macro speed editor (0.1×–10.0×) and a settings menu, all driven by the **EC11 rotary wheel** with BACK/CONFIRM. No app required to read or tune your keypad.
+- **Encoder + nav buttons as macro slots** — the wheel (→ / ←), its push, and BACK/CONFIRM each carry their own assignable action, per layer and per context. Great for volume, scroll/zoom or scene switching.
+- **On-screen bands** — optional strips name the active **layer** and the desktop app's active **per-app profile**; font size and auto-return timeout are adjustable on the device or in the app. See [docs/vision6.md](docs/vision6.md).
+
 **In the desktop app (Windows / macOS, Linux planned):**
 - **Point-and-click key setup** — click a key, press the shortcut you want (single keys, combos, text snippets, media keys), save. Live key test shows every physical press.
-- **Beyond keystrokes** — put a key to launching an app, file or URL, running a terminal command, playing a sound (tap to play; hold to stop, fade out, or restart it), or calling a webhook — a fully custom HTTP request (method, headers, body) for smart lights, Discord/Telegram messages, Home Assistant and anything else with an HTTP API. Chain several of these into one multi-step sequence with delays in between.
+- **Beyond keystrokes** — put a key to launching an app, file or URL, running a terminal command, playing a sound (tap to play; hold to stop, fade out, or restart it), scrolling/zooming (wheel + modifiers), controlling your microphone (mute/unmute/toggle/**push-to-talk**), driving **OBS Studio** over obs-websocket (scene, record, stream, mic, virtual cam), or calling a webhook — a fully custom HTTP request (method, headers, body) for smart lights, Discord/Telegram messages, Home Assistant and anything else with an HTTP API. Chain several of these into one multi-step sequence with delays in between. Full list: [docs/actions.md](docs/actions.md).
 - **Macro recorder & editor** — record globally with F8, then edit every event: coordinates, delays, durations; straighten or simplify mouse paths; draw the path 1:1 on your real screen to verify click positions; multi-select rows with shift/cmd-click; full undo/redo.
 - **Per-app profiles** — with the app running, key 1 can be *Save As* in Photoshop and an inventory macro in your game. No matching profile? The keypad falls back to its own on-board config within 5 seconds.
 - **Runs in the background** — closing the window sends MKYADA to the system tray instead of quitting, so key actions and profiles keep working; an optional "start at login" setting launches it automatically.
@@ -63,18 +71,22 @@ Unlike most DIY macro pads that just remap keys, MKYADA plays back **full record
 
 ## The app
 
-| Assign keys | Manage devices |
+| Assign keys (Vision 6) | Manage devices |
 |---|---|
-| ![Keys page — click a key, pick what it does](docs/images/app-keys.png) | ![Devices page — connected keypad with nickname and firmware info](docs/images/app-devices.png) |
+| ![Keys page — click a key, pick what it does](docs/images/screens/vision6-keys.png) | ![Devices page — connected keypad with nickname and firmware info](docs/images/screens/core6-devices.png) |
 | **Record & edit macros** | **Per-app profiles** |
-| ![Recorder — every event is an editable row, playback rules per key](docs/images/app-recorder.png) | ![Profiles — the active window picks the assignments](docs/images/app-profiles.png) |
-| **Setup at a glance** | **Settings & permissions** |
-| ![Setup — keypad summary and live key test](docs/images/app-setup.png) | ![Settings — theme, always-on-top, macOS permissions, updates](docs/images/app-settings.png) |
+| ![Recorder — every event is an editable row, playback rules per key](docs/images/screens/core6-recorder.png) | ![Profiles — the active window picks the assignments](docs/images/screens/core6-profiles.png) |
+| **Setup at a glance** | **Settings (Vision 6 screen options)** |
+| ![Setup — keypad summary and live key test](docs/images/screens/vision6-setup.png) | ![Settings — theme, screen bands, OBS, permissions, updates](docs/images/screens/vision6-settings.png) |
 
-Prefer dark? The whole app ships with light and dark themes:
+The Vision 6's own OLED screens (Home · Grid · Speed · Settings · About):
 
 <p align="center">
-  <img src="docs/images/app-keys-dark.png" alt="Keys page in dark theme, with a key selected" width="640">
+  <img src="docs/images/oled/home.png" alt="Vision 6 Home" width="150">
+  <img src="docs/images/oled/grid.png" alt="Vision 6 Grid" width="150">
+  <img src="docs/images/oled/speed.png" alt="Vision 6 Speed editor" width="150">
+  <img src="docs/images/oled/settings.png" alt="Vision 6 Settings" width="150">
+  <img src="docs/images/oled/about.png" alt="Vision 6 About" width="150">
 </p>
 
 ## Hardware
@@ -85,6 +97,7 @@ Prefer dark? The whole app ships with light and dark themes:
 | Firmware | [CircuitPython](https://circuitpython.org/board/waveshare_rp2040_zero/) 10.x + MKYADA firmware ([firmware/](firmware/)) |
 | Switches | 1–20 × Cherry MX-compatible (6 = reference build), one leg each to **GP0, GP1, GP2…** in key order, other legs daisy-chained to a common **GND** — no diodes, no resistors |
 | Status LED | onboard WS2812 (GP16), nothing to wire |
+| Screen (Vision 6) | SH1106 **128×64 OLED** (I²C, 3V3) + **EC11 rotary encoder** with push + BACK/CONFIRM buttons — wiring in [docs/vision6.md](docs/vision6.md) |
 | Case | 3D-printed **Stream Cheap** remix — STLs + print notes in [hardware/case/](hardware/case/) |
 
 <p align="center">
@@ -130,7 +143,7 @@ Details: [docs/macro-format.md](docs/macro-format.md) · [docs/serial-protocol.m
 | [app/](app/) | Desktop configurator — Tauri v2, React + TypeScript frontend, Rust backend |
 | [firmware/](firmware/) | CircuitPython firmware for the RP2040-Zero |
 | [hardware/](hardware/) | [Soldering guide](hardware/wiring.md) + [3D-printable case](hardware/case/) |
-| [docs/](docs/) | [Macro format](docs/macro-format.md) · [Serial protocol](docs/serial-protocol.md) · [Firmware install](docs/firmware-install.md) · [macOS install](docs/macos-install.md) |
+| [docs/](docs/) | [Models](docs/models.md) · [Key actions](docs/actions.md) · [Use cases](docs/use-cases.md) · [Vision 6](docs/vision6.md) · [Macro format](docs/macro-format.md) · [Serial protocol](docs/serial-protocol.md) · [Firmware install](docs/firmware-install.md) · [macOS install](docs/macos-install.md) |
 | [community-macros/](community-macros/) | Macro gallery — contributions welcome via PR |
 | [tests/](tests/) | Firmware simulation tests + editor model tests (run in CI) |
 
@@ -147,7 +160,7 @@ npx tsx tests/model_test.ts
 
 ## Status
 
-**v0.3.0** — firmware and app verified on real hardware (two boards). Light/dark themed app with onboarding, press-to-capture key assignment, macro recorder/editor with on-screen path overlay and undo/redo, per-app profiles, playback policies (stop/restart, hold-to-repeat), tap/double-press/hold key logic, multi-step key sequences, launch/command/sound key actions, system tray + autostart + live system status, full keyboard-layout awareness (Turkish and any other layout), in-app firmware updates and release checks. CI publishes a Windows installer + macOS universal DMG per release; Linux packages are next.
+**v0.21.x** — two hardware models (**Core 6** screenless, **Vision 6** OLED + encoder) on one firmware and one app, verified on real hardware. Light/dark themed app with onboarding, press-to-capture key assignment, a full macro recorder/editor with on-screen path overlay and undo/redo, per-app profiles that run **natively on the device** (a full config copy), and a broad key-action set: keystroke/combo/text/media, mouse scroll & zoom, launch/command/sound, microphone (incl. push-to-talk), **OBS Studio** control, webhooks, multi-step sequences, and "go to layer X". Tap/double-press/hold key logic with playback policies (stop/restart, hold-to-repeat, loop). Vision 6 adds an on-device menu (layer picker, per-macro speed editor, settings), on-screen layer/profile bands, and encoder/nav-button macro slots. A provisioning wizard flashes blank RP2040-Zero boards; firmware updates are one-click and unbrickable (rescue console, locked update mode). System tray + autostart, full keyboard-layout awareness (Turkish and any other layout), in-app firmware updates and release checks. CI publishes a Windows installer + macOS universal DMG per release; Linux packages are next.
 
 > **Note:** automating input in online games may violate their Terms of Service. You are responsible for how you use this device.
 
@@ -167,6 +180,8 @@ STLs and print notes live in [hardware/case/](hardware/case/).
 
 **MKYADA** (Macro Keypad You Always Dream About), Waveshare RP2040-Zero üzerine kurulu, açık kaynak, kendin-yap bir makro klavyedir (referans tasarım 6 tuş, 20 tuşa kadar desteklenir) ve çok platformlu bir masaüstü yapılandırma uygulamasıyla gelir.
 
+**İki model, tek bellenim ve tek uygulama:** **Core 6** sade, ekransız klavye (RGB LED + katman tuşu); **Vision 6** ise 128×64 OLED ve EC11 döner tekerlek ekler; böylece makro adlarını okuyup katman değiştirir ve ayarları doğrudan cihaz üzerinde yaparsınız. Ayrıntı: [docs/models.md](docs/models.md).
+
 **Macro oluşturmak, keypad'inize yüklemek, kaydettiğiniz makroyu düzenlemek, sürüm güncellemek — her şey için ihtiyacınız olan tek repo burası:** donanımı kur ([hardware/](hardware/)), firmware'i yükle/güncelle (uygulamadan tek tık), tuşlara aksiyon ata (*Keys*), makro kaydet ve ince ayar yap (*Recorder*), uygulamaya özel profiller kur (*Profiles*), hazır makroları paylaş ([community-macros/](community-macros/)).
 
 Çoğu DIY makro pad sadece tuş atar; MKYADA ise kaydedilmiş **mouse hareketleri + tıklamalar + tuş vuruşlarını gerçek donanım HID girdisi olarak** kartın kendisinden oynatır. Yazılımsal makro araçları girdiyi işletim sistemi seviyesinde enjekte ettiği için oyunlarda çoğu zaman çalışmaz; MKYADA'nın girdisi elektriksel olarak gerçek bir klavye/mouse olduğundan ayırt edilemez.
@@ -179,7 +194,8 @@ STLs and print notes live in [hardware/case/](hardware/case/).
 - **Layer desteği** — bir tuşu layer anahtarı yap: 4 tuş → 3×3 = 9 makro. Uygulamadaki canlı rozet o an hangi layer'da olduğunuzu gösterir.
 - **Döngü modu** — `repeat: 0` ile makro, tuşa tekrar basılana kadar çalar; aynı tuş çalan makroyu anında durdurur (panik durdurma).
 - **Uygulamaya özel profiller** — masaüstü uygulaması açıkken tuş 1 Photoshop'ta *Save As*, oyunda envanter makrosu olabilir.
-- **Tuş vuruşunun ötesinde** — bir tuşu uygulama/dosya/URL açmaya, terminal komutu çalıştırmaya ya da ses çalmaya (basılı tutunca durdur, kıs veya baştan başlat) atayın; birkaçını aralarında bekleme ile zincirleyerek tek bir çok adımlı aksiyon yapın.
+- **Tuş vuruşunun ötesinde** — bir tuşu uygulama/dosya/URL açmaya, terminal komutu çalıştırmaya, ses çalmaya (basılı tutunca durdur/kıs/baştan başlat), kaydırma & yakınlaştırmaya, mikrofon kontrolüne (sustur/aç/değiştir/**bas-konuş**), **OBS Studio** kontrolüne (sahne, kayıt, yayın, mikrofon) ya da webhook'a atayın; birkaçını aralarında bekleme ile zincirleyerek tek bir çok adımlı aksiyon yapın. Tüm liste: [docs/actions.md](docs/actions.md).
+- **Vision 6 ekranı** — 128×64 OLED'de canlı makro adları, katman seçici, makro başına hız ayarı ve ayarlar menüsü; hepsi döner tekerlekle. Encoder ve BACK/CONFIRM tuşları da kendi makrolarını taşır. Ayrıntı: [docs/vision6.md](docs/vision6.md).
 - **Kaydet & düzenle** — klavye + mouse kaydı, event bazında düzenleme, çoklu satır seçimi, geri al/ileri al, mouse yolunu gerçek ekranda 1:1 çizme, hız / tekrar ayarı.
 - **Arka planda çalışır** — pencereyi kapatmak uygulamayı kapatmaz, sistem tepsisine gönderir; tuş aksiyonları ve profiller çalışmaya devam eder. İsteğe bağlı "açılışta başlat" seçeneği de var.
 - **Kendin yap** — 6 switch'i RP2040-Zero'ya lehimle, kutuyu 3D yazıcıda bas, firmware'i yükle.
