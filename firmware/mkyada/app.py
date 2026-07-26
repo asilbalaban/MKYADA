@@ -24,6 +24,7 @@ from binascii import a2b_base64, b2a_base64, crc32
 
 import board
 import digitalio
+import keypad
 import microcontroller
 
 # File copies onto a visible CIRCUITPY drive must never reboot the board
@@ -215,6 +216,39 @@ class Buttons:
         return edges
 
 
+class KeyMatrix:
+    """Main key matrix via keypad.Keys: scanned in the background with a
+    hardware event queue, so a press during a long blocking stretch (a grid
+    paint + gc takes 100-300ms) is delivered late instead of LOST — the
+    level-sampled Buttons scanner silently missed taps that fit inside a
+    blocked window ("D->A gecislerinde zaman zaman tekrar basmak gerekiyor").
+    Buttons stays for the wiring wizard, which needs raw level access."""
+
+    def __init__(self, pins):
+        self._keys = keypad.Keys(tuple(pins), value_when_pressed=False,
+                                 pull=True)
+        # current levels, for hold checks (resolve_variant, hold_repeat)
+        self.stable = [False] * len(pins)
+
+    def deinit(self):
+        try:
+            self._keys.deinit()
+        except Exception:
+            pass
+
+    def scan(self):
+        """Drain queued key events -> [(index, pressed_bool), ...]."""
+        edges = []
+        while True:
+            ev = self._keys.events.get()
+            if not ev:
+                break
+            if ev.key_number < len(self.stable):
+                self.stable[ev.key_number] = ev.pressed
+            edges.append((ev.key_number, ev.pressed))
+        return edges
+
+
 class App:
     def __init__(self):
         self.fw_version = read_text("/VERSION") or "0.0.0"
@@ -225,7 +259,7 @@ class App:
         self.led = Led()
         self.config = dict(DEFAULT_CONFIG)
         self.load_config()
-        self.buttons = Buttons(resolve_pins(self.key_pin_names()))
+        self.buttons = KeyMatrix(resolve_pins(self.key_pin_names()))
         self.layer = 0
         self.mode = "standalone"
         self.last_rx = 0.0
@@ -628,7 +662,7 @@ class App:
             self.stop_pin_watch()
             self.load_config()
             self.buttons.deinit()
-            self.buttons = Buttons(resolve_pins(self.key_pin_names()))
+            self.buttons = KeyMatrix(resolve_pins(self.key_pin_names()))
             self.layer = 0
             self.led.set(layer=0)
             self.proto.send({"t": "ok", "re": "reload"})
@@ -997,7 +1031,7 @@ class App:
         _, watch = self.pin_watch
         self.pin_watch = None
         watch.deinit()
-        self.buttons = Buttons(resolve_pins(self.key_pin_names()))
+        self.buttons = KeyMatrix(resolve_pins(self.key_pin_names()))
 
     def tick_pin_watch(self, now):
         names, watch = self.pin_watch

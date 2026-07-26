@@ -959,7 +959,7 @@ check("pin event streamed",
       any(m.get("t") == "pin" and m.get("pin") == "GP13" and m.get("down") for m in outbox),
       str(outbox))
 app.handle_msg({"t": "pin_detect", "on": False})
-check("pin watch restored", app.pin_watch is None and len(app.buttons.ios) == 6)
+check("pin watch restored", app.pin_watch is None and len(app.buttons.stable) == 6)
 app.proto.send = _orig_send
 app.proto.ser = None
 
