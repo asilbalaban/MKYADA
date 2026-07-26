@@ -2,6 +2,7 @@
 // parseAssignment(compileAssignment(a)) with its meaning intact — that pair
 // is what moves assignments between the UI and the device drive.
 import { describe, expect, it } from "vitest";
+import { serializeForDevice } from "./recorder-model";
 import {
   assignmentComplete,
   compileAssignment,
@@ -491,5 +492,37 @@ describe("module-slot assignments (issue #19)", () => {
     expect(back.kind).toBe("nothing");
     expect(back.variants?.hold).toEqual({ kind: "menu", action: "back" });
     expect(describeSlotAssignment(back)).toBe("Do nothing · Hold: Menu back");
+  });
+});
+
+// The very first thing a new keypad ever shows. It is written by the setup
+// wizard (ProvisionWizard) with an explicit name, and it has to survive the
+// trip back: an unnamed starter would leave key 1 blank on the device's grid
+// and its Display name box empty in the editor.
+describe("first-run starter macro", () => {
+  const STARTER_NAME = "MKYADA releases";
+  const starter = compileAssignment(
+    { kind: "text", text: "https://github.com/asilbalaban/MKYADA/releases/" },
+    STARTER_NAME,
+  );
+
+  it("carries the name the wizard gave it", () => {
+    expect(starter?.name).toBe(STARTER_NAME);
+  });
+
+  // The firmware reads a macro's name from LINE 1 and only parses a whole
+  // pretty-printed file below 4 KB (ui.py META_MAX_WHOLE). This one is 10 KB,
+  // so writing it pretty-printed made a brand-new keypad label key 1 "K1".
+  it("puts its name on line 1, where the device looks for it", () => {
+    const line1 = serializeForDevice(starter!, 4).split("\n")[0];
+    expect((JSON.parse(line1) as MacroFile).name).toBe(STARTER_NAME);
+  });
+
+  it("comes back as an editable display name, not a blank field", () => {
+    const back = parseAssignment(JSON.parse(JSON.stringify(starter)) as MacroFile);
+    expect(back.kind).toBe("text");
+    expect(back.label).toBe(STARTER_NAME);
+    // and re-saving it keeps the name — no silent rename to "Type: https://…"
+    expect(compileAssignment(back)?.name).toBe(STARTER_NAME);
   });
 });

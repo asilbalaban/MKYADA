@@ -11,9 +11,15 @@ import { BootloaderDrive, ipc } from "../lib/ipc";
 import type { DeviceModel, DriveInfo } from "../lib/types";
 import { MODEL_META } from "../lib/types";
 import { compileAssignment, defaultConfig } from "../lib/macro-model";
+import { serializeForDevice } from "../lib/recorder-model";
 import { useDevice } from "../lib/device";
 import { Button, Spinner, Stepper } from "./ui";
 import { ProductImage } from "./ProductImage";
+
+/** The wizard writes files for firmware it has just installed itself, so it
+ * can count on the bundled build: line-by-line macro streaming landed in
+ * protocol 4 and every release since speaks it. */
+const STREAM_PROTO = 4;
 
 type Source =
   | { kind: "bootloader"; mount: string }
@@ -113,10 +119,15 @@ export function ProvisionWizard({
         "MKYADA releases",
       );
       if (starter) {
+        // Serialize it the way every other save does. Pretty-printed, this
+        // macro is 10 KB with `{` alone on line 1 — the firmware reads a
+        // macro's name from line 1 and only falls back to parsing the whole
+        // file under 4 KB, so key 1 came up labelled "K1" on a brand-new
+        // keypad. The stream format puts the header (name included) on line 1.
         await ipc.driveWrite(
           drive.path,
           "macros/key1.json",
-          JSON.stringify(starter, null, 2),
+          serializeForDevice(starter, STREAM_PROTO),
         );
       }
       setPhase("");

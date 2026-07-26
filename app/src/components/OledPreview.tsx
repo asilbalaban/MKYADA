@@ -15,10 +15,18 @@ export function OledPreview({ preview, scale = 2 }: { preview: WheelPreview; sca
     if (c) drawWheelScreen(c, preview);
   }, [preview]);
 
+  // `scale` is a CEILING, not a fixed size: the bezel takes the width it is
+  // given and stops growing there. A fixed pixel width broke both ways inside
+  // a flex/grid column — it overflowed a narrow one, and in a wide one the
+  // bezel stretched to the column while the picture inside stayed put.
   return (
     <div
-      className="inline-block rounded-lg p-2"
-      style={{ background: "linear-gradient(#20242c, #171a20)", border: "1px solid #2c313b" }}
+      className="w-full rounded-lg p-2"
+      style={{
+        maxWidth: OLED_W * scale + 16, // + the 8px padding on each side
+        background: "linear-gradient(#20242c, #171a20)",
+        border: "1px solid #2c313b",
+      }}
     >
       <canvas
         ref={ref}
@@ -26,8 +34,9 @@ export function OledPreview({ preview, scale = 2 }: { preview: WheelPreview; sca
         height={OLED_H}
         style={{
           display: "block",
-          width: OLED_W * scale,
-          height: OLED_H * scale,
+          width: "100%",
+          height: "auto",
+          aspectRatio: `${OLED_W} / ${OLED_H}`,
           imageRendering: "pixelated",
           borderRadius: 4,
           background: "#000",
