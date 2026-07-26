@@ -22,7 +22,7 @@ import { fadeOutSounds, playSound, stopAllSounds } from "./sound";
 import { useDevice } from "./device";
 
 /** Holding a sound key this long stops all playing sounds instead of playing. */
-const SOUND_HOLD_STOP_MS = 400;
+const SOUND_HOLD_STOP_MS = 1500; // keep in sync with sound.rs HOLD_MS
 
 /** One short line for the keypad OLED band from the live OBS state: recording /
  * streaming flags plus the active scene name. Empty when OBS is disconnected so
@@ -34,7 +34,8 @@ function formatObsStatus(s: ObsSnapshot | null): string {
   if (s.recording) flags.push("● REC");
   const scene = s.currentScene ?? "";
   const prefix = flags.join(" ");
-  return prefix && scene ? `${prefix} · ${scene}` : prefix || scene;
+  if (!prefix) return scene ? `OBS · ${scene}` : "";
+  return scene ? `${prefix} · ${scene}` : prefix;
 }
 
 import { ipc } from "./ipc";

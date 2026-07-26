@@ -771,10 +771,12 @@ class Ui:
             letter = LAYER_NAMES[idx].upper()
             names = cfg.get("layer_names")
             nick = names[idx] if names and idx < len(names) else None
+            # The app-pushed label (live OBS scene / profile name) wins over
+            # the stored nickname: it's the dynamic status the user watches.
+            if label:
+                return "(%s) %s" % (letter, label)
             if nick:
                 return "(%s) %s" % (letter, nick)
-            if label:
-                return "%s: %s" % (letter, label)
             return tr("layer_band") % letter
         return label
 

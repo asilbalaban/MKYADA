@@ -35,13 +35,14 @@ use rodio::{Decoder, OutputStream, Sink};
 #[derive(Clone)]
 pub struct SoundKey {
     pub path: String,
-    /// what a ~half-second hold does: "fade" | "restart" | "stop" (default).
+    /// what a long hold does: "fade" | "restart" | "stop" (default).
     pub hold: Option<String>,
 }
 
 /// How long the key must be held (down→up) before the hold action, not a plain
-/// tap-and-play, applies.
-const HOLD_MS: u128 = 600;
+/// tap-and-play, applies. Deliberately generous: users layer sounds with quick
+/// taps and stray "slow taps" kept muting everything at 600ms.
+const HOLD_MS: u128 = 1500;
 
 static KEYS: Mutex<Option<HashMap<String, SoundKey>>> = Mutex::new(None);
 
@@ -171,8 +172,42 @@ fn tx() -> Option<&'static Sender<Cmd>> {
                 }
                 stop_sinks(sinks);
             };
-            for cmd in rx {
+            let hold_action =
+                |sinks: &mut Vec<Sink>, handle: &rodio::OutputStreamHandle, entry: &SoundKey| {
+                    match entry.hold.as_deref() {
+                        Some("fade") => fade_sinks(sinks, 600),
+                        Some("restart") => {
+                            stop_sinks(sinks);
+                            play_bytes(sinks, handle, &entry.path);
+                        }
+                        _ => stop_sinks(sinks),
+                    }
+                };
+            loop {
+                // Wake periodically so a key held past HOLD_MS fires its hold
+                // action right then — the user shouldn't wait for the release.
+                let cmd = match rx.recv_timeout(std::time::Duration::from_millis(100)) {
+                    Ok(c) => Some(c),
+                    Err(std::sync::mpsc::RecvTimeoutError::Timeout) => None,
+                    Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+                };
                 sinks.retain(|s| !s.empty()); // reap finished sounds
+                let held: Vec<String> = down
+                    .iter()
+                    .filter(|(_, (at, deferred, _))| *deferred && at.elapsed().as_millis() >= HOLD_MS)
+                    .map(|(id, _)| id.clone())
+                    .collect();
+                for id in held {
+                    if let Some((at, _, entry)) = down.remove(&id) {
+                        crate::dbg_log!(
+                            "audio: {id} hold({}ms) fires: {}",
+                            at.elapsed().as_millis(),
+                            entry.hold.as_deref().unwrap_or("stop")
+                        );
+                        hold_action(&mut sinks, &handle, &entry);
+                    }
+                }
+                let Some(cmd) = cmd else { continue };
                 match cmd {
                     Cmd::Play(bytes) => {
                         if let Ok(sink) = Sink::try_new(&handle) {
@@ -197,6 +232,7 @@ fn tx() -> Option<&'static Sender<Cmd>> {
                         down.insert(id, (Instant::now(), playing, entry));
                     }
                     Cmd::KeyUp(id) => {
+                        // A hold that already fired removed the entry above.
                         let Some((at, deferred, entry)) = down.remove(&id) else {
                             continue;
                         };
@@ -208,18 +244,12 @@ fn tx() -> Option<&'static Sender<Cmd>> {
                             crate::dbg_log!("audio: {id} tap({ms}ms) while playing — layer");
                             play_bytes(&mut sinks, &handle, &entry.path);
                         } else {
+                            // Release raced the 100ms sweep past the threshold.
                             crate::dbg_log!(
-                                "audio: {id} hold({ms}ms): {}",
+                                "audio: {id} hold({ms}ms) on release: {}",
                                 entry.hold.as_deref().unwrap_or("stop")
                             );
-                            match entry.hold.as_deref() {
-                                Some("fade") => fade_sinks(&mut sinks, 600),
-                                Some("restart") => {
-                                    stop_sinks(&mut sinks);
-                                    play_bytes(&mut sinks, &handle, &entry.path);
-                                }
-                                _ => stop_sinks(&mut sinks),
-                            }
+                            hold_action(&mut sinks, &handle, &entry);
                         }
                     }
                 }

@@ -502,7 +502,9 @@ export function compileAssignment(a: Assignment, name?: string): MacroFile | nul
         };
         return {
           ...base,
-          name: name ?? obsActionName(a),
+          // Scene keys default to the bare scene name: the OLED cell is ~6-10
+          // chars, so "Switch scene · X" would fill it before X even starts.
+          name: name ?? (a.action === "setScene" && a.sceneName ? a.sceneName : obsActionName(a)),
           kind: "obs",
           obs: req,
           events: [],

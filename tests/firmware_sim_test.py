@@ -1598,7 +1598,14 @@ vapp.config["show_layer"] = True
 vapp.layer = 1
 check("band layer only", ui._band() == "Layer B", str(ui._band()))
 vapp.config["show_profile"] = True
-check("band layer + profile", ui._band() == "B: Photoshop", str(ui._band()))
+check("band layer + profile", ui._band() == "(B) Photoshop", str(ui._band()))
+# the app-pushed label (live OBS scene / profile) outranks the stored nickname
+vapp.config["layer_names"] = [None, "studyo"]
+check("band label beats nickname", ui._band() == "(B) Photoshop", str(ui._band()))
+vapp.host_label = None
+check("band nickname without label", ui._band() == "(B) studyo", str(ui._band()))
+vapp.host_label = "Photoshop"
+vapp.config["layer_names"] = None
 vapp.config["show_layer"] = False
 check("band profile only", ui._band() == "Photoshop", str(ui._band()))
 vapp.host_label = None

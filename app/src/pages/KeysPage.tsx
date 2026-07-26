@@ -593,7 +593,7 @@ export function KeysPage() {
             <Input
               id="layer-name"
               value={layerNameDraft}
-              maxLength={20}
+              maxLength={16}
               placeholder={`Layer ${layerLabel(layer)}`}
               className="flex-1"
               aria-label={`On-screen name for layer ${layerLabel(layer)}`}

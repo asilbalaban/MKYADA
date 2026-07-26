@@ -405,7 +405,9 @@ class Oled:
         g = displayio.Group()
         top = 0
         if band:
-            band = fold_ascii(band)  # band uses the UI font (no Turkish)
+            # band uses the UI font (no Turkish); 21 chars is what fits in
+            # 128px — a longer text would center itself off both edges.
+            band = fold_ascii(band)[:21]
             top = self.BAND_H
             g.append(_rect(0, 0, self.W, top))
             if self.ui_font is not terminalio.FONT:
