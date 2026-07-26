@@ -43,6 +43,16 @@ jobs:
         run: |
           npm ci
           npm run build
+      # firmware/fonts/*.fnt is committed because it ships in the bundle, so the
+      # thing that can go wrong is an edited .txt with a stale .fnt beside it —
+      # the device would keep drawing the old glyphs and nothing would say so.
+      # Recompile and require the result to be byte-identical.
+      - name: Font compiles and matches its source
+        run: |
+          node scripts/build-font.mjs
+          node scripts/build-font.mjs --html --public
+          git diff --exit-code -- firmware/fonts/ docs/font.html
+
       # The same script every release build runs — catch a broken firmware
       # bundle here, not on the tag. --require-mpy also proves the pinned
       # mpy-cross/neopixel downloads still resolve.
