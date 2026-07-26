@@ -332,6 +332,18 @@ pub fn connect(app: AppHandle, mgr: &DeviceManager, port: &str) -> Result<(), St
 }
 
 pub fn send(mgr: &DeviceManager, msg: &Value) -> Result<(), String> {
+    // Hold back status pushes while a file transfer owns the link. The keypad's
+    // USB receive FIFO is a few hundred bytes and only drains once per main-loop
+    // pass; every one of these makes it repaint (100-300ms), and a chunk landing
+    // in that window loses bytes off the middle of the line. Measured: the
+    // device logged a 1024-byte chunk arriving as 642 bytes of base64, then
+    // dropped the next line entirely — which the app saw only as "the keypad did
+    // not answer in time", i.e. every recorded-macro save failing.
+    if super::serialfs::BUSY.load(std::sync::atomic::Ordering::SeqCst)
+        && super::serialfs::is_cosmetic(msg)
+    {
+        return Ok(());
+    }
     let mut guard = mgr.0.lock().unwrap();
     let conn = guard.as_mut().ok_or("not connected")?;
     let mut data = Vec::new();

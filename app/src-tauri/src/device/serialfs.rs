@@ -120,6 +120,7 @@ impl<'a> Op<'a> {
         let lock = OP.lock().unwrap_or_else(|e| e.into_inner());
         let (tx, rx) = std::sync::mpsc::channel();
         mgr.set_fs_route(Some(tx))?;
+        BUSY.store(true, std::sync::atomic::Ordering::SeqCst);
         Ok(Op { mgr, rx, _lock: lock })
     }
 
@@ -145,8 +146,27 @@ impl<'a> Op<'a> {
 
 impl Drop for Op<'_> {
     fn drop(&mut self) {
+        BUSY.store(false, std::sync::atomic::Ordering::SeqCst);
         let _ = self.mgr.set_fs_route(None);
     }
+}
+
+/// True while a file transfer holds the link. The keypad's USB receive FIFO is
+/// a few hundred bytes and it only drains once per main-loop pass — so a status
+/// push landing mid-transfer (each one makes the device repaint for 100-300ms)
+/// overflows the FIFO and TRUNCATES the chunk line that follows. That read as
+/// "the keypad did not answer in time" and failed every recorded-macro save.
+/// `serial::send` drops cosmetic messages while this is set.
+pub static BUSY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Message types safe to drop while a transfer owns the link: all of them are
+/// either re-asserted on a timer (profile, sysvol) or purely cosmetic and
+/// refreshed by the next change (label). Nothing here carries user intent.
+pub fn is_cosmetic(v: &Value) -> bool {
+    matches!(
+        v.get("t").and_then(Value::as_str),
+        Some("label" | "sysvol" | "profile" | "hostinfo")
+    )
 }
 
 fn fs_err(v: &Value) -> String {

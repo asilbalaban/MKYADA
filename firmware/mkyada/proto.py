@@ -7,6 +7,9 @@ import json
 
 import usb_cdc
 
+# CircuitPython-only heap gauge; the desktop simulator's gc lacks it
+_free = getattr(gc, "mem_free", lambda: -1)
+
 
 class Proto:
     # Commands are tiny, but fs_write lines carry ~2.7KB of base64 when the
@@ -71,6 +74,7 @@ class Proto:
                 # timeout. A silent drop here is the failure that read as
                 # "macro save failed" with no error anywhere.
                 head = bytes(self.buf[:64])
+                print("line dropped:", i, "bytes,", _free(), "free")
                 self.buf = bytearray()
                 gc.collect()
                 for op in (b"fs_write", b"fs_read", b"fs_list", b"fs_delete"):

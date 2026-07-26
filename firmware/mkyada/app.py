@@ -124,10 +124,26 @@ LAYER_NAMES = "abcdefgh"
 # the extra ack round-trips are ~ms on CDC. Core 6 has the whole heap free.
 FS_CHUNK = 1024 if MODELS[MODEL]["display"] else 8192
 FS_ACK_TIMEOUT_S = 3.0
+# Biggest raw fs_WRITE chunk we advertise in hello. An inbound chunk must be
+# copied out of the RX buffer as ONE contiguous block, and CircuitPython never
+# compacts: measured on a working board, a 1451-byte line (1KB chunk) was
+# refused with 14.5KB free, while ~740-byte lines (512B chunks) land every
+# time. Reads keep FS_CHUNK — they have their own adaptive halving.
+FS_WRITE_CHUNK = 512 if MODELS[MODEL]["display"] else 8192
 # Consecutive MemoryErrors the main loop absorbs (compact + resume) before it
 # gives up and takes the branded reset. A fragmented heap refusing ONE big
 # serial line is normal under load; refusing many in a row is a real leak.
 OOM_RECOVERIES = 20
+# The host abandons a chunk after ~8s and just stops sending. Reclaim an
+# upload that goes quiet for longer so its file handle — and the UI, which
+# is held still during transfers — are never stuck waiting for a dead one.
+UPLOAD_IDLE_S = 12.0
+# UI hooks deferred while a file transfer is in flight (see ui_call). Purely
+# cosmetic: the band label, the live volume readout, the idle tick. NOT
+# on_profile — that one drops stale caches, so deferring it would leave the
+# grid naming the wrong profile's macros (and set_profile already no-ops when
+# the id is unchanged, so it only fires on a real switch).
+COSMETIC_HOOKS = ("tick", "on_label", "on_sysvol")
 
 DEFAULT_CONFIG = {
     "model": None,       # "core6" | "vision6"; null = auto (I2C probe once)
@@ -271,6 +287,8 @@ class App:
         self.pending_play = None  # (path, trigger) queued by restart/switch policies
         self._mem_report_at = 0  # last heap-telemetry print (console)
         self.upload = None  # in-flight fs_write: {"path", "tmp", "f", "seq"}
+        self.upload_at = 0.0  # last chunk received (stale-upload reclaim)
+        self.ui_stale = False  # a repaint was skipped during a transfer
         self.pin_watch = None  # ("names", Buttons) while pin-detect mode is on
         self.pin_watch_until = 0.0
         self.host_label = None  # app-pushed profile/app label for the band
@@ -507,6 +525,16 @@ class App:
         keys and serial must keep working even if a screen draw dies."""
         if not self.ui:
             return
+        # A file transfer must own the main loop. Every repaint costs 100-300ms
+        # in which the USB receive FIFO is not drained, and the chunk arriving
+        # then loses bytes out of the middle of its line — a corrupted or
+        # dropped chunk, i.e. a failed save. The app suppresses its own status
+        # pushes during a transfer too; this covers the ones already queued
+        # (and any older app). State still updates; the screen catches up in
+        # one repaint when the transfer ends.
+        if self.upload is not None and name in COSMETIC_HOOKS:
+            self.ui_stale = True
+            return
         try:
             getattr(self.ui, name)(*args)
         except Exception as e:
@@ -543,7 +571,7 @@ class App:
                 # refuse 2KB while reporting 13KB free — so it names its own
                 # safe size instead of letting the host discover it by
                 # crashing the transfer. Older apps ignore the field.
-                "fs_chunk": FS_CHUNK,
+                "fs_chunk": FS_WRITE_CHUNK,
                 "layer": LAYER_NAMES[self.layer], "mode": self.mode}
 
     def handle_msg(self, msg, in_playback=False):
@@ -963,6 +991,7 @@ class App:
         if not up or up["path"] != path or seq != up["seq"]:
             self.close_upload(discard=True)
             return self.fs_err("fs_write", "bad_seq", seq)
+        self.upload_at = time.monotonic()
         data = msg.get("data")
         try:
             if data:
@@ -1516,6 +1545,14 @@ class App:
             # a half-received upload must not leak its file handle either
             if self.upload and not self.proto.connected:
                 self.close_upload(discard=True)
+            # ...nor outlive the host that abandoned it. The host gives up on
+            # a chunk after ~8s and simply stops sending; without this the
+            # stale upload sat there forever, and since the UI is held still
+            # during a transfer (below) that FROZE THE SCREEN — no layer
+            # repaints, no blinking (R) — until the app disconnected.
+            if self.upload and time.monotonic() - self.upload_at > UPLOAD_IDLE_S:
+                print("upload abandoned:", self.upload["path"])
+                self.close_upload(discard=True)
             # ...and neither must a locked update session
             if self.updating and not self.proto.connected:
                 self.end_update()
@@ -1524,6 +1561,10 @@ class App:
             # so hold the screen still until the upload lands. (A save is a
             # second or two; a crash mid-save costs the whole macro.)
             if not self.updating and not self.upload:
+                # catch up on whatever the transfer suppressed, in one paint
+                if self.ui_stale:
+                    self.ui_stale = False
+                    self.ui_call("on_label")
                 self.ui_call("tick", now)
             self.led.tick()
             # heap trend on the console (~10s cadence): a monotonic decline

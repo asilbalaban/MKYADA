@@ -1624,10 +1624,10 @@ check("band markers gone when idle", ui._band() == "(B) Photoshop", str(ui._band
 # hello advertises the biggest fs_write chunk this board's heap can hold in
 # one contiguous block, so the app never has to discover it by failing
 _h = vapp.hello()
-check("hello advertises fs_chunk", _h.get("fs_chunk") == vis_mod.FS_CHUNK,
+check("hello advertises fs_chunk", _h.get("fs_chunk") == vis_mod.FS_WRITE_CHUNK,
       str(_h.get("fs_chunk")))
-check("display model caps fs_chunk at 1KB", vis_mod.FS_CHUNK == 1024,
-      str(vis_mod.FS_CHUNK))
+check("display model caps write chunk at 512B", vis_mod.FS_WRITE_CHUNK == 512,
+      str(vis_mod.FS_WRITE_CHUNK))
 
 # the blink tick: idle _st_select calls flip the phase every ~0.6s while a
 # marker is active, throttled in between
