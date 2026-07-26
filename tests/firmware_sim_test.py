@@ -1620,6 +1620,23 @@ ui._blink_on = True
 vapp.host_rec = False
 vapp.host_live = False
 check("band markers gone when idle", ui._band() == "(B) Photoshop", str(ui._band()))
+
+# the blink tick: idle _st_select calls flip the phase every ~0.6s while a
+# marker is active, throttled in between
+vapp.host_rec = True
+ui.state = uimod.S_SELECT
+ui.sel_mode = False
+ui._blink_at = 0.0
+ui.activity_at = 1000.0
+_b0 = ui._blink_on
+ui._st_select(1000.0, 0, None)
+check("blink tick flips phase", ui._blink_on == (not _b0), str(ui._blink_on))
+ui._st_select(1000.2, 0, None)
+check("blink tick throttled <0.6s", ui._blink_on == (not _b0), str(ui._blink_on))
+ui._st_select(1000.7, 0, None)
+check("blink tick flips again", ui._blink_on == _b0, str(ui._blink_on))
+vapp.host_rec = False
+ui._blink_on = True
 vapp.config["show_layer"] = False
 check("band profile only", ui._band() == "Photoshop", str(ui._band()))
 vapp.host_label = None
