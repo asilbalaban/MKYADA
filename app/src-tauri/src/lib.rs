@@ -1,3 +1,4 @@
+pub mod debuglog;
 mod device;
 mod layout;
 mod obs;
@@ -110,11 +111,14 @@ fn scan_devices(mgr: State<DeviceManager>) -> Vec<DeviceInfo> {
 
 #[tauri::command]
 fn connect_device(app: AppHandle, mgr: State<DeviceManager>, port: String) -> Result<(), String> {
-    serial::connect(app, &mgr, &port)
+    let r = serial::connect(app, &mgr, &port);
+    dbg_log!("connect {port}: {:?}", r.as_ref().err());
+    r
 }
 
 #[tauri::command]
 fn disconnect_device(mgr: State<DeviceManager>) {
+    dbg_log!("disconnect (ui)");
     serial::disconnect(&mgr);
 }
 
@@ -194,6 +198,7 @@ fn write_to_device_bytes(
 ) -> Result<(), String> {
     // a cancel request belongs to the previous transfer, not this one
     serialfs::clear_cancel();
+    dbg_log!("write {rel} {}b", content.len());
     if serialfs::is_serial(drive) {
         let mgr = app.state::<DeviceManager>();
         serialfs::write_file(&mgr, rel, content, |written, total| {
@@ -310,6 +315,7 @@ fn drive_write_cancel() {
 async fn drive_read(app: AppHandle, drive: String, path: String) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
         emit_status(&app, "transfer");
+        let t0 = Instant::now();
         let r = if serialfs::is_serial(&drive) {
             let mgr = app.state::<DeviceManager>();
             serialfs::read_file(&mgr, &path)
@@ -317,6 +323,10 @@ async fn drive_read(app: AppHandle, drive: String, path: String) -> Result<Strin
         } else {
             drive::read_file(&drive, &path)
         };
+        match &r {
+            Ok(s) => dbg_log!("read {path} ok {}b {}ms", s.len(), t0.elapsed().as_millis()),
+            Err(e) => dbg_log!("read {path} ERR {e} {}ms", t0.elapsed().as_millis()),
+        }
         emit_result_status(&app, &r);
         r
     })
@@ -345,17 +355,28 @@ async fn drive_delete(app: AppHandle, drive: String, path: String) -> Result<(),
 async fn drive_list(app: AppHandle, drive: String, path: String) -> Result<Vec<String>, String> {
     tauri::async_runtime::spawn_blocking(move || {
         emit_status(&app, "transfer");
+        let t0 = Instant::now();
         let r = if serialfs::is_serial(&drive) {
             let mgr = app.state::<DeviceManager>();
             serialfs::list_dir(&mgr, &path)
         } else {
             drive::list_dir(&drive, &path)
         };
+        match &r {
+            Ok(names) => dbg_log!("list {path} ok {} files {}ms", names.len(), t0.elapsed().as_millis()),
+            Err(e) => dbg_log!("list {path} ERR {e} {}ms", t0.elapsed().as_millis()),
+        }
         emit_result_status(&app, &r);
         r
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+/// Frontend debug tracing into the same debug.log (loader progress etc.).
+#[tauri::command]
+fn debug_log(msg: String) {
+    dbg_log!("[ui] {msg}");
 }
 
 /// Cleanly unmount the drive before a device reset, so the next mount
@@ -1250,6 +1271,7 @@ pub fn run() {
             sound_stop,
             sound_fade,
             set_sound_keys,
+            debug_log,
             open_target,
             mic_action,
             mic_state,

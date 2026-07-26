@@ -19,7 +19,7 @@ import { useLayoutVersion } from "./lib/layout";
 import { NavContext, Page } from "./lib/nav";
 import { ipc } from "./lib/ipc";
 import type { UpdateInfo } from "./lib/types";
-import { Badge, Button } from "./components/ui";
+import { Badge, Button, Spinner } from "./components/ui";
 import { ToastProvider } from "./components/toast";
 import { ConfirmProvider } from "./components/dialog";
 import { WriteGateProvider } from "./components/WriteProgress";
@@ -44,7 +44,7 @@ function Shell() {
   const [page, setPage] = useState<Page>("devices");
   const [update, setUpdate] = useState<UpdateInfo | null>(null);
   const [nickname, setNickname] = useState("");
-  const { hello, port, layer, status } = useDevice();
+  const { hello, port, layer, status, linkWedged, keysLoading } = useDevice();
   // key labels everywhere show what they type on the user's real keyboard
   // layout; re-render the tree when that map loads or changes
   useLayoutVersion();
@@ -160,6 +160,20 @@ function Shell() {
                   Later
                 </Button>
               </div>
+            </div>
+          )}
+          {linkWedged && (
+            <div className="flex items-center gap-2 bg-danger-bg border-b border-danger-line px-4 py-2 text-sm">
+              <span className="text-fg">
+                The keypad link is stuck and couldn't reconnect on its own —
+                unplug and replug the cable.
+              </span>
+            </div>
+          )}
+          {keysLoading && !linkWedged && (
+            <div className="flex items-center gap-2 bg-info-bg border-b border-info-line px-4 py-2 text-sm">
+              <Spinner />
+              <span className="text-fg">Loading keys from the keypad…</span>
             </div>
           )}
           {/* The Recorder is a full-bleed Photoshop-style workspace (its own

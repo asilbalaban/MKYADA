@@ -561,14 +561,16 @@ class App:
                 except Exception:
                     return self.fs_err("bootloader", "unsupported")
             microcontroller.reset()
-        elif t == "fs_list":
-            self.fs_list(msg)
-        elif t == "fs_read":
-            self.fs_read(msg)
-        elif t == "fs_write":
-            self.fs_write(msg)
-        elif t == "fs_delete":
-            self.fs_delete(msg)
+        elif t in ("fs_list", "fs_read", "fs_write", "fs_delete"):
+            # An fs op that OOMs (fragmented heap right after a connect's
+            # display churn) must answer "oom" — an escaped MemoryError would
+            # hit run()'s fatal handler and hard-RESET the board, and a
+            # swallowed one would strand the host on its timeout.
+            try:
+                getattr(self, t)(msg)
+            except MemoryError:
+                gc.collect()
+                self.fs_err(t, "oom", "out of memory")
         elif t == "fs_ack":
             pass  # stray ack from a transfer we already gave up on
         elif t == "host_enter":
@@ -760,18 +762,30 @@ class App:
     def fs_list(self, msg):
         gc.collect()
         path = "/" + str(msg.get("path", "")).strip("/")
-        entries = []
         try:
-            for name in os.listdir(path):
-                try:
-                    st = os.stat((path.rstrip("/") + "/" + name))
-                except OSError:
-                    continue
-                entries.append({"name": name, "size": st[6],
-                                "dir": bool(st[0] & 0x4000)})
+            names = os.listdir(path)
         except OSError as e:
             return self.fs_err("fs_list", "not_found", e)
-        self.proto.send({"t": "fs_list", "path": path, "entries": entries})
+        # Paginate: a well-used keypad's macros dir holds dozens of files
+        # (layers + profile copies), and serializing them as ONE reply needs a
+        # multi-KB contiguous string — which a display-churned heap can't
+        # always give. The dumps then MemoryError'd and the reply was silently
+        # lost: the app saw a keypad that never answered ("keys all blank").
+        # Small batches keep every allocation tiny; "more" marks continuation.
+        batch = []
+        for name in names:
+            try:
+                st = os.stat((path.rstrip("/") + "/" + name))
+            except OSError:
+                continue
+            batch.append({"name": name, "size": st[6],
+                          "dir": bool(st[0] & 0x4000)})
+            if len(batch) >= 8:
+                self.proto.send({"t": "fs_list", "path": path,
+                                 "entries": batch, "more": True})
+                batch = []
+                gc.collect()
+        self.proto.send({"t": "fs_list", "path": path, "entries": batch})
 
     def fs_read(self, msg):
         path = self.fs_path(msg)
@@ -784,22 +798,50 @@ class App:
             return self.fs_err("fs_read", "not_found", e)
         seq = 0
         crc = 0
+        # Adaptive chunking: each chunk's transient buffers (raw + base64 +
+        # the JSON line, several copies at once) need contiguous heap, and a
+        # display-churned vision6 sometimes can't give even the 1KB default —
+        # one big recorded macro then failed with "oom" on EVERY retry. When a
+        # chunk OOMs (read, encode, or send), rewind the file and halve the
+        # chunk size instead of giving up; 128-byte pieces always fit.
+        size = FS_CHUNK
         try:
             while True:
                 self.feed()
-                chunk = f.read(FS_CHUNK)
-                eof = len(chunk) < FS_CHUNK
+                pos = f.tell()
+                try:
+                    chunk = f.read(size)
+                    eof = len(chunk) < size
+                    data = b2a_base64(chunk).decode().strip() if chunk else ""
+                    out = {"t": "fs_chunk", "path": path, "seq": seq,
+                           "data": data, "eof": eof}
+                    if eof:
+                        out["crc"] = crc32(chunk, crc) & 0xFFFFFFFF
+                    sent = self.proto.send(out)
+                except MemoryError:
+                    chunk = data = out = None
+                    gc.collect()
+                    if size > 128:
+                        size //= 2
+                        f.seek(pos)
+                        continue
+                    raise
+                if not sent:
+                    # the reply couldn't be serialized/written — treat like an
+                    # OOM: shrink and resend this same chunk rather than
+                    # leaving the host waiting for a line that never went out
+                    chunk = data = out = None
+                    gc.collect()
+                    if size > 128:
+                        size //= 2
+                        f.seek(pos)
+                        continue
+                    raise MemoryError("send")
                 crc = crc32(chunk, crc)
-                data = b2a_base64(chunk).decode().strip() if chunk else ""
-                out = {"t": "fs_chunk", "path": path, "seq": seq,
-                       "data": data, "eof": eof}
-                if eof:
-                    out["crc"] = crc & 0xFFFFFFFF
-                self.proto.send(out)
                 # free this chunk's buffers before the next read so the heap
                 # stays compact — a big recorded macro is many chunks and the
                 # display stack leaves little contiguous room on vision6
-                chunk = data = None
+                chunk = data = out = None
                 gc.collect()
                 if eof:
                     break

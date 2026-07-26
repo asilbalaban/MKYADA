@@ -55,6 +55,9 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 /// whenever assignments / the active profile change). Key = "layer:keyNo",
 /// e.g. "a:5".
 pub fn set_keys(map: HashMap<String, SoundKey>) {
+    let mut ids: Vec<&str> = map.keys().map(String::as_str).collect();
+    ids.sort_unstable();
+    crate::dbg_log!("sound map: {} keys [{}]", map.len(), ids.join(","));
     *lock(&KEYS) = Some(map);
 }
 
@@ -79,11 +82,18 @@ pub fn on_device_msg(v: &serde_json::Value) {
     let id = format!("{layer}:{key}");
 
     let entry = lock(&KEYS).as_ref().and_then(|m| m.get(&id).cloned());
-    let Some(entry) = entry else { return };
+    let Some(entry) = entry else {
+        if edge == "down" {
+            let n = lock(&KEYS).as_ref().map_or(0, HashMap::len);
+            crate::dbg_log!("btn {id} down: not a sound key (map has {n})");
+        }
+        return;
+    };
 
     match edge {
         "down" => {
-            let _ = play(&entry.path);
+            let r = play(&entry.path);
+            crate::dbg_log!("btn {id} down: play {} -> {:?}", entry.path, r.as_ref().err());
             lock(&DOWN)
                 .get_or_insert_with(HashMap::new)
                 .insert(id, Instant::now());

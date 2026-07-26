@@ -12,6 +12,7 @@ import {
 } from "react";
 import { ipc, onDeviceDisconnected, onDeviceMsg, onDeviceStatus } from "./ipc";
 import { keysCache } from "./keys-cache";
+import { loadKeysToCache } from "./keys-loader";
 import { rememberDevice, syncNameWithDevice } from "./devnames";
 import type { BtnEvent, DeviceInfo, DriveInfo, Hello } from "./types";
 
@@ -34,6 +35,11 @@ interface DeviceState {
   /** active layer letter ("a", "b", …) as reported live by the device */
   layer: string;
   status: DeviceStatus;
+  /** The link wedged and auto-reopen couldn't recover it — the user needs to
+   * physically unplug/replug. Rare; normal stalls self-heal silently. */
+  linkWedged: boolean;
+  /** The connect-time keys load is still in flight (non-blocking banner). */
+  keysLoading: boolean;
   /** A firmware update is running: every other device interaction (profile
    * pings, label pushes, macro saves) must stand down until it finishes. */
   updating: boolean;
@@ -77,6 +83,19 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
   const [stalled, setStalled] = useState(false);
   const [reloading, setReloading] = useState(false);
   const [updating, setUpdating] = useState(false);
+  // The link wedged and self-heal (auto port-reopen) couldn't clear it — the
+  // one case left where the user must physically replug (a truly hung board).
+  const [linkWedged, setLinkWedged] = useState(false);
+  const linkWedgedRef = useRef(false);
+  linkWedgedRef.current = linkWedged;
+  // Connect-time keys load into keysCache — true while the first read is in
+  // flight so the shell can show a non-blocking "Loading keys…" banner.
+  const [keysLoading, setKeysLoading] = useState(false);
+  // Monotonic id of the newest load; an older load noticing a newer id (or a
+  // disconnect bump) aborts, and only the newest may clear the banner.
+  const loadSeq = useRef(0);
+  const recoverAt = useRef(0); // last auto-reopen time (throttle)
+  const recoverTries = useRef(0); // consecutive auto-reopens without recovery
   const stallTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reloadTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -85,6 +104,12 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
       msgSubs.current.forEach((cb) => cb(msg));
       // any message proves the link is alive again
       setStalled(false);
+      // Real device traffic (not just a reconnect's own hello) means the link
+      // actually recovered — clear the self-heal counters and any "replug" hint.
+      if (msg.t !== "hello") {
+        recoverTries.current = 0;
+        if (linkWedgedRef.current) setLinkWedged(false);
+      }
       if (msg.t === "play_start") setPlayingBusy(true);
       if (msg.t === "play_done") setPlayingBusy(false);
       if (msg.t === "hello") {
@@ -137,6 +162,12 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
       setTransferCount(0);
       setStalled(false);
       setReloading(false);
+      setLinkWedged(false);
+      recoverTries.current = 0;
+      // abort any in-flight keys load and drop its banner — a fresh connect
+      // starts a fresh load
+      loadSeq.current += 1;
+      setKeysLoading(false);
     });
     const un3 = onDeviceStatus((s) => {
       if (s === "transfer") {
@@ -196,13 +227,14 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
       // to the fs_* protocol in the Rust backend.
       const virtual = serialDrive(info.hello.uid);
       setDrive(virtual);
-      void syncNameWithDevice(virtual.path, info.hello.uid);
+      // Nickname sync no longer fires here — it used to race the still-settling
+      // link at the raw connect instant and wedge it. The connect-time keys
+      // loader runs it once the link is proven ready instead.
     } else {
       // Match the CIRCUITPY volume by the UID reported in hello.
       const drives = await ipc.listDrives();
       const match = drives.find((d) => d.uid.toLowerCase() === info.hello.uid.toLowerCase());
       setDrive(match ?? drives[0] ?? null);
-      if (match) void syncNameWithDevice(match.path, info.hello.uid);
     }
     await ipc.deviceSend({ t: "identify" });
   }, []);
@@ -216,7 +248,6 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
     if (hello.usb_drive === false) {
       const virtual = serialDrive(hello.uid);
       setDrive(virtual);
-      void syncNameWithDevice(virtual.path, hello.uid);
       return;
     }
     let cancelled = false;
@@ -227,7 +258,6 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
         const match = drives.find((d) => d.uid.toLowerCase() === hello.uid.toLowerCase());
         if (match) {
           setDrive(match);
-          void syncNameWithDevice(match.path, hello.uid);
         }
       } catch {
         // keep trying on the next tick
@@ -272,6 +302,118 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
     setHello(null);
     setDrive(null);
   }, []);
+
+  // Self-heal: reopen the serial port in place — the software equivalent of
+  // unplugging and replugging the cable. A wedged link recovers only when the
+  // port is reopened (a firmware reload alone doesn't clear it), so instead of
+  // making the user pull the cable we do it for them. Reuses the same
+  // connect_device path (which closes any old handle first) and re-identifies;
+  // the fresh hello flows back through the normal event handler.
+  const reconnect = useCallback(async () => {
+    const p = portRef.current;
+    if (!p) return;
+    try {
+      await ipc.connectDevice(p);
+      await ipc.deviceSend({ t: "identify" });
+    } catch {
+      // Reopen failed — the port is likely truly gone; the reader thread's
+      // disconnect plus the auto-connect loop below take over from here.
+    }
+  }, []);
+
+  // When a drive op times out (link may be wedged), try one automatic reopen,
+  // throttled. If several reopens in a row don't bring real traffic back, the
+  // board is genuinely hung — stop and ask the user to replug (linkWedged).
+  useEffect(() => {
+    if (!stalled || !port) return;
+    const now = Date.now();
+    if (now - recoverAt.current < 12_000) return;
+    recoverAt.current = now;
+    recoverTries.current += 1;
+    if (recoverTries.current > 4) {
+      setLinkWedged(true);
+      return;
+    }
+    void reconnect();
+  }, [stalled, port, reconnect]);
+
+  // Handshake: pulse ping until the device answers (any message will do —
+  // pong proves the link both ways). Right after a connect the firmware is
+  // busy switching modes and redrawing; file requests sent into that window
+  // used to be lost to a fragmented heap. Waiting for a pong first means the
+  // main loop is demonstrably serving messages before we start reading files.
+  const waitForReady = useCallback(async (isCurrent: () => boolean): Promise<boolean> => {
+    for (let attempt = 0; attempt < 15 && isCurrent(); attempt++) {
+      const answered = await new Promise<boolean>((resolve) => {
+        const cb = (m: Record<string, unknown>) => {
+          if (m.t === "pong") {
+            cleanup();
+            resolve(true);
+          }
+        };
+        const timer = setTimeout(() => {
+          cleanup();
+          resolve(false);
+        }, 800);
+        const cleanup = () => {
+          clearTimeout(timer);
+          msgSubs.current.delete(cb);
+        };
+        msgSubs.current.add(cb);
+        void ipc.deviceSend({ t: "ping" }).catch(() => {
+          cleanup();
+          resolve(false);
+        });
+      });
+      if (answered) return true;
+    }
+    return false;
+  }, []);
+
+  // Fill keysCache once the drive is known, so every consumer (Keys page,
+  // native sound-key map, background playback) has the assignments without each
+  // re-reading the link. Keyed on hello too: a reload/reboot sends a fresh
+  // hello, and if a config rewrite invalidated the cache this re-runs then
+  // (after the board is back), not mid-write. A warm cache short-circuits.
+  useEffect(() => {
+    const d = drive?.path;
+    const uid = drive?.uid;
+    // Skip in rescue mode: the main firmware is down, so there are no keys to
+    // load — fs_* there is for repair, not the config/macros this reads.
+    if (!d || !hello || hello.mode === "rescue") return;
+    if (keysCache.get(d)) return; // already warm
+    const seq = ++loadSeq.current; // supersede any older load
+    const isCurrent = () => loadSeq.current === seq && portRef.current !== null;
+    setKeysLoading(true);
+    void (async () => {
+      try {
+        // handshake first — no file traffic until the link answers a ping
+        if (await waitForReady(isCurrent)) {
+          // whole-load retries: an incomplete load (some file kept failing)
+          // must end in a complete cache, not a silently half-blank keypad
+          let warm = false;
+          for (let round = 0; round < 4 && isCurrent() && !warm; round++) {
+            if (round) await new Promise((r) => setTimeout(r, 1500));
+            warm = await loadKeysToCache(d, isCurrent);
+          }
+          // Nickname sync piggybacks on the now-ready link (was a connect race).
+          if (isCurrent() && uid) await syncNameWithDevice(d, uid).catch(() => {});
+        } else if (isCurrent()) {
+          // The link never answered a single ping — that's a wedge, and since
+          // no fs op ran, the stall watcher can't see it. Software-replug from
+          // here: a successful reopen yields a fresh hello, which re-runs this
+          // effect for a fresh handshake + load.
+          recoverTries.current += 1;
+          if (recoverTries.current > 4) setLinkWedged(true);
+          else void reconnect();
+        }
+      } finally {
+        // only the newest load owns the banner; a superseded one leaves it to
+        // its successor (this is what used to strand the spinner forever)
+        if (loadSeq.current === seq) setKeysLoading(false);
+      }
+    })();
+  }, [drive, hello, waitForReady, reconnect]);
 
   const send = useCallback((msg: Record<string, unknown>) => {
     // reload/reset restart the firmware's config — show it as Reloading
@@ -335,6 +477,8 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
         drive,
         layer,
         status,
+        linkWedged,
+        keysLoading,
         updating,
         setUpdating,
         scan,

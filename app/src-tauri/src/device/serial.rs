@@ -181,7 +181,39 @@ pub fn scan(skip: Option<&str>) -> Vec<DeviceInfo> {
 /// `device:msg` event. Emits `device:disconnected` when the port drops.
 pub fn connect(app: AppHandle, mgr: &DeviceManager, port: &str) -> Result<(), String> {
     disconnect(mgr);
-    let mut sp = open(port)?;
+    // Reopening the SAME port (self-heal "software replug"): the old reader
+    // thread may hold the file for up to its read timeout before it notices
+    // the stop flag, and macOS enforces an exclusive lock — an immediate open
+    // then fails and used to strand the app "connected" to nothing. Give the
+    // old reader time to actually release the port.
+    let mut sp = match open(port) {
+        Ok(sp) => sp,
+        Err(first) => {
+            let mut last = first;
+            let mut opened = None;
+            for _ in 0..25 {
+                std::thread::sleep(Duration::from_millis(120));
+                match open(port) {
+                    Ok(sp) => {
+                        opened = Some(sp);
+                        break;
+                    }
+                    Err(e) => last = e,
+                }
+            }
+            match opened {
+                Some(sp) => sp,
+                None => {
+                    // Truly can't open: make sure the frontend knows it is NOT
+                    // connected (the old connection is gone), so auto-connect
+                    // can take over instead of waiting forever.
+                    crate::dbg_log!("connect {port}: open failed after retries: {last}");
+                    let _ = app.emit("device:disconnected", port);
+                    return Err(last);
+                }
+            }
+        }
+    };
     let mut writer = sp.try_clone().map_err(|e| e.to_string())?;
     // Lengthen both handles from open()'s short probe timeout: writes need the
     // headroom (see LIVE_TIMEOUT), and reads only wake from idle on it — data
@@ -214,6 +246,7 @@ pub fn connect(app: AppHandle, mgr: &DeviceManager, port: &str) -> Result<(), St
             match reader.read_until(b'\n', &mut line) {
                 Ok(0) => {
                     // EOF: device unplugged on some platforms
+                    crate::dbg_log!("reader {port_name}: EOF -> disconnected");
                     let _ = app.emit("device:disconnected", &port_name);
                     break;
                 }
@@ -247,6 +280,7 @@ pub fn connect(app: AppHandle, mgr: &DeviceManager, port: &str) -> Result<(), St
                     // disappears on removal — use that as the drop signal.
                     #[cfg(unix)]
                     if !std::path::Path::new(&port_name).exists() {
+                        crate::dbg_log!("reader {port_name}: /dev node gone -> disconnected");
                         let _ = app.emit("device:disconnected", &port_name);
                         break;
                     }
@@ -271,12 +305,14 @@ pub fn connect(app: AppHandle, mgr: &DeviceManager, port: &str) -> Result<(), St
                     }
                     continue;
                 }
-                Err(_) => {
+                Err(e) => {
+                    crate::dbg_log!("reader {port_name}: read err {e} -> disconnected");
                     let _ = app.emit("device:disconnected", &port_name);
                     break;
                 }
             }
         }
+        crate::dbg_log!("reader {port_name}: exit (stop={})", stop.load(Ordering::Relaxed));
         // Drop the dead connection from the manager (unless a newer one
         // already replaced it) so send() fails fast with "not connected"
         // instead of writing into a void.

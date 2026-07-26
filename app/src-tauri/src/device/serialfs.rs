@@ -77,6 +77,15 @@ const TIMEOUT: Duration = Duration::from_secs(8);
 const FS_ATTEMPTS: u32 = 5;
 const RETRY_BACKOFF: Duration = Duration::from_millis(150);
 
+/// A pure reply *timeout* (as opposed to a recoverable "oom"/"crc") almost
+/// always means the link is wedged, not that the firmware is mid-GC — and each
+/// retry costs a full TIMEOUT of dead air. Retrying it the full FS_ATTEMPTS
+/// times held the sole `OP` lock for ~40s, during which the Keys page (and
+/// every other fs op) could read nothing — the "data transfer failed at startup,
+/// only a replug fixes it" report. Cap timeouts hard so the failure surfaces
+/// fast, letting the frontend's self-heal reopen the port.
+const FS_TIMEOUT_ATTEMPTS: u32 = 2;
+
 /// An in-flight fs operation: holds the op lock and receives the routed
 /// fs messages; the route is uninstalled again on drop.
 struct Op<'a> {
@@ -198,16 +207,33 @@ fn with_recovery<T>(
     mut op: impl FnMut(&DeviceManager) -> Result<T, String>,
 ) -> Result<T, String> {
     let mut last = String::new();
+    let mut timeouts = 0u32;
     for attempt in 0..FS_ATTEMPTS {
         if stop_playback {
             quiesce(mgr);
         }
         if attempt > 0 {
-            std::thread::sleep(RETRY_BACKOFF);
+            // grows per attempt: an OOM'd device needs breathing room to
+            // gc/compact — immediate retries just found the same full heap
+            RETRY_BACKOFF
+                .checked_mul(attempt)
+                .map(std::thread::sleep)
+                .unwrap_or_default();
         }
         match op(mgr) {
             Ok(v) => return Ok(v),
-            Err(e) if is_transient(&e) => last = e,
+            Err(e) if is_transient(&e) => {
+                crate::dbg_log!("fs attempt {attempt}: transient {e}");
+                // A wedged link (reply timeout) won't recover by waiting — bail
+                // early so the whole op can't hold the link for ~40s.
+                if e.contains("did not answer in time") {
+                    timeouts += 1;
+                    if timeouts >= FS_TIMEOUT_ATTEMPTS {
+                        return Err(e);
+                    }
+                }
+                last = e;
+            }
             Err(e) => return Err(e),
         }
     }
@@ -327,26 +353,35 @@ pub fn delete_file(mgr: &DeviceManager, path: &str) -> Result<(), String> {
 /// (files only, dotfiles skipped, missing directory = empty list).
 pub fn list_dir(mgr: &DeviceManager, path: &str) -> Result<Vec<String>, String> {
     let path = rel(path)?;
+    // Big directories can OOM the reply on the device — retry like reads do
+    // (never stopping playback), though pagination makes it rare.
+    with_recovery(mgr, false, |mgr| list_once(mgr, path))
+}
+
+fn list_once(mgr: &DeviceManager, path: &str) -> Result<Vec<String>, String> {
     let op = Op::begin(mgr)?;
     op.send(&json!({"t": "fs_list", "path": path}))?;
+    // Firmware ≥ 0.18.1 paginates big directories: each page carries
+    // "more": true until the final one. A single un-flagged reply (older
+    // firmware, small dirs) is simply the first-and-last page.
+    let mut names: Vec<String> = Vec::new();
     loop {
         let v = op.recv()?;
         match v.get("t").and_then(Value::as_str) {
             Some("fs_list") => {
-                let names = v
-                    .get("entries")
-                    .and_then(Value::as_array)
-                    .map(|entries| {
+                if let Some(entries) = v.get("entries").and_then(Value::as_array) {
+                    names.extend(
                         entries
                             .iter()
                             .filter(|e| !e.get("dir").and_then(Value::as_bool).unwrap_or(false))
                             .filter_map(|e| e.get("name").and_then(Value::as_str))
                             .filter(|n| !n.starts_with('.'))
-                            .map(str::to_string)
-                            .collect()
-                    })
-                    .unwrap_or_default();
-                return Ok(names);
+                            .map(str::to_string),
+                    );
+                }
+                if !v.get("more").and_then(Value::as_bool).unwrap_or(false) {
+                    return Ok(names);
+                }
             }
             Some("err") if v.get("code").and_then(Value::as_str) == Some("not_found") => {
                 return Ok(Vec::new());

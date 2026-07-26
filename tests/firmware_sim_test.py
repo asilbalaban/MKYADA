@@ -337,7 +337,7 @@ app.config["layer_key"] = 6
 app.config["layer_count"] = 3
 layer_msgs = []
 _orig_send = app.proto.send
-app.proto.send = lambda obj: layer_msgs.append(obj)
+app.proto.send = lambda obj: (layer_msgs.append(obj), True)[1]
 app.on_edge(5, True)
 check("toggle -> layer b", app.layer == 1)
 check("layer announced", layer_msgs[-1] == {"t": "layer", "layer": "b"}, str(layer_msgs))
@@ -396,7 +396,7 @@ app.config["key_map"] = [3, 1, 2, 4, 5, 6]
 
 # host mode: btn events carry logical key + physical pin
 outbox = []
-app.proto.send = lambda obj: outbox.append(obj)
+app.proto.send = lambda obj: (outbox.append(obj), True)[1]
 app.handle_msg({"t": "host_enter"})
 check("mode host", app.mode == "host")
 app.on_edge(1, True)
@@ -641,7 +641,7 @@ def pressed_usages():
 
 path_variants = variant_file()
 outbox.clear()
-app.proto.send = lambda obj: outbox.append(obj)
+app.proto.send = lambda obj: (outbox.append(obj), True)[1]
 app.proto.ser = FakeSerial([])  # "connected" so key_action is announced
 
 # tap: key released before the call, no second press within the window
@@ -679,7 +679,7 @@ app.proto.send = _orig_send
 
 # --- standalone btn streaming: edges reach a connected app in both modes --
 outbox.clear()
-app.proto.send = lambda obj: outbox.append(obj)
+app.proto.send = lambda obj: (outbox.append(obj), True)[1]
 app.handle_msg({"t": "host_leave"})
 app.play_file = lambda path, trigger=None, **kw: None  # don't actually play
 app.on_edge(1, True)
@@ -720,7 +720,7 @@ check("led garbage rgb tolerated", app.led.override is None, str(app.led.overrid
 
 # --- serial "label" op (fw 0.9.0): app-pushed profile label ---------------
 outbox.clear()
-app.proto.send = lambda obj: outbox.append(obj)
+app.proto.send = lambda obj: (outbox.append(obj), True)[1]
 app.handle_msg({"t": "label", "text": "Photoshop"})
 check("label stored", app.host_label == "Photoshop", str(app.host_label))
 check("label acked", outbox[-1] == {"t": "ok", "re": "label"}, str(outbox[-1:]))
@@ -773,7 +773,7 @@ def fs_section():
     fs_dir = tempfile.mkdtemp()  # absolute path; fs_path() keeps it absolute
     fs_rel = fs_dir.lstrip("/")
     outbox.clear()
-    app.proto.send = lambda obj: outbox.append(obj)
+    app.proto.send = lambda obj: (outbox.append(obj), True)[1]
 
     # chunked write: two chunks + eof, lands atomically via .part + rename
     payload = b'{"format":"mkyada-macro","version":2,"events":[]}' * 50
@@ -821,15 +821,17 @@ def fs_section():
         if obj.get("t") == "fs_chunk":
             _calls["n"] += 1
             raise MemoryError("simulated")
-        _orig_send(obj)
+        return _orig_send(obj)
 
     app.proto.send = _boom
     app.wait_fs_ack = lambda: True
     app.handle_msg({"t": "fs_read", "path": fs_rel + "/macros/key1.json"})
     app.proto.send = _orig_send
     del app.wait_fs_ack
+    # the adaptive reader halves the chunk a few times before giving up, so
+    # several attempts are expected — what matters is err oom, not a crash
     check("fs_read oom -> err not crash",
-          _calls["n"] == 1 and outbox and outbox[-1].get("code") == "oom",
+          _calls["n"] >= 1 and outbox and outbox[-1].get("code") == "oom",
           str(outbox[-1:]))
 
     # list + delete
@@ -841,6 +843,22 @@ def fs_section():
           and any(e["name"] == "key1.json" and e["size"] == len(payload) and not e["dir"]
                   for e in listed.get("entries", [])),
           str(listed))
+    # a big directory pages its listing (>8 entries → "more"-flagged batches),
+    # so the reply never needs one multi-KB dumps on a fragmented heap
+    for i in range(20):
+        with open(fs_dir + "/macros/pg%02d.json" % i, "w") as f:
+            f.write("{}")
+    outbox.clear()
+    app.handle_msg({"t": "fs_list", "path": fs_rel + "/macros"})
+    pages = [m for m in outbox if m.get("t") == "fs_list"]
+    total = sum(len(p.get("entries", [])) for p in pages)
+    check("fs_list paginates",
+          len(pages) >= 3 and all(p.get("more") for p in pages[:-1])
+          and not pages[-1].get("more") and total >= 20,
+          "pages=%d total=%d" % (len(pages), total))
+    for i in range(20):
+        os.remove(fs_dir + "/macros/pg%02d.json" % i)
+
     app.handle_msg({"t": "fs_delete", "path": fs_rel + "/macros/key1.json"})
     check("fs_delete ok", outbox[-1].get("re") == "fs_delete" and outbox[-1].get("t") == "ok", str(outbox[-1:]))
     check("fs_delete removed", not os.path.exists(fs_dir + "/macros/key1.json"))
@@ -928,7 +946,7 @@ app.load_config()
 
 # pin_detect: wiring wizard streams GPIO edges, then restores the keys
 outbox.clear()
-app.proto.send = lambda obj: outbox.append(obj)
+app.proto.send = lambda obj: (outbox.append(obj), True)[1]
 app.proto.ser = FakeSerial([])
 app.handle_msg({"t": "pin_detect", "on": True})
 check("pin watch armed", app.pin_watch is not None)
@@ -967,7 +985,7 @@ check("vision6 ui attached", vapp.ui is not None)
 # --- vision6 UI: labels, speed persistence, slots, host events ------------
 ui = vapp.ui
 voutbox = []
-vapp.proto.send = lambda obj: voutbox.append(obj)
+vapp.proto.send = lambda obj: (voutbox.append(obj), True)[1]
 vapp.proto.ser = FakeSerial([])
 mac_dir = tempfile.mkdtemp()
 LN = "abcdefgh"
@@ -1623,7 +1641,7 @@ os.remove = lambda p: _orig_os_remove(_map(p))
 os.rename = lambda a, b: _orig_os_rename(_map(a), _map(b))
 _b.open = _lang_open
 voutbox.clear()
-vapp.proto.send = lambda obj: voutbox.append(obj)
+vapp.proto.send = lambda obj: (voutbox.append(obj), True)[1]
 res_lang = ui.persist_lang("tr")
 _b.open = _real_open
 os.remove, os.rename = _orig_os_remove, _orig_os_rename
@@ -1687,7 +1705,7 @@ import tempfile as _tf  # noqa: E402
 fs_dir = _tf.mkdtemp()
 app.fs_path = lambda msg: os.path.join(fs_dir, str(msg.get("path", "")).lstrip("/"))
 outbox = []
-app.proto.send = lambda obj: outbox.append(obj)
+app.proto.send = lambda obj: (outbox.append(obj), True)[1]
 app.proto.ser = FakeSerial([])
 
 # CRC-verified fs_write: good CRC lands the file...

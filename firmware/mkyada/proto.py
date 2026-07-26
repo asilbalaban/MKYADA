@@ -2,6 +2,7 @@
 # One JSON object per newline-terminated line, both directions.
 # See docs/serial-protocol.md for the message catalogue.
 
+import gc
 import json
 
 import usb_cdc
@@ -55,19 +56,50 @@ class Proto:
                 except ValueError:
                     pass
                 except MemoryError:
-                    # a big fs_write line didn't fit the heap right now —
-                    # drop it (the sender times out and retries); the keypad
-                    # itself must never die on serial traffic
-                    import gc
+                    # The heap was too fragmented to parse this line (right
+                    # after a connect the display churn leaves little room —
+                    # even a tiny fs_read can hit this). Silently dropping it
+                    # made the host wait out its full timeout on a request the
+                    # keypad never saw ("data transfer failed" at startup), so:
+                    # compact and retry, and if it still won't fit, tell the
+                    # host which op died so it can retry NOW instead of hanging.
                     gc.collect()
+                    try:
+                        msg = json.loads(line)
+                        if isinstance(msg, dict):
+                            msgs.append(msg)
+                    except ValueError:
+                        pass
+                    except MemoryError:
+                        gc.collect()
+                        for op in (b"fs_read", b"fs_list", b"fs_write",
+                                   b"fs_delete"):
+                            if op in line:
+                                self.send({"t": "err", "re": op.decode(),
+                                           "code": "oom",
+                                           "msg": "out of memory"})
+                                break
         if len(self.buf) > self.MAX_LINE:  # garbage guard
             self.buf = bytearray()
         return msgs
 
     def send(self, obj):
+        """Send one message. Returns True if the line went out — senders that
+        MUST deliver (fs replies) check this: a silently dropped reply used to
+        strand the host on its full timeout with no clue."""
         if not self.ser:
-            return
+            return False
         try:
             self.ser.write(json.dumps(obj).encode("utf-8") + b"\n")
+            return True
+        except MemoryError:
+            # Serializing the reply OOM'd (fs_chunk lines are ~KBs) — compact
+            # and retry once before reporting failure.
+            gc.collect()
+            try:
+                self.ser.write(json.dumps(obj).encode("utf-8") + b"\n")
+                return True
+            except Exception:
+                return False
         except Exception:
-            pass
+            return False

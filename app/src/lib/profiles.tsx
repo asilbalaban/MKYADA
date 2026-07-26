@@ -155,7 +155,7 @@ function matches(p: Profile, fg: ForegroundInfo): boolean {
 }
 
 export function ProfilesProvider({ children }: { children: ReactNode }) {
-  const { port, drive, hello, send, onBtn, onMsg, updating } = useDevice();
+  const { port, drive, hello, send, onBtn, onMsg, updating, keysLoading } = useDevice();
   const driveRef = useRef<DriveInfo | null>(null);
   driveRef.current = drive;
   const helloRef = useRef<Hello | null>(null);
@@ -674,6 +674,10 @@ export function ProfilesProvider({ children }: { children: ReactNode }) {
       await store.set("profiles", next);
       await store.save();
       if (!drive) return;
+      // ONE listing for the whole sync — this used to run per key, and at
+      // connect time those repeated full-directory listings saturated the
+      // serial link alongside the keys load (device OOM, blank keys).
+      const existing = await ipc.driveList(drive.path, "macros").catch(() => [] as string[]);
       for (const p of next) {
         for (const [keyNo, a] of Object.entries(p.keys)) {
           const macro = compileAssignment(a as Assignment);
@@ -694,7 +698,6 @@ export function ProfilesProvider({ children }: { children: ReactNode }) {
           }
           const stem = file.split("/").pop()!.replace(/\.json$/, ".");
           const keep = new Set(parts.map((part) => part.path.split("/").pop()));
-          const existing = await ipc.driveList(drive.path, "macros").catch(() => [] as string[]);
           for (const f of existing) {
             if (f.startsWith(stem) && AUX_FILE_RE.test(f) && !keep.has(f)) {
               await ipc.driveDelete(drive.path, `macros/${f}`).catch(() => {});
@@ -719,10 +722,14 @@ export function ProfilesProvider({ children }: { children: ReactNode }) {
       return;
     }
     if (!hello || updating || profiles.length === 0) return; // wait for proto
+    // Never compete with the connect-time keys load: this sync writes + lists
+    // heavily, and running it concurrently used to saturate the serial link
+    // (device OOM, timed-out reads, keys showing blank). Wait our turn.
+    if (keysLoading) return;
     if (syncedDrive.current === drive.path) return;
     syncedDrive.current = drive.path;
     void saveProfiles(profiles);
-  }, [drive, hello, profiles, updating, saveProfiles]);
+  }, [drive, hello, profiles, updating, keysLoading, saveProfiles]);
 
   return (
     <Ctx.Provider value={{ profiles, foreground, activeProfile, enabled, setEnabled, saveProfiles }}>
