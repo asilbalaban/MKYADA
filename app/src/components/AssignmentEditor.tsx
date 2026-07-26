@@ -595,23 +595,6 @@ export function AssignmentEditor({
         <SequenceEditor value={value.steps} onChange={(steps) => onChange({ ...value, steps })} />
       )}
 
-      {!nested && !slotMode && allowMenu && value.kind !== "none" && value.kind !== "nothing" && (
-        <div className="flex flex-col gap-2 border-t border-line pt-3">
-          <span className="text-xs font-semibold text-fg-muted">
-            Wheel menu — what turning the wheel to this key and pressing shows on screen
-          </span>
-          <div className="flex items-start gap-3">
-            <OledPreview preview={wheelPreview(value)} />
-            <div className="flex min-w-0 flex-col gap-1 text-xs">
-              <p className="text-fg-muted">{wheelSpec(value.kind).summary}</p>
-              {wheelSpec(value.kind).standaloneFallback && (
-                <p className="text-fg-faint">{wheelSpec(value.kind).standaloneFallback}</p>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
       {!nested && (showBehavior || showKeyLogic) && (
         <Collapsible title="Behavior & key logic" summary={behaviorSummary}>
           {showBehavior && (
@@ -688,6 +671,25 @@ export function AssignmentEditor({
             </div>
           )}
         </Collapsible>
+      )}
+
+      {!nested && !slotMode && allowMenu && value.kind !== "none" && value.kind !== "nothing" && (
+        <div className="flex flex-col gap-2 border-t border-line pt-3">
+          <span className="text-xs font-semibold text-fg-muted">
+            Wheel menu — what turning the wheel to this key and pressing shows on screen
+          </span>
+          {/* Half the width each: the screenshot was wide enough to squeeze the
+            * explanation into a narrow ragged column beside it. */}
+          <div className="grid grid-cols-2 items-start gap-3">
+            <OledPreview preview={wheelPreview(value)} scale={1.5} />
+            <div className="flex min-w-0 flex-col gap-1 text-xs">
+              <p className="text-fg-muted">{wheelSpec(value.kind).summary}</p>
+              {wheelSpec(value.kind).standaloneFallback && (
+                <p className="text-fg-faint">{wheelSpec(value.kind).standaloneFallback}</p>
+              )}
+            </div>
+          </div>
+        </div>
       )}
 
       {importError && <p className="text-danger text-xs">{importError}</p>}
