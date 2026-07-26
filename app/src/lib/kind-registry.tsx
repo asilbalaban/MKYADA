@@ -12,7 +12,7 @@ import { kindRequiresHost } from "./macro-model";
 
 /** How the picker groups action kinds. Order here is the order shown. */
 export const KIND_CATEGORIES = [
-  { id: "keyboard", label: "Keyboard & text" },
+  { id: "keyboard", label: "Keyboard, mouse & text" },
   { id: "media", label: "Media & sound" },
   { id: "automation", label: "Automation" },
   { id: "stream", label: "Streaming" },
@@ -55,23 +55,7 @@ export interface KindMeta {
 
 // Order within a category is the order listed here.
 const KINDS: KindMeta[] = [
-  // ── Keyboard & text ──────────────────────────────────────────────────────
-  {
-    // A sequence is how most people write "a macro" by hand — a few keystrokes
-    // in a row — so it opens the keyboard group rather than hiding under
-    // Automation next to webhooks and shell commands.
-    id: "sequence",
-    label: "Multi action (sequence)",
-    icon: KIND_ICON.sequence,
-    category: "keyboard",
-    host: false,
-    wheel: {
-      mtype: "card",
-      title: "SEQUENCE",
-      summary: "Press to run the whole sequence from the top.",
-      standaloneFallback: "Steps that need the app are skipped when it's closed; the rest still run.",
-    },
-  },
+  // ── Keyboard, mouse & text ───────────────────────────────────────────────
   {
     id: "keystroke",
     label: "Single key",
@@ -97,6 +81,36 @@ const KINDS: KindMeta[] = [
     },
   },
   {
+    // A sequence is how most people write "a macro" by hand — a few keystrokes
+    // in a row — so it opens the keyboard group rather than hiding under
+    // Automation next to webhooks and shell commands.
+    id: "sequence",
+    label: "Multi action (sequence)",
+    icon: KIND_ICON.sequence,
+    category: "keyboard",
+    host: false,
+    wheel: {
+      mtype: "card",
+      title: "SEQUENCE",
+      summary: "Press to run the whole sequence from the top.",
+      standaloneFallback: "Steps that need the app are skipped when it's closed; the rest still run.",
+    },
+  },
+  {
+    id: "scroll",
+    label: "Mouse scroll / zoom",
+    icon: KIND_ICON.scroll,
+    // A wheel/zoom key is typed input the same way a keystroke is: standalone
+    // HID that lands wherever the cursor is, not a media transport.
+    category: "keyboard",
+    host: false,
+    wheel: {
+      mtype: "card",
+      title: "SCROLL",
+      summary: "Turn the wheel to scroll in the assigned direction; press for a single step.",
+    },
+  },
+  {
     id: "text",
     label: "Type text",
     icon: KIND_ICON.text,
@@ -110,15 +124,16 @@ const KINDS: KindMeta[] = [
   },
   // ── Media & sound ────────────────────────────────────────────────────────
   {
-    id: "media",
-    label: "Media key",
-    icon: KIND_ICON.media,
+    id: "sound",
+    label: "Play a sound",
+    icon: KIND_ICON.sound,
     category: "media",
-    host: false,
+    host: true,
     wheel: {
-      mtype: "picker",
-      title: "MEDIA",
-      summary: "Turn to browse every media key, tap to use the highlighted one, hold to reassign this key to it.",
+      mtype: "card",
+      title: "SOUND",
+      summary: "Press to play or stop the sound; shows whether it's playing.",
+      standaloneFallback: "Needs the MKYADA app — the wheel shows a short reminder.",
     },
   },
   {
@@ -161,28 +176,15 @@ const KINDS: KindMeta[] = [
     },
   },
   {
-    id: "sound",
-    label: "Play a sound",
-    icon: KIND_ICON.sound,
-    category: "media",
-    host: true,
-    wheel: {
-      mtype: "card",
-      title: "SOUND",
-      summary: "Press to play or stop the sound; shows whether it's playing.",
-      standaloneFallback: "Needs the MKYADA app — the wheel shows a short reminder.",
-    },
-  },
-  {
-    id: "scroll",
-    label: "Mouse scroll / zoom",
-    icon: KIND_ICON.scroll,
+    id: "media",
+    label: "Media key",
+    icon: KIND_ICON.media,
     category: "media",
     host: false,
     wheel: {
-      mtype: "card",
-      title: "SCROLL",
-      summary: "Turn the wheel to scroll in the assigned direction; press for a single step.",
+      mtype: "picker",
+      title: "MEDIA",
+      summary: "Turn to browse every media key, tap to use the highlighted one, hold to reassign this key to it.",
     },
   },
   // ── Automation ───────────────────────────────────────────────────────────

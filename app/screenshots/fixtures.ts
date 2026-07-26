@@ -40,7 +40,7 @@ export interface Fixture {
   appVersion: string;
 }
 
-const APP_VERSION = "0.28.0";
+const APP_VERSION = "0.29.0";
 
 // -------------------------------------------------------------- assignments ---
 // key number (per layer) -> what it does. Chosen to show the range of action
