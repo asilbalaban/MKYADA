@@ -120,6 +120,7 @@ class Oled:
         self.H = self.display.height if self.display else 64
         self.CX = self.W // 2
         self._font_cache = {}
+        self._grid = None  # persistent grid group, built on first show_grid
         # last grid paint dropped a cell label (or failed whole) under memory
         # pressure — the UI repaints it once the heap has recovered
         self.grid_degraded = False
@@ -175,6 +176,7 @@ class Oled:
             except Exception:
                 pass
         self._font_cache = {}
+        self._grid = None  # its Labels reference the dropped fonts
         self.grid_font, self.grid_cpx, self.grid_tr_ok = terminalio.FONT, 6, False
         self.hero_font, self.hero_scale = terminalio.FONT, 3
         self.ui_font = terminalio.FONT
@@ -380,80 +382,115 @@ class Oled:
         renders inverted while invert is True (selection / playing).
         band = optional status text (active layer / profile label) drawn as
         an inverted strip across the top; the six cells and their macro
-        names squeeze into the remaining height."""
+        names squeeze into the remaining height.
+
+        The grid is PERSISTENT: the group (band strip, dividers, 6 highlight
+        rects, 13 Labels) is built once and every later paint only mutates
+        Label.text / .color and shifts the highlight rect. Rebuilding it per
+        paint transiently ate nearly all free heap, and under pressure a cell
+        Label (or the whole paint) died — the "blinking labels" bug. Now a
+        repaint allocates only for the cells whose text actually changed."""
         if not self.display:
             return
-        # The grid is the label-heaviest screen and every caller repaints it
-        # (layer switch, play start/done, selection ticks). Building its group
-        # transiently uses most of the free heap, so start compacted and, if
-        # the build still dies mid-way, drop the half-built group and try once
-        # more — a failed repaint used to leave the screen showing the OLD
-        # layer ("B never appears"). Protecting it HERE covers every caller.
-        # Loop (not a nested retry inside `except`): the handler frame would
-        # stay live under the retried call and exhaust the fixed pystack.
         self.grid_degraded = False
-        for _ in range(2):
-            gc.collect()
-            try:
-                self._show_grid(labels, active, invert, band)
+        banded = bool(band)
+        st = self._grid
+        if (st is None or st["banded"] != banded
+                or st["font"] is not self.grid_font):
+            st = None
+            self._grid = None  # the old group is garbage — free it first
+            for _ in range(2):
+                gc.collect()
+                try:
+                    st = self._grid_build(banded)
+                    break
+                except MemoryError:
+                    continue
+            if st is None:
+                self.grid_degraded = True  # retry once the heap recovers
                 return
-            except MemoryError:
-                continue
-        self.grid_degraded = True  # both attempts died — repaint when calmer
-
-    def _show_grid(self, labels, active, invert, band):
-        g = displayio.Group()
-        top = 0
-        if band:
+            self._grid = st
+        if banded:
             # band uses the UI font (no Turkish); 21 chars is what fits in
             # 128px — a longer text would center itself off both edges.
-            band = fold_ascii(band)[:21]
-            top = self.BAND_H
-            g.append(_rect(0, 0, self.W, top))
-            if self.ui_font is not terminalio.FONT:
-                try:  # profile names carry chars outside UI_GLYPHS
-                    self.ui_font.load_glyphs(set(band))
-                except Exception:
-                    pass
-            try:
-                g.append(self._txt(band, self.CX, top // 2 - 1, color=0x000000,
-                                   font=self.ui_font))
-            except MemoryError:
-                gc.collect()  # band text skipped; the grid still paints
-        cols, rows = 3, 2
-        cw = self.W // cols        # 42
-        ch = (self.H - top) // rows  # 32 full-height, 27 under the band
+            b = fold_ascii(band)[:21]
+            if st["band"].text != b:
+                if self.ui_font is not terminalio.FONT:
+                    try:  # profile names carry chars outside UI_GLYPHS
+                        self.ui_font.load_glyphs(set(b))
+                    except Exception:
+                        pass
+                try:
+                    st["band"].text = b
+                except MemoryError:
+                    gc.collect()
+                    self.grid_degraded = True
+        cw, ch, top = st["cw"], st["ch"], st["top"]
+        y1 = st["y1"]
         maxc = (cw - 2) // self.grid_cpx
+        for k in range(6):
+            cell = st["cells"][k]
+            bg, l1, l2, x, y = cell[0], cell[1], cell[2], cell[3], cell[4]
+            t1, t2 = labels[k] if k < len(labels) else ("", "")
+            t1 = fold_ascii((t1 or "")[:maxc], self.grid_tr_ok)
+            t2 = fold_ascii((t2 or "")[:maxc], self.grid_tr_ok)
+            on = k == active and invert
+            want = (t1, t2, on)
+            if cell[5] == want:
+                continue
+            # Per-cell resilience: even a text mutation allocates its glyph
+            # tiles, and on a shredded heap that can still fail. Skip just
+            # that cell, keep its cache dirty so the degraded repaint fixes
+            # it once the heap recovers.
+            try:
+                bg.x = x if on else -cw - 2  # off-screen == hidden
+                col = 0x000000 if on else 0xFFFFFF
+                # one-line cells center vertically; two-line cells stack
+                l1.anchored_position = (x + cw // 2,
+                                        y + (y1 if t2 else ch // 2))
+                if l1.text != t1:
+                    l1.text = t1
+                if l2.text != t2:
+                    l2.text = t2
+                l1.color = col
+                l2.color = col
+                cell[5] = want
+            except MemoryError:
+                gc.collect()
+                cell[5] = None
+                self.grid_degraded = True
+        self.paint(st["g"])
+
+    def _grid_build(self, banded):
+        cols, rows = 3, 2
+        top = self.BAND_H if banded else 0
+        cw = self.W // cols          # 42
+        ch = (self.H - top) // rows  # 32 full-height, 27 under the band
+        g = displayio.Group()
+        st = {"g": g, "banded": banded, "font": self.grid_font,
+              "cw": cw, "ch": ch, "top": top,
+              "y1": 9 if banded else 11, "band": None, "cells": []}
+        if banded:
+            g.append(_rect(0, 0, self.W, top))
+            st["band"] = self._txt("", self.CX, top // 2 - 1, color=0x000000,
+                                   font=self.ui_font)
+            g.append(st["band"])
         g.append(_rect(cw, top, 1, self.H - top))
         g.append(_rect(2 * cw, top, 1, self.H - top))
         g.append(_rect(0, top + ch, self.W, 1))
-        y1, y2 = (9, 18) if band else (11, 22)
+        y2 = 18 if banded else 22
         for k in range(6):
             x = (k % cols) * cw
             y = top + (k // cols) * ch
-            if k == active and invert:
-                g.append(_rect(x, y, cw, ch))
-                col = 0x000000
-            else:
-                col = 0xFFFFFF
-            l1, l2 = labels[k] if k < len(labels) else ("", "")
-            # Per-cell resilience: on a shredded heap a single Label can fail
-            # even with plenty of total free RAM (no contiguous hole). One
-            # missing cell text is invisible damage; the whole screen failing
-            # left the OLD layer on screen after the state had switched — the
-            # worst possible outcome for muscle memory. Paint what fits, and
-            # flag the screen as degraded so the UI quietly repaints it once
-            # the heap recovers (labels used to just stay missing).
-            try:
-                if l2:
-                    g.append(self._gtxt(l1[:maxc], x + cw // 2, y + y1, color=col))
-                    g.append(self._gtxt(l2[:maxc], x + cw // 2, y + y2, color=col))
-                elif l1:
-                    g.append(self._gtxt(l1[:maxc], x + cw // 2, y + ch // 2, color=col))
-            except MemoryError:
-                gc.collect()  # cell skipped; keep painting the rest
-                self.grid_degraded = True
-        self.paint(g)
+            bg = _rect(-cw - 2, y, cw, ch)  # starts hidden (off-screen)
+            g.append(bg)
+            l1 = self._gtxt("", x + cw // 2, y + ch // 2)
+            l2 = self._gtxt("", x + cw // 2, y + y2)
+            g.append(l1)
+            g.append(l2)
+            # [5] caches (line1, line2, inverted) so unchanged cells cost 0
+            st["cells"].append([bg, l1, l2, x, y, None])
+        return st
 
     def show_speed(self, layer_name, key_no, t):
         if not self.display:

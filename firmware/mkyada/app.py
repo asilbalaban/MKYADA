@@ -271,6 +271,8 @@ class App:
         self.pin_watch_until = 0.0
         self.host_label = None  # app-pushed profile/app label for the band
         self.host_keys = None  # app-pushed profile key names (host-mode grid)
+        self.host_rec = False  # OBS is recording — band blinks "(R)"
+        self.host_live = False  # OBS is streaming — band blinks "(L)"
         self.host_menus = False  # app advertised wheel-menu support (hostinfo)
         # Active per-app profile (issue #23): a file prefix like "p_p123" the
         # app sets via {t:"profile"}. When set, macro paths resolve to that
@@ -699,10 +701,15 @@ class App:
                     keys = None
             else:
                 keys = None
+            rec = bool(msg.get("rec"))
+            live = bool(msg.get("live"))
             self.proto.send({"t": "ok", "re": "label"})
-            if text != self.host_label or keys != self.host_keys:
+            if (text != self.host_label or keys != self.host_keys
+                    or rec != self.host_rec or live != self.host_live):
                 self.host_label = text
                 self.host_keys = keys
+                self.host_rec = rec
+                self.host_live = live
                 self.ui_call("on_label")
         elif t == "scroll":
             # direct wheel ticks (proto v6): the app drives profile wheel
@@ -1446,9 +1453,12 @@ class App:
             if self.led.override and not self.proto.connected:
                 self.led.clear_override()
             # ...and neither must its profile label on the band
-            if (self.host_label or self.host_keys) and not self.proto.connected:
+            if ((self.host_label or self.host_keys or self.host_rec
+                 or self.host_live) and not self.proto.connected):
                 self.host_label = None
                 self.host_keys = None
+                self.host_rec = False
+                self.host_live = False
                 self.ui_call("on_label")
             # the app's wheel-menu support (and any open host menu) can't
             # outlive the connection either

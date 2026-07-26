@@ -24,18 +24,18 @@ import { useDevice } from "./device";
 /** Holding a sound key this long stops all playing sounds instead of playing. */
 const SOUND_HOLD_STOP_MS = 1500; // keep in sync with sound.rs HOLD_MS
 
-/** One short line for the keypad OLED band from the live OBS state: recording /
- * streaming flags plus the active scene name. Empty when OBS is disconnected so
- * the band falls back to the profile name. The firmware trims to 24 chars. */
-function formatObsStatus(s: ObsSnapshot | null): string {
-  if (!s?.connected) return "";
-  const flags: string[] = [];
-  if (s.streaming) flags.push("● CANLI");
-  if (s.recording) flags.push("● REC");
-  const scene = s.currentScene ?? "";
-  const prefix = flags.join(" ");
-  if (!prefix) return scene ? `OBS · ${scene}` : "";
-  return scene ? `${prefix} · ${scene}` : prefix;
+/** The keypad OLED band's view of the live OBS state: the active scene as
+ * text, recording/streaming as flags the firmware renders as blinking (R)/(L)
+ * markers. Only ASCII reaches the band — the spleen UI font has no ● or ·
+ * glyphs (the old "● REC" prefix rendered as blank space). Empty text when
+ * OBS is disconnected so the band falls back to the profile name. */
+function formatObsStatus(s: ObsSnapshot | null): { text: string; rec: boolean; live: boolean } {
+  if (!s?.connected) return { text: "", rec: false, live: false };
+  return {
+    text: s.currentScene ? `OBS: ${s.currentScene}` : "",
+    rec: !!s.recording,
+    live: !!s.streaming,
+  };
 }
 
 import { ipc } from "./ipc";
@@ -170,7 +170,7 @@ export function ProfilesProvider({ children }: { children: ReactNode }) {
   pausedRef.current = paused;
   const activeRef = useRef<Profile | null>(null);
   const [activeProfile, setActiveProfile] = useState<Profile | null>(null);
-  const [obsStatus, setObsStatus] = useState("");
+  const [obsStatus, setObsStatus] = useState(() => formatObsStatus(null));
 
   // Track live OBS state and turn it into a one-line band string. Shown on the
   // keypad OLED (via the label below) so the device reports the active scene /
@@ -224,7 +224,9 @@ export function ProfilesProvider({ children }: { children: ReactNode }) {
     // feedback); otherwise the band names the active profile as before.
     void send({
       t: "label",
-      text: obsStatus || (activeProfile?.name ?? ""),
+      text: obsStatus.text || (activeProfile?.name ?? ""),
+      rec: obsStatus.rec,
+      live: obsStatus.live,
       ...(keys?.some(Boolean) ? { keys } : {}),
     }).catch(() => {});
   }, [port, activeProfile, send, updating, obsStatus]);

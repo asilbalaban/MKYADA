@@ -113,9 +113,131 @@ enum Cmd {
     // it alone knows synchronously whether sinks are still playing
     KeyDown(String, SoundKey),
     KeyUp(String),
+    // route playback to a second output device too (None = off)
+    Secondary(Option<String>),
 }
 
 static TX: OnceLock<Sender<Cmd>> = OnceLock::new();
+
+/// Open a named output device (the Settings "also play into" pick). Called on
+/// the audio thread only — OutputStream is !Send.
+fn open_output(name: &str) -> Option<(OutputStream, rodio::OutputStreamHandle)> {
+    use rodio::cpal::traits::{DeviceTrait, HostTrait};
+    let devs = match rodio::cpal::default_host().output_devices() {
+        Ok(d) => d,
+        Err(e) => {
+            crate::dbg_log!("audio: can't list outputs: {e}");
+            return None;
+        }
+    };
+    for d in devs {
+        if d.name().map(|n| n == name).unwrap_or(false) {
+            match OutputStream::try_from_device(&d) {
+                Ok(pair) => {
+                    crate::dbg_log!("audio: secondary output open: {name}");
+                    return Some(pair);
+                }
+                Err(e) => {
+                    crate::dbg_log!("audio: can't open {name}: {e}");
+                    return None;
+                }
+            }
+        }
+    }
+    crate::dbg_log!("audio: secondary output not found: {name}");
+    None
+}
+
+fn append_sound(sinks: &mut Vec<Sink>, handle: &rodio::OutputStreamHandle, bytes: Vec<u8>) {
+    let Ok(sink) = Sink::try_new(handle) else { return };
+    match Decoder::new(Cursor::new(bytes)) {
+        Ok(dec) => {
+            sink.append(dec);
+            sinks.push(sink);
+        }
+        Err(e) => crate::dbg_log!("audio: undecodable: {e}"),
+    }
+}
+
+/// Everything the audio thread plays into: the default output plus an optional
+/// second device (a virtual output like BlackHole, so a stream or call hears
+/// the soundboard while the speakers do too). Lives on the audio thread.
+struct Outs {
+    handle: rodio::OutputStreamHandle,
+    sinks: Vec<Sink>,
+    second: Option<(OutputStream, rodio::OutputStreamHandle)>,
+    sinks2: Vec<Sink>,
+}
+
+impl Outs {
+    fn playing(&self) -> bool {
+        !self.sinks.is_empty() || !self.sinks2.is_empty()
+    }
+
+    fn reap(&mut self) {
+        self.sinks.retain(|s| !s.empty());
+        self.sinks2.retain(|s| !s.empty());
+    }
+
+    fn play_bytes(&mut self, bytes: Vec<u8>) {
+        if let Some((_, h2)) = &self.second {
+            append_sound(&mut self.sinks2, h2, bytes.clone());
+        }
+        append_sound(&mut self.sinks, &self.handle, bytes);
+    }
+
+    fn play_path(&mut self, path: &str) {
+        match std::fs::read(path) {
+            Ok(bytes) => {
+                self.play_bytes(bytes);
+                crate::dbg_log!("audio: play {path}");
+            }
+            Err(e) => crate::dbg_log!("audio: can't read {path}: {e}"),
+        }
+    }
+
+    fn stop(&mut self) {
+        for s in self.sinks.iter().chain(self.sinks2.iter()) {
+            s.stop();
+        }
+        self.sinks.clear();
+        self.sinks2.clear();
+    }
+
+    fn fade(&mut self, ms: u64) {
+        // rodio has no live fade; approximate with a short volume ramp on
+        // this thread, then stop.
+        let steps = 16u32;
+        let dt = ms / u64::from(steps);
+        for i in 0..steps {
+            let v = 1.0 - (i as f32 + 1.0) / steps as f32;
+            for s in self.sinks.iter().chain(self.sinks2.iter()) {
+                s.set_volume(v.max(0.0));
+            }
+            thread::sleep(std::time::Duration::from_millis(dt.max(1)));
+        }
+        self.stop();
+    }
+
+    fn hold_action(&mut self, entry: &SoundKey) {
+        match entry.hold.as_deref() {
+            Some("fade") => self.fade(600),
+            Some("restart") => {
+                self.stop();
+                self.play_path(&entry.path);
+            }
+            _ => self.stop(),
+        }
+    }
+
+    fn set_secondary(&mut self, name: Option<&str>) {
+        for s in self.sinks2.iter() {
+            s.stop();
+        }
+        self.sinks2.clear();
+        self.second = name.and_then(open_output);
+    }
+}
 
 /// The audio thread's command channel, started on first use. Returns None only
 /// if the default output device can't be opened (headless / no audio).
@@ -129,60 +251,12 @@ fn tx() -> Option<&'static Sender<Cmd>> {
                 Ok(pair) => pair,
                 Err(_) => return, // no audio device — drain nothing, exit
             };
-            let mut sinks: Vec<Sink> = Vec::new();
+            let mut o = Outs { handle, sinks: Vec::new(), second: None, sinks2: Vec::new() };
             // sound keys currently held down: id -> (press time, deferred?).
             // deferred = something was playing at the press, so the decision
-            // (tap = play again, hold = the key's hold action) waits for
-            // the release instead of re-triggering the sound immediately.
+            // (tap = play again, hold = the key's hold action) is made later
+            // instead of re-triggering the sound immediately.
             let mut down: HashMap<String, (Instant, bool, SoundKey)> = HashMap::new();
-            let play_bytes = |sinks: &mut Vec<Sink>, handle: &rodio::OutputStreamHandle, path: &str| {
-                match std::fs::read(path) {
-                    Ok(bytes) => {
-                        if let Ok(sink) = Sink::try_new(handle) {
-                            match Decoder::new(Cursor::new(bytes)) {
-                                Ok(dec) => {
-                                    sink.append(dec);
-                                    sinks.push(sink);
-                                    crate::dbg_log!("audio: play {path}");
-                                }
-                                Err(e) => crate::dbg_log!("audio: undecodable {path}: {e}"),
-                            }
-                        }
-                    }
-                    Err(e) => crate::dbg_log!("audio: can't read {path}: {e}"),
-                }
-            };
-            let stop_sinks = |sinks: &mut Vec<Sink>| {
-                for s in sinks.iter() {
-                    s.stop();
-                }
-                sinks.clear();
-            };
-            let fade_sinks = |sinks: &mut Vec<Sink>, ms: u64| {
-                // rodio has no live fade; approximate with a short volume
-                // ramp on this thread, then stop.
-                let steps = 16u32;
-                let dt = ms / u64::from(steps);
-                for i in 0..steps {
-                    let v = 1.0 - (i as f32 + 1.0) / steps as f32;
-                    for s in sinks.iter() {
-                        s.set_volume(v.max(0.0));
-                    }
-                    thread::sleep(std::time::Duration::from_millis(dt.max(1)));
-                }
-                stop_sinks(sinks);
-            };
-            let hold_action =
-                |sinks: &mut Vec<Sink>, handle: &rodio::OutputStreamHandle, entry: &SoundKey| {
-                    match entry.hold.as_deref() {
-                        Some("fade") => fade_sinks(sinks, 600),
-                        Some("restart") => {
-                            stop_sinks(sinks);
-                            play_bytes(sinks, handle, &entry.path);
-                        }
-                        _ => stop_sinks(sinks),
-                    }
-                };
             loop {
                 // Wake periodically so a key held past HOLD_MS fires its hold
                 // action right then — the user shouldn't wait for the release.
@@ -191,7 +265,7 @@ fn tx() -> Option<&'static Sender<Cmd>> {
                     Err(std::sync::mpsc::RecvTimeoutError::Timeout) => None,
                     Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
                 };
-                sinks.retain(|s| !s.empty()); // reap finished sounds
+                o.reap(); // drop finished sounds
                 let held: Vec<String> = down
                     .iter()
                     .filter(|(_, (at, deferred, _))| *deferred && at.elapsed().as_millis() >= HOLD_MS)
@@ -204,28 +278,19 @@ fn tx() -> Option<&'static Sender<Cmd>> {
                             at.elapsed().as_millis(),
                             entry.hold.as_deref().unwrap_or("stop")
                         );
-                        hold_action(&mut sinks, &handle, &entry);
+                        o.hold_action(&entry);
                     }
                 }
                 let Some(cmd) = cmd else { continue };
                 match cmd {
-                    Cmd::Play(bytes) => {
-                        if let Ok(sink) = Sink::try_new(&handle) {
-                            match Decoder::new(Cursor::new(bytes)) {
-                                Ok(dec) => {
-                                    sink.append(dec);
-                                    sinks.push(sink);
-                                }
-                                Err(_) => {} // undecodable file — skip
-                            }
-                        }
-                    }
-                    Cmd::Stop => stop_sinks(&mut sinks),
-                    Cmd::Fade(ms) => fade_sinks(&mut sinks, ms),
+                    Cmd::Play(bytes) => o.play_bytes(bytes),
+                    Cmd::Stop => o.stop(),
+                    Cmd::Fade(ms) => o.fade(ms),
+                    Cmd::Secondary(name) => o.set_secondary(name.as_deref()),
                     Cmd::KeyDown(id, entry) => {
-                        let playing = !sinks.is_empty();
+                        let playing = o.playing();
                         if !playing {
-                            play_bytes(&mut sinks, &handle, &entry.path);
+                            o.play_path(&entry.path);
                         } else {
                             crate::dbg_log!("audio: {id} down while playing — deferred");
                         }
@@ -242,14 +307,14 @@ fn tx() -> Option<&'static Sender<Cmd>> {
                         let ms = at.elapsed().as_millis();
                         if ms < HOLD_MS {
                             crate::dbg_log!("audio: {id} tap({ms}ms) while playing — layer");
-                            play_bytes(&mut sinks, &handle, &entry.path);
+                            o.play_path(&entry.path);
                         } else {
                             // Release raced the 100ms sweep past the threshold.
                             crate::dbg_log!(
                                 "audio: {id} hold({ms}ms) on release: {}",
                                 entry.hold.as_deref().unwrap_or("stop")
                             );
-                            hold_action(&mut sinks, &handle, &entry);
+                            o.hold_action(&entry);
                         }
                     }
                 }
@@ -284,5 +349,29 @@ pub fn stop_all() {
 pub fn fade(ms: u64) {
     if let Some(tx) = tx() {
         let _ = tx.send(Cmd::Fade(ms));
+    }
+}
+
+/// Names of every audio output device, for the Settings "also play into" pick.
+pub fn outputs() -> Vec<String> {
+    use rodio::cpal::traits::{DeviceTrait, HostTrait};
+    let mut v = Vec::new();
+    if let Ok(devs) = rodio::cpal::default_host().output_devices() {
+        for d in devs {
+            if let Ok(n) = d.name() {
+                v.push(n);
+            }
+        }
+    }
+    v
+}
+
+/// Also play every sound into this named output device (a virtual device like
+/// BlackHole, so a stream/call hears the soundboard while the speakers do
+/// too); None switches the second route off.
+pub fn set_secondary(name: Option<String>) {
+    crate::dbg_log!("audio: secondary output = {}", name.as_deref().unwrap_or("off"));
+    if let Some(tx) = tx() {
+        let _ = tx.send(Cmd::Secondary(name));
     }
 }

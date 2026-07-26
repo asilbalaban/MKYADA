@@ -153,6 +153,8 @@ class Ui:
         self.playing_cell = None
         self.ctx = None  # active context-menu (S_CTX) descriptor
         self._degraded_at = 0  # last degraded-grid repair repaint
+        self._blink_at = 0  # last (R)/(L) band-marker blink flip
+        self._blink_on = True
         self.sysvol = None  # live system output volume % pushed by the app
         self._pending_layer = clamp(last_layer, 0,
                                     app.config["layer_count"] - 1)
@@ -766,6 +768,7 @@ class Ui:
         (config "layer_names") replaces the plain "Layer A" with "(A) NAME"."""
         cfg = self.app.config
         label = self.app.host_label if cfg["show_profile"] else None
+        marks = self._band_marks()
         if cfg["show_layer"]:
             idx = self.app.layer
             letter = LAYER_NAMES[idx].upper()
@@ -774,11 +777,26 @@ class Ui:
             # The app-pushed label (live OBS scene / profile name) wins over
             # the stored nickname: it's the dynamic status the user watches.
             if label:
-                return "(%s) %s" % (letter, label)
+                return "(%s) %s%s" % (letter, marks, label)
             if nick:
-                return "(%s) %s" % (letter, nick)
+                return "(%s) %s%s" % (letter, marks, nick)
             return tr("layer_band") % letter
-        return label
+        return (marks + label) if label else label
+
+    def _band_marks(self):
+        """Blinking OBS state markers before the band text: (R) while
+        recording, (L) while live-streaming. The blink phase swaps them for
+        same-width spaces so the rest of the band doesn't shift."""
+        m = ""
+        if self.app.host_rec:
+            m += "(R)"
+        if self.app.host_live:
+            m += "(L)"
+        if not m:
+            return ""
+        if not self._blink_on:
+            m = " " * len(m)
+        return m + " "
 
     def on_sysvol(self, percent):
         """The app pushed the live system volume (the device can't read it).
@@ -1499,6 +1517,16 @@ class Ui:
         if (self.oled.grid_degraded and not d and press is None
                 and now - self._degraded_at > 1.0):
             self._degraded_at = now
+            self._draw_grid()
+        # Blink the (R)/(L) OBS markers in the band. Cheap since the grid
+        # group is persistent: this repaint only swaps the band label text.
+        cfg = self.app.config
+        if ((self.app.host_rec or self.app.host_live)
+                and (cfg["show_layer"] or cfg["show_profile"])
+                and not d and press is None
+                and now - self._blink_at > 0.6):
+            self._blink_at = now
+            self._blink_on = not self._blink_on
             self._draw_grid()
 
     def _select_default(self, now, d, press):

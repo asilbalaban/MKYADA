@@ -233,6 +233,41 @@ export function useObsConfig(): ObsConfig {
   );
 }
 
+// ------------------------------------------------------ secondary output ---
+// "Play sound" keys always play on the default output; optionally they ALSO
+// play into a second output device — a virtual device (BlackHole, VB-Cable)
+// routed into OBS / a call, so the audience hears the soundboard while the
+// speakers do too. Stored as the device name; empty/null = off.
+
+let soundSecondary: string | null = null;
+const ssListeners = new Set<() => void>();
+
+/** Call once at boot — re-arms the stored second output on the audio thread. */
+export function initSoundSecondary() {
+  void getSetting<string | null>("soundSecondary", null).then((stored) => {
+    soundSecondary = stored || null;
+    ssListeners.forEach((l) => l());
+    if (soundSecondary) void invoke("sound_secondary", { name: soundSecondary }).catch(() => {});
+  });
+}
+
+export function setSoundSecondary(name: string | null) {
+  soundSecondary = name || null;
+  void setSetting("soundSecondary", soundSecondary);
+  void invoke("sound_secondary", { name: soundSecondary }).catch(() => {});
+  ssListeners.forEach((l) => l());
+}
+
+export function useSoundSecondary(): string | null {
+  return useSyncExternalStore(
+    (cb) => {
+      ssListeners.add(cb);
+      return () => ssListeners.delete(cb);
+    },
+    () => soundSecondary,
+  );
+}
+
 /** Call once at boot — re-applies the stored preference to the window. */
 export function initAlwaysOnTop() {
   void getSetting("alwaysOnTop", false).then((stored) => {

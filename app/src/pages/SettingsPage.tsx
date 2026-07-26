@@ -17,6 +17,7 @@ import {
   setAutostart,
   setObsConfig,
   setRunInBackground,
+  setSoundSecondary,
   setThemePref,
   setWheelAccel,
   ThemePref,
@@ -24,6 +25,7 @@ import {
   useAutostart,
   useObsConfig,
   useRunInBackground,
+  useSoundSecondary,
   useThemePref,
   useWheelAccel,
 } from "../lib/settings";
@@ -37,6 +39,50 @@ const THEME_OPTIONS: { value: ThemePref; label: string; icon: typeof Sun }[] = [
   { value: "light", label: "Light", icon: Sun },
   { value: "dark", label: "Dark", icon: Moon },
 ];
+
+function SoundOutputCard() {
+  const secondary = useSoundSecondary();
+  const [outputs, setOutputs] = useState<string[]>([]);
+
+  // refresh the device list every time the card mounts — virtual devices
+  // (BlackHole, VB-Cable) come and go with their driver/app
+  useEffect(() => {
+    void invoke<string[]>("sound_outputs")
+      .then(setOutputs)
+      .catch(() => setOutputs([]));
+  }, []);
+
+  const options = outputs.includes(secondary ?? "")
+    ? outputs
+    : [...(secondary ? [secondary] : []), ...outputs];
+
+  return (
+    <Card title="Sound output">
+      <div className="flex flex-col gap-2">
+        <Field label="Also play sound keys into">
+          <Select
+            value={secondary ?? ""}
+            onChange={(e) => setSoundSecondary(e.target.value || null)}
+            aria-label="Secondary output device for sound keys"
+          >
+            <option value="">Off — default output only</option>
+            {options.map((n) => (
+              <option key={n} value={n}>
+                {n}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        <p className="text-xs text-fg-faint">
+          Sounds always play on your default output. Pick a virtual device
+          (e.g. BlackHole or VB-Cable) here and route it into OBS or your
+          call, so your audience hears the soundboard at the same time you
+          do.
+        </p>
+      </div>
+    </Card>
+  );
+}
 
 function AppearanceCard() {
   const pref = useThemePref();
@@ -646,6 +692,7 @@ export function SettingsPage() {
 
       {/* Integrations */}
       <ObsCard />
+      <SoundOutputCard />
 
       {/* App look & behavior */}
       <AppearanceCard />

@@ -1606,6 +1606,20 @@ vapp.host_label = None
 check("band nickname without label", ui._band() == "(B) studyo", str(ui._band()))
 vapp.host_label = "Photoshop"
 vapp.config["layer_names"] = None
+# blinking OBS markers: (R) recording, (L) live — swapped for same-width
+# spaces on the off phase so the band text doesn't shift
+vapp.host_rec = True
+ui._blink_on = True
+check("band rec marker", ui._band() == "(B) (R) Photoshop", str(ui._band()))
+vapp.host_live = True
+check("band rec+live markers", ui._band() == "(B) (R)(L) Photoshop", str(ui._band()))
+ui._blink_on = False
+check("band markers blink off keeps width",
+      ui._band() == "(B) " + " " * 6 + " Photoshop", str(ui._band()))
+ui._blink_on = True
+vapp.host_rec = False
+vapp.host_live = False
+check("band markers gone when idle", ui._band() == "(B) Photoshop", str(ui._band()))
 vapp.config["show_layer"] = False
 check("band profile only", ui._band() == "Photoshop", str(ui._band()))
 vapp.host_label = None
@@ -1614,10 +1628,12 @@ check("band profile without label -> none", ui._band() is None, str(ui._band()))
 # {"t":"label"} lands in host_label and redraws through on_label (headless
 # no-op here — the point is it must not crash mid-grid)
 ui.state = uimod.S_SELECT
-vapp.handle_msg({"t": "label", "text": "GIMP"})
+vapp.handle_msg({"t": "label", "text": "GIMP", "rec": True, "live": True})
 check("vision6 label stored", vapp.host_label == "GIMP", str(vapp.host_label))
+check("vision6 rec/live flags stored", vapp.host_rec and vapp.host_live)
 vapp.handle_msg({"t": "label", "text": ""})
 check("vision6 label cleared", vapp.host_label is None)
+check("vision6 rec/live flags cleared", not vapp.host_rec and not vapp.host_live)
 vapp.config["show_profile"] = False
 vapp.layer = 0
 

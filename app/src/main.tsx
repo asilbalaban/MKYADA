@@ -7,6 +7,7 @@ import {
   initAutostart,
   initObs,
   initRunInBackground,
+  initSoundSecondary,
   initTheme,
   initWheelAccel,
 } from "./lib/settings";
@@ -34,6 +35,7 @@ if (isOverlay) {
   initAutostart();
   initWheelAccel();
   initObs();
+  initSoundSecondary();
 }
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(

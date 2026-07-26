@@ -451,6 +451,19 @@ fn sound_fade(ms: u64) {
     sound::fade(ms);
 }
 
+/// Names of every audio output device (Settings > secondary output picker).
+#[tauri::command]
+fn sound_outputs() -> Vec<String> {
+    sound::outputs()
+}
+
+/// Also play sounds into this output device (virtual device for streams /
+/// calls); None or empty turns the second route off.
+#[tauri::command]
+fn sound_secondary(name: Option<String>) {
+    sound::set_secondary(name.filter(|n| !n.is_empty()));
+}
+
 #[derive(serde::Deserialize)]
 struct SoundKeyDto {
     /// "layer:keyNo", e.g. "a:5"
@@ -1269,6 +1282,8 @@ pub fn run() {
             run_command,
             sound_play,
             sound_stop,
+            sound_outputs,
+            sound_secondary,
             sound_fade,
             set_sound_keys,
             debug_log,
