@@ -532,7 +532,11 @@ class App:
         # pushes during a transfer too; this covers the ones already queued
         # (and any older app). State still updates; the screen catches up in
         # one repaint when the transfer ends.
-        if self.upload is not None and name in COSMETIC_HOOKS:
+        # The same goes for a firmware update, which owns the screen as well as
+        # the link: a status push arriving mid-update repainted the grid over
+        # the "do not unplug" screen for one frame before the next chunk drew
+        # it again (issue #35).
+        if (self.upload is not None or self.updating) and name in COSMETIC_HOOKS:
             self.ui_stale = True
             return
         try:

@@ -231,20 +231,27 @@ class Oled:
         for dx in (-1, 0, 1):
             g.append(self._txt(s, cx + dx, y, scale=scale, font=font))
 
-    def _top_bar(self, g, title):
+    def _top_bar(self, g, title, hint=None):
+        """Inverted title strip. `hint` rides at its right edge — that's where
+        the third gesture ("hold: assign") lives, because three labels in the
+        13px bottom bar ran together into one unreadable smear (issue #36).
+        Up here the title is left-aligned instead of centred, so the two never
+        collide."""
         g.append(_rect(0, 0, self.W, 13))
-        g.append(self._txt(title, self.CX, 6, color=0x000000))
+        if hint:
+            g.append(self._txt(title, 2, 6, color=0x000000, anchor=(0.0, 0.5)))
+            g.append(self._txt(hint, self.W - 2, 6, color=0x000000,
+                               anchor=(1.0, 0.5), font=self.ui_font))
+        else:
+            g.append(self._txt(title, self.CX, 6, color=0x000000))
 
-    def _bottom_bar(self, g, action=None, back=True, hold=None):
+    def _bottom_bar(self, g, action=None, back=True):
+        """Two slots only: BACK on the left, the confirming action on the
+        right. Anything else belongs in the top bar's hint (issue #36)."""
         y = self.H - 13
         g.append(_rect(0, y, self.W, 1))
         if back:
             g.append(self._txt(tr("back"), 2, self.H - 6, anchor=(0.0, 0.5),
-                               font=self.ui_font))
-        if hold:
-            # centered third-gesture affordance ("hold: assign") so the
-            # reassign gesture is discoverable, not folklore
-            g.append(self._txt(hold, self.CX, self.H - 6, anchor=(0.5, 0.5),
                                font=self.ui_font))
         if action:
             g.append(self._txt(action, self.W - 2, self.H - 6, anchor=(1.0, 0.5),
@@ -343,9 +350,15 @@ class Oled:
         if not self.display:
             return
         g = displayio.Group()
-        g.append(self._txt("MKYADA", self.CX, 18, scale=2))
-        msg = tr("restarting") if restarting else tr("updating")
-        g.append(self._txt(msg, self.CX, 38, font=self.ui_font))
+        g.append(self._txt("MKYADA", self.CX, 14, scale=2))
+        # "updating - do not unplug" on one line ran off both edges (issue
+        # #35): the warning gets its own second line, and the whole stack
+        # moves up to keep the bar and percentage on screen.
+        if restarting:
+            g.append(self._txt(tr("restarting"), self.CX, 34, font=self.ui_font))
+        else:
+            g.append(self._txt(tr("updating"), self.CX, 30, font=self.ui_font))
+            g.append(self._txt(tr("updating2"), self.CX, 41, font=self.ui_font))
         bw = self.W - 24
         bmp = displayio.Bitmap(bw, 5, 2)
         pal = displayio.Palette(2)
@@ -356,7 +369,7 @@ class Oled:
             for y in range(5):
                 bmp[x, y] = 1
         g.append(displayio.TileGrid(bmp, pixel_shader=pal,
-                                    x=(self.W - bw) // 2, y=48))
+                                    x=(self.W - bw) // 2, y=50))
         g.append(self._txt("%d%%" % int(frac * 100), self.CX, 60,
                            font=self.ui_font))
         self.paint(g)
@@ -612,12 +625,33 @@ class Oled:
     def show_menu(self, title, items, sel, marked=None, action=None, hold=None):
         """Generic list menu (Settings, Font). marked = index tagged with >.
         Longer lists scroll: the selection stays visible and small arrows on
-        the right show there are items above/below. `hold`, when set, labels
-        the centre of the bottom bar with the hold-to-reassign gesture."""
+        the right show there are items above/below. `hold`, when set, names
+        the hold-to-reassign gesture in the top bar's right corner."""
         if not self.display:
             return
+        # Every detent rebuilds this group — five Labels plus rects — and a
+        # failed build leaves the PREVIOUS screen on the glass, so the wheel
+        # looks stuck at the row it opened on while the selection moves
+        # invisibly underneath (issue #39). Compact first, and if the build
+        # still can't fit, fall back to the one row that matters.
+        gc.collect()
+        try:
+            g = self._menu_group(title, items, sel, marked, action, hold)
+        except MemoryError:
+            gc.collect()
+            try:
+                g = self._menu_group(title, items, sel, marked, action, hold)
+            except MemoryError:
+                gc.collect()
+                g = displayio.Group()
+                self._top_bar(g, title)
+                g.append(self._txt(str(items[sel])[:20], self.CX, 32))
+                self._bottom_bar(g, action=action or tr("select"))
+        self.paint(g)
+
+    def _menu_group(self, title, items, sel, marked, action, hold):
         g = displayio.Group()
-        self._top_bar(g, title)
+        self._top_bar(g, title, hint=hold)
         n = len(items)
         top = sel - self.MENU_VIS + 1 if sel >= self.MENU_VIS else 0
         # keep the arrow strip clear of the selection rectangle
@@ -641,8 +675,8 @@ class Oled:
             g.append(vectorio.Polygon(pixel_shader=WHITE,
                                       points=[(0, 0), (6, 0), (3, 4)],
                                       x=self.W - 7, y=45))
-        self._bottom_bar(g, action=action or tr("select"), hold=hold)
-        self.paint(g)
+        self._bottom_bar(g, action=action or tr("select"))
+        return g
 
     def show_timeout(self, sec, lo, hi):
         if not self.display:

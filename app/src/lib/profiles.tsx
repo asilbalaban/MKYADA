@@ -22,7 +22,7 @@ import { fadeOutSounds, playSound, stopAllSounds } from "./sound";
 import { useDevice } from "./device";
 
 /** Holding a sound key this long stops all playing sounds instead of playing. */
-const SOUND_HOLD_STOP_MS = 1500; // keep in sync with sound.rs HOLD_MS
+const SOUND_HOLD_STOP_MS = 1000; // keep in sync with sound.rs HOLD_MS
 
 /** The keypad OLED band's view of the live OBS state: the active scene as
  * text, recording/streaming as flags the firmware renders as blinking (R)/(L)
@@ -54,6 +54,7 @@ import type {
   WebhookRequest,
 } from "./types";
 import { DOUBLE_MS_DEFAULT, HOLD_MS_DEFAULT, LAYER_NAMES } from "./types";
+import { testModeActive } from "./focus";
 import {
   AUX_FILE_RE,
   compileAssignment,
@@ -222,13 +223,23 @@ export function ProfilesProvider({ children }: { children: ReactNode }) {
       : undefined;
     // Live OBS status takes over the band while OBS is connected (Stream Deck
     // feedback); otherwise the band names the active profile as before.
-    void send({
+    const msg = {
       t: "label",
       text: obsStatus.text || (activeProfile?.name ?? ""),
       rec: obsStatus.rec,
       live: obsStatus.live,
       ...(keys?.some(Boolean) ? { keys } : {}),
-    }).catch(() => {});
+    };
+    void send(msg).catch(() => {});
+    // Re-assert like the profile below. One label that never lands leaves the
+    // band lying until the next unrelated change — the "(R) doesn't come on
+    // until I switch scenes" report (issue #37). A push can be lost for
+    // reasons the app can't see (the device's USB FIFO isn't drained during a
+    // repaint), so the cure is repetition, not a bigger hammer: the firmware
+    // compares before repainting, so an unchanged re-assert costs one short
+    // line every 5s and nothing on screen.
+    const tick = setInterval(() => void send(msg).catch(() => {}), 5000);
+    return () => clearInterval(tick);
   }, [port, activeProfile, send, updating, obsStatus]);
 
   // Activate the profile on the device instead of holding host mode
@@ -531,6 +542,11 @@ export function ProfilesProvider({ children }: { children: ReactNode }) {
         }
         heldKeys.current.add(keyId);
         if (pausedRef.current) return;
+        // The Keys/Setup pages suppress playback on the device, but the
+        // computer-side half of an assignment runs here — so pressing a key
+        // while editing it still launched apps and switched OBS scenes
+        // (issue #40).
+        if (testModeActive()) return;
         // key logic: a second press inside the double window fires "double"
         const klPending = klStates.current.get(keyId);
         if (klPending?.phase === "wait2") {

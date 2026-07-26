@@ -250,7 +250,7 @@ export interface MacroSettings {
 export const HOLD_MS_DEFAULT = 400;
 export const DOUBLE_MS_DEFAULT = 250;
 
-/** What holding a sound key (~half a second) does. */
+/** What holding a sound key (~1 second) does. */
 export type SoundHoldAction = "stop" | "fade" | "restart";
 
 /** A webhook key action: one fully user-defined HTTP request, curl-style —

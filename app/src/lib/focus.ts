@@ -57,9 +57,23 @@ export function useTestMode(
   const focused = useWindowFocused();
   useEffect(() => {
     if (!connected || !focused) return;
+    testDepth++;
     void send({ t: "test_enter", ui });
     return () => {
+      testDepth = Math.max(0, testDepth - 1);
       void send({ t: "test_leave" });
     };
   }, [connected, focused, ui, send]);
+}
+
+// Suppressing playback on the device was only half of it: the computer-side
+// half of an assignment (OBS, webhook, launch, command, mic) runs here off the
+// same btn event, so keys kept firing while the user was editing them on the
+// Keys page (issue #40). One module-level depth counter — no IPC, no context —
+// because the check sits on the press path, which must stay instant.
+let testDepth = 0;
+
+/** True while any page is holding the keypad in test mode. */
+export function testModeActive(): boolean {
+  return testDepth > 0;
 }

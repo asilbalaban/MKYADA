@@ -542,9 +542,9 @@ export function AssignmentEditor({
       )}
 
       {value.kind === "sound" && (
-        <ControlField label="Holding the key for half a second">
+        <ControlField label="Holding the key for 1 second">
           <IconSelect
-            ariaLabel="Holding the key for half a second"
+            ariaLabel="Holding the key for 1 second"
             value={value.holdAction ?? "stop"}
             options={[
               { value: "stop", label: "Stops all playing sounds", icon: SOUND_HOLD_ICON.stop },

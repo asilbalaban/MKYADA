@@ -102,12 +102,30 @@ fn output_active(data: &Value, current: bool) -> bool {
         .unwrap_or(current)
 }
 
+/// True for the transitional halves of an output state change
+/// (`..._STARTING` / `..._STOPPING`), which OBS sends ~8ms before the real
+/// `..._STARTED` / `..._STOPPED`. Acting on them pushed the keypad two labels
+/// back to back: the first one costs the device a 100-300ms repaint, and the
+/// second — the one that actually turns (R) on — lands in that window, where
+/// the USB FIFO isn't being drained. Lost there it was never re-sent, so the
+/// band only caught up at the next scene change (issue #37). The transitional
+/// event carries no state the band shows, so simply ignore it.
+fn is_transitional(data: &Value) -> bool {
+    data.get("eventData")
+        .and_then(|d| d.get("outputState"))
+        .and_then(|v| v.as_str())
+        .is_some_and(|s| s.ends_with("_STARTING") || s.ends_with("_STOPPING"))
+}
+
 /// Handle one op-5 Event, updating the snapshot.
 fn on_event(app: &AppHandle, d: &Value) {
     let event_type = d
         .get("eventType")
         .and_then(|v| v.as_str())
         .unwrap_or_default();
+    if is_transitional(d) {
+        return;
+    }
     match event_type {
         "CurrentProgramSceneChanged" => {
             let name = d
@@ -119,13 +137,9 @@ fn on_event(app: &AppHandle, d: &Value) {
         }
         // Logged because the keypad's blinking (R) hangs off this one event:
         // when the band is wrong, the first question is always whether OBS
-        // announced the state change at all (it sends STARTING with
-        // outputActive:false, then STARTED with true — two labels, 8ms apart).
+        // announced the state change at all.
         "RecordStateChanged" => {
-            crate::dbg_log!(
-                "obs RecordStateChanged active={}",
-                output_active(d, false)
-            );
+            crate::dbg_log!("obs RecordStateChanged active={}", output_active(d, false));
             update_snapshot(app, |s| s.recording = output_active(d, s.recording));
         }
         "StreamStateChanged" => {

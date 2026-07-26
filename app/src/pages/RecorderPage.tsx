@@ -359,6 +359,13 @@ export function RecorderPage({ active = true }: { active?: boolean }) {
     setStatus("");
   }
 
+  // "key 3" is ambiguous the moment the keypad has layers — say which one
+  // (issue #41).
+  const keyLabel =
+    (hello?.layer_count ?? 1) > 1
+      ? `key ${assignKey} (layer ${"ABCDEFGH"[assignLayer]})`
+      : `key ${assignKey}`;
+
   async function assignToKey() {
     if (!macro || !drive) return;
     const file = macroFileName(assignKey, assignLayer);
@@ -366,7 +373,7 @@ export function RecorderPage({ active = true }: { active?: boolean }) {
       // Same blocking modal as the Keys page (issues #13/#15): the editor is
       // unusable while the macro streams to the keypad, and it closes only
       // once the file is fully written.
-      await writeToKeypad(`Macro → key ${assignKey}`, async (ctx) => {
+      await writeToKeypad(`Macro → ${keyLabel}`, async (ctx) => {
         await ipc.driveWrite(drive.path, file, serializeForDevice(macro, hello?.proto ?? 0));
         if (ctx.cancelRequested()) throw writeCancelledError();
         // Best-effort: a read-only drive makes the backend restart the keypad
@@ -377,7 +384,7 @@ export function RecorderPage({ active = true }: { active?: boolean }) {
       keysCache.setAssignment(drive.path, slotKey(assignKey, assignLayer), parseAssignment(macro));
       setStatus(`Assigned to ${file}`);
       toast.success(
-        `Macro saved to key ${assignKey}`,
+        `Macro saved to ${keyLabel}`,
         `${macro.events.length} events written to the keypad. Press the key to try it.`,
       );
     } catch (e) {
@@ -385,8 +392,8 @@ export function RecorderPage({ active = true }: { active?: boolean }) {
         // a half-written macro must not stay on the key (issue #15)
         await ipc.driveDelete(drive.path, file).catch(() => {});
         keysCache.setAssignment(drive.path, slotKey(assignKey, assignLayer), null);
-        setStatus(`Send cancelled — key ${assignKey} was left unassigned.`);
-        toast.info("Send cancelled", `Key ${assignKey} was left without a macro.`);
+        setStatus(`Send cancelled — ${keyLabel} was left unassigned.`);
+        toast.info("Send cancelled", `The macro was not written to ${keyLabel}.`);
         return;
       }
       toast.error("Could not write to the keypad", String(e));
@@ -552,7 +559,12 @@ export function RecorderPage({ active = true }: { active?: boolean }) {
                       ))}
                   </Select>
                 </ToolField>
-                {hello.layer_key ? (
+                {/* Gating this on layer_key hid it on the Vision 6, whose
+                    layers are switched from the wheel and whose layer_key is
+                    therefore null — so the recorder could only ever write to
+                    layer A's six keys, silently overwriting them (issue #41).
+                    What matters is whether the keypad HAS layers. */}
+                {hello.layer_count > 1 ? (
                   <ToolField label="Layer" align="start">
                     <Select value={assignLayer} onChange={(e) => setAssignLayer(Number(e.target.value))}>
                       {Array.from({ length: hello.layer_count }, (_, i) => (
@@ -563,7 +575,7 @@ export function RecorderPage({ active = true }: { active?: boolean }) {
                 ) : null}
                 <ToolButton
                   label="Save" tone="primary" icon={<HardDriveDownload size={18} aria-hidden />}
-                  onClick={() => void assignToKey()} title={`Save this macro onto key ${assignKey}`}
+                  onClick={() => void assignToKey()} title={`Save this macro onto ${keyLabel}`}
                 />
               </>
             ) : (

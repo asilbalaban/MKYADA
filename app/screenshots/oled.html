@@ -77,17 +77,22 @@
         c.fillStyle = opt.color || INK;
         c.fillText(s, x, y);
       }
-      // inverted 13px title strip, centered black title (oled.py _top_bar)
-      function topBar(c, title) {
+      // inverted 13px title strip; with a hint the title left-aligns and the
+      // hint takes the right corner (oled.py _top_bar)
+      function topBar(c, title, hint) {
         c.fillStyle = INK; rect(c, 0, 0, W, 13);
-        t(c, title, CX, 6, { color: "#000", font: font(7) });
+        if (hint) {
+          t(c, title, 2, 6, { align: "left", color: "#000", font: font(7) });
+          t(c, hint, W - 2, 6, { align: "right", color: "#000", font: font(8) });
+        } else {
+          t(c, title, CX, 6, { color: "#000", font: font(7) });
+        }
       }
-      // 1px divider + "Back" left, optional centred hold hint, action right
-      // (oled.py _bottom_bar)
-      function bottomBar(c, action, hold) {
+      // 1px divider + "Back" left, action right — two slots only, because
+      // three labels in 13px ran together (oled.py _bottom_bar)
+      function bottomBar(c, action) {
         c.fillStyle = INK; rect(c, 0, H - 13, W, 1);
         t(c, "Back", 2, H - 6, { align: "left", font: font(8) });
-        if (hold) t(c, hold, W / 2, H - 6, { align: "center", font: font(8) });
         if (action) t(c, action, W - 2, H - 6, { align: "right", font: font(8) });
       }
 
@@ -179,7 +184,7 @@
 
       // WHEEL MENU — OBS scene picker (a host-fed list; picking reassigns the key)
       function drawWheelScene(c) {
-        topBar(c, "SCENE");
+        topBar(c, "SCENE", "hold: assign");
         const rows = [["Intro", 1], ["Game", 0], ["Break", 0]], sel = 1;
         rows.forEach(([label, live], row) => {
           const y = 20 + row * 12;
@@ -188,7 +193,7 @@
           t(c, (row === sel ? "▸ " : "  ") + label, 6, y, { align: "left", color: col });
           if (live) { c.fillStyle = INK; c.beginPath(); c.arc(W - 12, y, 2, 0, 7); c.fill(); }
         });
-        bottomBar(c, "Pick", "hold: assign");
+        bottomBar(c, "Pick");
       }
       // WHEEL MENU — OBS record status card (press toggles; live REC dot)
       function drawWheelStatus(c) {

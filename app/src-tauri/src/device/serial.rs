@@ -231,6 +231,10 @@ pub fn connect(app: AppHandle, mgr: &DeviceManager, port: &str) -> Result<(), St
         resync: false,
     };
     *mgr.0.lock().unwrap() = Some(conn);
+    // A fresh keypad starts outside test mode; the open page re-enters it on
+    // mount. Without this reset a disconnect while the Keys page was up left
+    // the flag stuck and sound keys stayed mute for the rest of the session.
+    TEST_MODE.store(false, std::sync::atomic::Ordering::Relaxed);
 
     let port_name = port.to_string();
     std::thread::spawn(move || {
@@ -331,7 +335,22 @@ pub fn connect(app: AppHandle, mgr: &DeviceManager, port: &str) -> Result<(), St
     Ok(())
 }
 
+/// True while the app holds the keypad in test mode (Keys / Setup pages).
+/// Tracked here because it's the app's own outgoing `test_enter`/`test_leave`
+/// that defines it, and both the sound player and the action runner have to
+/// honour it — a key being edited must not also fire (issue #40).
+static TEST_MODE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn test_mode() -> bool {
+    TEST_MODE.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 pub fn send(mgr: &DeviceManager, msg: &Value) -> Result<(), String> {
+    match msg.get("t").and_then(Value::as_str) {
+        Some("test_enter") => TEST_MODE.store(true, std::sync::atomic::Ordering::Relaxed),
+        Some("test_leave") => TEST_MODE.store(false, std::sync::atomic::Ordering::Relaxed),
+        _ => {}
+    }
     // Hold back status pushes while a file transfer owns the link. The keypad's
     // USB receive FIFO is a few hundred bytes and only drains once per main-loop
     // pass; every one of these makes it repaint (100-300ms), and a chunk landing

@@ -42,7 +42,7 @@ pub struct SoundKey {
 /// How long the key must be held (down→up) before the hold action, not a plain
 /// tap-and-play, applies. Deliberately generous: users layer sounds with quick
 /// taps and stray "slow taps" kept muting everything at 600ms.
-const HOLD_MS: u128 = 1500;
+const HOLD_MS: u128 = 1000;
 
 static KEYS: Mutex<Option<HashMap<String, SoundKey>>> = Mutex::new(None);
 
@@ -74,6 +74,13 @@ pub fn set_keys(map: HashMap<String, SoundKey>) {
 /// edges, so a lagging up edge can never cut a tap off mid-play.
 pub fn on_device_msg(v: &serde_json::Value) {
     if v.get("t").and_then(serde_json::Value::as_str) != Some("btn") {
+        return;
+    }
+    // The Keys/Setup pages put the keypad in test mode so a press shows in the
+    // UI instead of firing its assignment. The firmware suppresses its own
+    // playback there, but sound keys are played HERE, off the raw btn event —
+    // so they kept blaring while the user was editing them (issue #40).
+    if crate::device::serial::test_mode() {
         return;
     }
     let edge = v.get("edge").and_then(serde_json::Value::as_str).unwrap_or("");

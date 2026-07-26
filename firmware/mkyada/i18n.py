@@ -44,7 +44,10 @@ STRINGS = {
         "usb_on": "USB drive is on",
         "read_only": "read-only - use the app",
         "save_fail": "could not save",
-        "updating": "updating - do not unplug",
+        # two short lines: the 128px band fits ~21 characters, and the one-line
+        # version ran off both edges of the screen (issue #35)
+        "updating": "updating",
+        "updating2": "do not unplug",
         "restarting": "restarting...",
         "setup_test": "SETUP - TEST",
         "press_key": "press a key",
@@ -106,8 +109,9 @@ STRINGS = {
         "usb_on": "USB disk acik",
         "read_only": "salt okunur - uygulamayi kullan",
         "save_fail": "kaydedilemedi",
-        "updating": "guncelleniyor - fisi cekmeyin",
-        "restarting": "yeniden baslatiliyor...",
+        "updating": "guncelleniyor",
+        "updating2": "fisi cekmeyin",
+        "restarting": "yeniden baslatiliyor",
         "setup_test": "KURULUM - TEST",
         "press_key": "bir tusa bas",
         "keys_test": "TUS TESTI",

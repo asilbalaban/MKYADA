@@ -1782,6 +1782,11 @@ check("crc mismatch leaves no .part",
 outbox.clear()
 app.handle_msg({"t": "update_begin", "bytes": len(payload)})
 check("update locks", app.updating is True)
+check("update warning split in two", all(
+    len(i18nmod.STRINGS[lang]["updating"]) <= 21
+    and len(i18nmod.STRINGS[lang]["updating2"]) <= 21
+    for lang in i18nmod.STRINGS),
+    str([(l, i18nmod.STRINGS[l].get("updating2")) for l in i18nmod.STRINGS]))
 check("update_begin ok", any(m.get("re") == "update_begin" for m in outbox))
 outbox.clear()
 app.handle_msg({"t": "play", "file": "macros/key1.json"})
@@ -1792,6 +1797,33 @@ app.play_file = lambda *a, **k: played_upd.append(a)
 app.on_edge(0, True)
 check("keys dead while updating", played_upd == [])
 del app.play_file
+# ...and so is the screen: a status push arriving mid-update used to repaint
+# the grid over the "do not unplug" screen for a frame (issue #35)
+_upd_painted = []
+
+
+class _CosmeticUI:
+    def tick(self, now):
+        _upd_painted.append("tick")
+
+    def on_label(self):
+        _upd_painted.append("on_label")
+
+    def on_profile(self):
+        _upd_painted.append("on_profile")
+
+
+_real_ui, app.ui = app.ui, _CosmeticUI()
+app.ui_stale = False
+app.ui_call("on_label")
+app.ui_call("tick", 0)
+check("cosmetic hooks deferred while updating", _upd_painted == [],
+      str(_upd_painted))
+check("deferred paint remembered", app.ui_stale is True)
+app.ui_call("on_profile")  # not cosmetic: cache drops must still happen
+check("on_profile still runs while updating", _upd_painted == ["on_profile"],
+      str(_upd_painted))
+app.ui = _real_ui
 outbox.clear()
 app.handle_msg({"t": "fs_write", "path": "m2.bin", "seq": 0, "data": b64,
                 "eof": True, "crc": crc})
