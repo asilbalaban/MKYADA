@@ -1,59 +1,29 @@
-// Sound-effect playback for key actions: read the file through Rust, decode
-// it in the webview. Object URLs are cached per path so repeated presses
-// don't re-read the file from disk.
+// Sound-effect playback for key actions. Playback happens natively in Rust
+// (afplay on macOS, MediaPlayer on Windows, ffplay on Linux) — not in the
+// webview. WKWebView's Web Audio / HTMLAudio path decoded some MP3s silently to
+// nothing, so a valid file just never played; handing the file to the OS's own
+// player is reliable for every common format. Overlap is free (each play is its
+// own process) and hold-to-stop kills whatever is still playing.
 
 import { invoke } from "@tauri-apps/api/core";
 
-const MIME: Record<string, string> = {
-  mp3: "audio/mpeg",
-  wav: "audio/wav",
-  m4a: "audio/mp4",
-  aac: "audio/aac",
-  ogg: "audio/ogg",
-  oga: "audio/ogg",
-  flac: "audio/flac",
-  aiff: "audio/aiff",
-  aif: "audio/aiff",
-};
+// Extensions the file picker offers. The native players handle far more, but
+// these are the common effect formats we advertise.
+export const SOUND_EXTENSIONS = ["mp3", "wav", "m4a", "aac", "ogg", "oga", "flac", "aiff", "aif"];
 
-export const SOUND_EXTENSIONS = Object.keys(MIME);
-
-const cache = new Map<string, string>();
-const playing = new Set<HTMLAudioElement>();
-
+/** Play a sound file. Rejects (with the OS error) if the file can't be played,
+ * so the editor's Test button can surface the reason instead of failing mute. */
 export async function playSound(path: string): Promise<void> {
-  let url = cache.get(path);
-  if (!url) {
-    const buf = await invoke<ArrayBuffer>("read_local_bytes", { path });
-    const ext = path.split(".").pop()?.toLowerCase() ?? "";
-    url = URL.createObjectURL(new Blob([buf], { type: MIME[ext] ?? "audio/mpeg" }));
-    cache.set(path, url);
-  }
-  // A fresh Audio per press so rapid presses overlap instead of restarting.
-  const audio = new Audio(url);
-  playing.add(audio);
-  audio.addEventListener("ended", () => playing.delete(audio));
-  await audio.play();
+  await invoke("sound_play", { path });
 }
 
-/** Silence every sound effect that is currently playing (hold-to-stop). */
+/** Stop every sound effect currently playing (hold-to-stop / restart). */
 export function stopAllSounds(): void {
-  for (const audio of playing) audio.pause();
-  playing.clear();
+  void invoke("sound_stop").catch(() => {});
 }
 
-/** Ease every playing sound down to silence over `ms`, then stop it. */
+/** Ease every playing sound down to silence over `ms`, then stop (hold-to-fade
+ * action). Done on the audio thread in Rust. */
 export function fadeOutSounds(ms = 800): void {
-  for (const audio of [...playing]) {
-    playing.delete(audio); // a new press during the fade starts fresh
-    const startVolume = audio.volume;
-    const t0 = performance.now();
-    const step = () => {
-      const k = Math.min(1, (performance.now() - t0) / ms);
-      audio.volume = startVolume * (1 - k);
-      if (k < 1 && !audio.paused) requestAnimationFrame(step);
-      else audio.pause();
-    };
-    requestAnimationFrame(step);
-  }
+  void invoke("sound_fade", { ms }).catch(() => {});
 }

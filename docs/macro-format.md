@@ -27,7 +27,7 @@ identically.
 | `version` | yes | `2`, or `3` when the file carries key-logic `variants` |
 | `name` | no | Display name |
 | `created` | no | ISO 8601 timestamp |
-| `kind` | no | UI metadata: `"combo"` \| `"keystroke"` \| `"text"` \| `"media"` \| `"recorded"` \| `"launch"` \| `"command"` \| `"sound"` \| `"sequence"`. The firmware ignores it; the app uses it to show and re-edit the assignment. |
+| `kind` | no | UI metadata: `"combo"` \| `"keystroke"` \| `"text"` \| `"media"` \| `"volume"` \| `"mic_level"` \| `"scroll"` \| `"recorded"` \| `"launch"` \| `"command"` \| `"sound"` \| `"mic"` \| `"webhook"` \| `"obs"` \| `"sequence"`. The app uses it to show and re-edit the assignment. Since firmware 0.18.0 the Vision 6 also reads `kind` to pick the [wheel menu](actions.md#wheel-menu-vision-6): `"volume"` (system-volume slider; press plays the `mute` consumer event so it still works standalone) and `"mic_level"` (mic input-gain slider, host-only, empty events) open on a bare key press; `"media"` becomes a browser (turn to pick a usage, hold to reassign — the device rewrites this file). |
 | `combo` / `text` / `seq` … | no | UI metadata matching `kind` |
 | `screen` | for mouse macros | Capture resolution; absolute coordinates are rescaled from it (`x * 32767 / (width-1)`). |
 | `settings.speed` | no | Playback speed multiplier (default `1.0`; `2` = half the run time). On the Vision 6 the on-device speed editor rewrites this field in place and announces `macro_changed` (fw ≥ 0.7.0) |

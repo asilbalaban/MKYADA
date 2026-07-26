@@ -61,9 +61,39 @@ NAV_SLOTS = {K_PSH: "btn-psh", K_BACK: "btn-back", K_CONFIRM: "btn-confirm"}
 # PSH held this long toggles select mode when its slot has no hold variant —
 # past the 400 ms variant default so an assigned hold still wins cleanly
 ESC_HOLD_S = 1.2
+# how long the device waits for the app to answer a host-kind CONFIRM with a
+# `menu` before giving up and showing the "app required" toast
+CTX_WAIT_S = 1.5
 
 (S_HOME, S_SELECT, S_SPEED, S_SAVED, S_SET_MENU, S_FONT, S_TIMEOUT,
- S_PLAYING, S_HOST, S_TOAST, S_LANG, S_TEST, S_ABOUT) = range(13)
+ S_PLAYING, S_HOST, S_TOAST, S_LANG, S_TEST, S_ABOUT, S_CTX) = range(14)
+
+# media usages the wheel treats as a "turn to adjust" knob rather than a
+# single transport key (see _enter_ctx). Volume rotates up/down, CONFIRM mutes.
+VOL_USAGES = ("volume_up", "volume_down", "mute")
+BRIGHT_USAGES = ("brightness_up", "brightness_down")
+
+# the media wheel menu is a browser of every consumer usage: turn to highlight
+# one, tap to fire it once, hold to reassign the key to it (issue: wheel-menu
+# grammar). Order is the on-screen list order.
+MEDIA_OPTS = ("play_pause", "next_track", "prev_track", "stop", "mute",
+              "volume_up", "volume_down", "brightness_up", "brightness_down")
+MEDIA_LABEL = {"play_pause": "Play/Pause", "next_track": "Next",
+               "prev_track": "Prev", "stop": "Stop", "mute": "Mute",
+               "volume_up": "Vol +", "volume_down": "Vol -",
+               "brightness_up": "Bright +", "brightness_down": "Bright -"}
+
+# menu-kind (layer / nav) options the wheel browser offers: switch layers or
+# jump to a screen. The absolute layer_a.. entries are appended per device from
+# layer_count. All are runnable on-device with no host, so the browser reassigns
+# standalone just like the media one (issue: layer keys only ran "next layer").
+MENU_FIXED_OPTS = ("layer_next", "layer_prev", "home", "grid", "settings")
+MENU_LABEL = {"layer_next": "Next layer", "layer_prev": "Prev layer",
+              "home": "Home", "grid": "Grid", "settings": "Settings"}
+
+# how long CONFIRM/PSH must be held inside a menu to mean "assign" (vs a tap =
+# "do it once"). Matches the key-logic hold default.
+MENU_HOLD_S = 0.4
 
 (SET_FONT, SET_TMO, SET_LANG, SET_BAND_LAYER, SET_BAND_PROFILE,
  SET_ABOUT, SET_REBOOT) = range(7)
@@ -121,11 +151,14 @@ class Ui:
         self.last_move = 0.0
         self.activity_at = time.monotonic()
         self.playing_cell = None
+        self.ctx = None  # active context-menu (S_CTX) descriptor
+        self.sysvol = None  # live system output volume % pushed by the app
         self._pending_layer = clamp(last_layer, 0,
                                     app.config["layer_count"] - 1)
         self._enc_batch = 0  # host mode: accumulated detents
         self._labels = {}  # layer -> [(l1, l2)] * 6
         self._speeds = {}  # (layer, key0) -> tenths
+        self._kinds = {}   # (layer, key0) -> (kind, sub) for the wheel menu
         self._slots = {}   # layer -> {slot: meta dict or None} (grid context)
         self._ctx_slots = {}  # "home" / "menu" -> {slot: meta dict or None}
         self._injecting = 0  # >0 while a macro key drives the menu (inject)
@@ -154,13 +187,15 @@ class Ui:
 
     # --- labels / speeds / slots (lazy per layer) ---
     def _read_meta(self, path):
-        """(name, speed_tenths) from a macro file's header without loading
-        events: stream files carry both in line 1, legacy app files are one
-        line anyway; small pretty-printed files get a full parse."""
+        """(name, speed_tenths, kind, sub) from a macro file's header without
+        loading events: stream files carry it in line 1, legacy app files are
+        one line anyway; small pretty-printed files get a full parse. `kind`
+        drives the context-aware wheel menu (issue: wheel-menu redesign); `sub`
+        is the one extra field that menu needs (media usage, obs action, ...)."""
         try:
             size = os.stat(path)[6]
         except OSError:
-            return None, SPEED_DEF_T
+            return None, SPEED_DEF_T, None, None
         data = None
         try:
             with open(path, "rb") as f:
@@ -173,14 +208,28 @@ class Ui:
         except (OSError, ValueError, MemoryError):
             data = None
         if not isinstance(data, dict):
-            return None, SPEED_DEF_T
+            return None, SPEED_DEF_T, None, None
         name = data.get("name")
         speed = (data.get("settings") or {}).get("speed", 1.0)
         try:
             t = clamp(int(round(float(speed) * 10)), SPEED_MIN_T, SPEED_MAX_T)
         except (TypeError, ValueError):
             t = SPEED_DEF_T
-        return (name if isinstance(name, str) and name else None), t
+        kind = data.get("kind")
+        sub = None
+        if kind == "obs":
+            o = data.get("obs")
+            sub = o.get("action") if isinstance(o, dict) else None
+        elif kind == "media":
+            sub = data.get("media")
+        elif kind == "mic":
+            sub = data.get("mic_mode") or "toggle"
+        elif kind == "scroll":
+            sc = data.get("scroll")
+            sub = sc.get("dir") if isinstance(sc, dict) else None
+        elif kind == "menu":
+            sub = data.get("menu")
+        return (name if isinstance(name, str) and name else None), t, kind, sub
 
     def _node(self, d):
         """Classify what an assignment (macro dict) does when it fires:
@@ -256,8 +305,9 @@ class Ui:
         labels = []
         chars = set()
         for k in range(1, 7):
-            name, t = self._read_meta(self.app.macro_path_for(k, l))
+            name, t, kind, sub = self._read_meta(self.app.macro_path_for(k, l))
             self._speeds[(l, k - 1)] = t
+            self._kinds[(l, k - 1)] = (kind, sub)
             pair = self._split_name(name or ("K%d" % k))
             labels.append(pair)
             chars |= set(pair[0]) | set(pair[1])
@@ -298,6 +348,12 @@ class Ui:
             self.load_layer(l)
         return self._speeds.get((l, key0), SPEED_DEF_T)
 
+    def kind_sub(self, l, key0):
+        """(kind, sub) for the key's assignment, driving the wheel menu."""
+        if (l, key0) not in self._kinds:
+            self.load_layer(l)
+        return self._kinds.get((l, key0), (None, None))
+
     def invalidate_labels(self, path=None):
         """A macro file changed (app upload / delete). Drop the affected
         layer's cache; None drops everything."""
@@ -325,6 +381,7 @@ class Ui:
             self._slots.pop(l, None)
             for k in range(6):
                 self._speeds.pop((l, k), None)
+                self._kinds.pop((l, k), None)
         if self.state == S_SELECT and self.app.layer in set(layers):
             self._draw_grid()
 
@@ -444,8 +501,9 @@ class Ui:
         speeds and slots and repaint the grid with the new set."""
         self._labels.clear()
         self._speeds.clear()
+        self._kinds.clear()
         self._slots.clear()
-        if self.state == S_SELECT:
+        if self.state in (S_SELECT, S_CTX):
             self._enter_grid()
 
     def _draw_host(self):
@@ -497,6 +555,7 @@ class Ui:
         self.app.config["timeout"] = self.idle_secs
         self._labels.clear()
         self._speeds.clear()
+        self._kinds.clear()
         self._slots.clear()
         self._ctx_slots.clear()
         self.sel_key = 0
@@ -682,10 +741,41 @@ class Ui:
             return tr("layer_band") % letter
         return label
 
+    def on_sysvol(self, percent):
+        """The app pushed the live system volume (the device can't read it).
+        Shown on volume-kind grid cells; repaint the grid if it's up."""
+        try:
+            v = clamp(int(percent), 0, 100)
+        except (TypeError, ValueError):
+            v = None
+        if v == self.sysvol:
+            return
+        self.sysvol = v
+        if v is not None:
+            self.oled.ensure_glyphs("%0123456789")
+        if self.state == S_SELECT:
+            self._draw_grid()
+
+    def _grid_labels(self, l):
+        """Base labels with the live system volume overlaid on volume-kind
+        cells (their second line becomes '%NN')."""
+        labels = self.labels(l)
+        if self.sysvol is None:
+            return labels
+        out = None
+        for k in range(6):
+            kind, _ = self._kinds.get((l, k), (None, None))
+            if kind == "volume":
+                if out is None:
+                    out = list(labels)
+                a = labels[k][0] if k < len(labels) else "Vol"
+                out[k] = (a or "Vol", "%%%d" % self.sysvol)
+        return out if out is not None else labels
+
     def _draw_grid(self):
         l = self.app.layer
         invert = self.sel_mode or not self._enc_custom()
-        self.oled.show_grid(self.labels(l), self.sel_key, invert,
+        self.oled.show_grid(self._grid_labels(l), self.sel_key, invert,
                             band=self._band())
 
     def _enc_custom(self):
@@ -712,6 +802,419 @@ class Ui:
         self.last_move = 0.0
         self.state = S_SPEED
         self.oled.show_speed(LAYER_NAMES[l], self.sel_key + 1, self.speed_t)
+
+    def _cell_name(self, l, k0):
+        """The key's display label, joined back from the two grid lines."""
+        try:
+            a, b = self.labels(l)[k0]
+            return (a + " " + b).strip() or ("K%d" % (k0 + 1))
+        except Exception:
+            return "K%d" % (k0 + 1)
+
+    # kinds whose whole point is the wheel menu (a continuous slider), so
+    # pressing the physical key should open the menu, not "run" a poor default
+    PRESS_MENU_KINDS = ("volume", "mic_level")
+
+    def wants_press_menu(self, key_no):
+        """True if pressing key `key_no` should open its wheel menu (slider
+        kinds) rather than play its macro. Called from App.on_edge."""
+        kind, _ = self.kind_sub(self.app.layer, key_no - 1)
+        return kind in self.PRESS_MENU_KINDS
+
+    def open_key_menu(self, key_no):
+        """Open the given key's wheel menu as if it were selected on the grid
+        and CONFIRM pressed — the physical key press is the entry point."""
+        if self.state in (S_HOST, S_PLAYING, S_TEST):
+            return
+        self.sel_key = clamp(key_no - 1, 0, 5)
+        self.sel_mode = False
+        self._enter_ctx()
+
+    def _enter_ctx(self):
+        """Context-aware wheel menu: CONFIRM on the selected key opens a menu
+        that fits the key's action instead of always the speed editor.
+        Speed-editing kinds (recorded / typed text / legacy files) keep the
+        speed screen; the rest get an action card that's useful on its own."""
+        l = self.app.layer
+        k0 = self.sel_key
+        kind, sub = self.kind_sub(l, k0)
+        path = self.app.macro_path_for(k0 + 1, l)
+        if kind in (None, "recorded", "text"):
+            self._enter_speed()
+            return
+        name = self._cell_name(l, k0)
+        if kind in ("keystroke", "combo"):
+            # turn = fire the key again and again (turbo); CONFIRM = fire once
+            self._card_state("key", path, tr("key_t"), name, tr("hint_repeat"))
+        elif kind == "scroll":
+            self._card_state("scroll", path, tr("scroll_t"), name,
+                             tr("hint_scroll"))
+        elif kind == "media":
+            # browse every media key: turn to highlight, tap to fire once,
+            # hold to reassign this key to the highlighted one
+            self._enter_optlist("media", path, MEDIA_OPTS, sub, tr("media"))
+        elif kind == "volume":
+            # app running -> absolute % slider (host reads/sets system volume);
+            # app closed -> a relative HID volume knob (press mutes)
+            if self.app.proto.connected and self.app.host_menus:
+                self._ctx_host(kind, sub, path, k0, l)
+            else:
+                self._card_state("adjust", path, tr("volume"), name,
+                                 tr("hint_vol"), up="volume_up",
+                                 down="volume_down", conf="mute")
+        elif kind == "menu":
+            # layer / navigation keys: browse the whole family (next/prev layer,
+            # jump to a specific layer, Home/Grid/Settings), tap to run it live,
+            # hold to reassign — all standalone, the device rewrites the file
+            self._enter_optlist("menu", path, self._menu_opts(), sub,
+                                 tr("menu_t"))
+        elif kind == "sequence":
+            self._card_state("fire", path, tr("run_t"), name, tr("run"))
+        elif kind in ("launch", "command", "sound", "mic", "mic_level",
+                      "webhook", "obs"):
+            self._ctx_host(kind, sub, path, k0, l)
+        else:
+            self._enter_speed()
+
+    def _card_state(self, mode, path, title, big, hint,
+                    up=None, down=None, conf=None):
+        self.ctx = {"mode": mode, "path": path, "up": up, "down": down,
+                    "conf": conf}
+        self.state = S_CTX
+        self.activity_at = time.monotonic()
+        self.oled.show_card(title, big[:12], None, hint)
+
+    def _menu_opts(self):
+        """The layer/nav actions the menu-kind browser offers on this device:
+        step layers, jump to each existing layer, then Home/Grid/Settings."""
+        n = self.app.config["layer_count"]
+        opts = ["layer_next", "layer_prev"]
+        opts += ["layer_" + LAYER_NAMES[i] for i in range(n)]
+        opts += ["home", "grid", "settings"]
+        return opts
+
+    def _opt_label(self, kind, o):
+        if kind == "media":
+            return MEDIA_LABEL.get(o, o)
+        if kind == "menu":
+            if len(o) == 7 and o[:6] == "layer_":
+                return "Layer " + o[6].upper()
+            return MENU_LABEL.get(o, o)
+        return str(o)
+
+    def _enter_optlist(self, kind, path, opts, cur, title):
+        """A local option browser (media): turn highlights, a tap fires the
+        highlighted option, a hold reassigns the key to it. `cur` = the option
+        the key is assigned to now (shown marked, cursor starts on it)."""
+        opts = list(opts)
+        sel = opts.index(cur) if cur in opts else 0
+        self.ctx = {"mode": "optlist", "kind": kind, "opts": opts,
+                    "assigned": sel, "sel": sel, "path": path, "title": title}
+        self.state = S_CTX
+        self.activity_at = time.monotonic()
+        self._draw_optlist()
+
+    def _draw_optlist(self):
+        c = self.ctx
+        labels = [self._opt_label(c["kind"], o) for o in c["opts"]]
+        self.oled.show_menu(c["title"], labels, c["sel"],
+                            marked=c["assigned"], action=tr("run"),
+                            hold=tr("hold_set"))
+
+    def _resolve_hold(self, key, hold_s=MENU_HOLD_S):
+        """Blocking tap-vs-hold pick for a menu press: "hold" once held past
+        hold_s, else "tap" on release. Serial/LED keep pumping meanwhile."""
+        t0 = time.monotonic()
+        while True:
+            if time.monotonic() - t0 >= hold_s:
+                return "hold"
+            ev = self.nav.events.get()
+            if ev and ev.key_number == key and not ev.pressed:
+                return "tap"
+            self.app.pump()
+            self.app.led.tick()
+            time.sleep(0.002)
+
+    def _write_macro(self, path, data):
+        """Atomically (re)write a whole-file macro, refresh caches and tell the
+        app. Returns "ok" | "readonly" | "error". Profile-aware: `path` is
+        already the active target (macro_path_for)."""
+        tmp = path + ".part"
+        try:
+            with open(tmp, "w") as f:
+                json.dump(data, f)
+        except OSError as e:
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+            return "readonly" if (e.args and e.args[0] == 30) else "error"
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+        try:
+            os.rename(tmp, path)
+        except OSError:
+            return "error"
+        self.invalidate_labels(path)
+        self.app.proto.send({"t": "macro_changed", "file": path,
+                             "reason": "assign"})
+        return "ok"
+
+    def _write_media_macro(self, path, usage):
+        return self._write_macro(path, {
+            "format": "mkyada-macro", "version": 2,
+            "name": MEDIA_LABEL.get(usage, usage), "kind": "media",
+            "media": usage,
+            "events": [{"delay": 0, "type": "consumer", "usage": usage}]})
+
+    def _write_menu_macro(self, path, act):
+        return self._write_macro(path, {
+            "format": "mkyada-macro", "version": 2,
+            "name": self._opt_label("menu", act), "kind": "menu",
+            "menu": act, "events": []})
+
+    def _run_menu_act(self, act):
+        """Perform a layer/nav menu action live (tap in the menu browser). Each
+        of these transitions the UI itself, so the wheel menu is replaced by the
+        action's own screen — no redraw of the browser needed."""
+        if act == "layer_next":
+            self._jump_layer(1)
+        elif act == "layer_prev":
+            self._jump_layer(-1)
+        elif len(act) == 7 and act[:6] == "layer_":
+            self._goto_layer(LAYER_NAMES.find(act[6]))
+        elif act == "home":
+            self._go_home()
+        elif act == "grid":
+            self._enter_grid()
+        elif act == "settings":
+            self._goto_settings()
+
+    def _ctx_host(self, kind, sub, path, k0, l):
+        """A host-only action (OBS, webhook, mic, ...). The device can't perform
+        it alone: ask the app for a menu (proto v9). The app answers with a
+        `menu` message rendered by on_menu; if it never does (or isn't there),
+        fall back to the "app required" toast."""
+        if self.app.proto.connected and self.app.host_menus:
+            self.app.proto.send({"t": "ctx", "key": k0 + 1,
+                                 "layer": LAYER_NAMES[l], "kind": kind,
+                                 "sub": sub, "file": path})
+            self.ctx = {"mode": "wait", "key": k0 + 1, "layer": LAYER_NAMES[l],
+                        "deadline": time.monotonic() + CTX_WAIT_S}
+            self.state = S_CTX
+            self.activity_at = time.monotonic()
+            self.oled.show_card(tr("wheel"), "...", None, None)
+        else:
+            self._toast(tr("wheel"), tr("app_needed"), tr("open_app"))
+
+    def on_menu(self, msg):
+        """The app rendered/updated the open wheel menu (host-fed list, slider
+        or status card). Ignored unless a menu is open for this key."""
+        if self.state != S_CTX or not self.ctx:
+            return
+        key = msg.get("key")
+        if key is not None and self.ctx.get("key") not in (None, key):
+            return  # a menu meant for a different key
+        # a live re-render of the same menu (REC timer, external volume) keeps
+        # the user's cursor and doesn't reset the idle timer
+        prev = self.ctx if self.ctx.get("mode") == "host" else None
+        items = msg.get("items") or []
+        sel_in = msg.get("sel")
+        sel = int(sel_in) if sel_in is not None else (prev["sel"] if prev else 0)
+        self.ctx = {"mode": "host", "mtype": msg.get("mtype") or "card",
+                    "key": self.ctx.get("key") or key,
+                    "layer": self.ctx.get("layer") or msg.get("layer"),
+                    "title": str(msg.get("title") or tr("wheel")),
+                    "big": str(msg.get("big") or ""),
+                    "l1": str(msg.get("l1") or ""),
+                    "l2": str(msg.get("l2") or ""),
+                    "hint": msg.get("hint"), "action": msg.get("action"),
+                    "hold": msg.get("hold"), "items": items,
+                    "sel": clamp(sel, 0, max(0, len(items) - 1)),
+                    "value": msg.get("value"),
+                    "min": int(msg.get("min") or 0),
+                    "max": int(msg.get("max") or 100),
+                    "step": int(msg.get("step") or 1),
+                    "unit": str(msg.get("unit") or "")}
+        if prev is None:
+            self.activity_at = time.monotonic()
+        self._draw_host_menu()
+
+    def on_menu_result(self, msg):
+        """The app finished a picked/fired action: optionally refresh a
+        rewritten macro's label, show a brief toast, and close the menu."""
+        if self.state != S_CTX:
+            return
+        changed = msg.get("changed")
+        if changed:
+            self.invalidate_labels(changed)
+        toast = msg.get("toast")
+        if isinstance(toast, list) and toast:
+            title = str(toast[0])
+            line1 = str(toast[1]) if len(toast) > 1 else ""
+            self._toast(title, line1, "")
+        else:
+            self._enter_grid()
+
+    def on_host_gone(self):
+        """The app disconnected: abandon any open host menu and drop the live
+        system-volume readout (it would otherwise freeze on a stale value)."""
+        had_vol = self.sysvol is not None
+        self.sysvol = None
+        if self.state == S_CTX and self.ctx and \
+                self.ctx.get("mode") in ("host", "wait"):
+            self._enter_grid()
+        elif had_vol and self.state == S_SELECT:
+            self._draw_grid()
+
+    def _item_label(self, it):
+        try:
+            return str(it[1])[:21]
+        except (IndexError, TypeError):
+            return ""
+
+    def _draw_host_menu(self):
+        c = self.ctx
+        mt = c["mtype"]
+        if mt == "list":
+            items = [self._item_label(it) for it in c["items"]] or [""]
+            marked = None
+            for i, it in enumerate(c["items"]):
+                if len(it) > 2 and it[2]:
+                    marked = i
+                    break
+            self.oled.show_menu(c["title"], items, c["sel"], marked=marked,
+                                action=c.get("action") or tr("select"),
+                                hold=tr("hold_set") if c.get("hold") else None)
+        elif mt == "slider":
+            v = c["value"] or 0
+            span = c["max"] - c["min"]
+            frac = (v - c["min"]) / float(span) if span else 0.0
+            self.oled.show_adjust(c["title"], "%d%s" % (v, c["unit"]), frac,
+                                  c.get("action") or tr("save"))
+        else:  # card
+            self.oled.show_card(c["title"], (c["big"] or "")[:12],
+                                c["l1"] or None, c.get("hint"))
+
+    def _close_host_menu(self):
+        if self.app.proto.connected:
+            self.app.proto.send({"t": "menu_ev", "ev": "close"})
+        self._enter_grid()
+
+    def _st_ctx(self, now, d, press):
+        """Wheel-menu handler. Local action cards run entirely on the device;
+        host menus (mode "host") relay turn/press as menu_ev and re-render from
+        the app's menu messages. BACK / idle close and notify the app."""
+        c = self.ctx or {}
+        mode = c.get("mode")
+        if mode == "wait":
+            if press == K_BACK:
+                self._close_host_menu()
+            elif now >= c.get("deadline", now):
+                self._toast(tr("wheel"), tr("app_needed"), tr("open_app"))
+            return
+        if mode == "host":
+            self._st_ctx_host(now, d, press)
+            return
+        # --- local menus (keystroke / scroll knob / media browser / volume) ---
+        if press == K_BACK:
+            self._enter_grid()
+            return
+        eng = self.app.engine
+        if mode == "optlist":
+            if d:
+                c["sel"] = clamp(c["sel"] + (1 if d > 0 else -1), 0,
+                                 len(c["opts"]) - 1)
+                self._draw_optlist()
+            if press in (K_PSH, K_CONFIRM):
+                self._optlist_press(press)
+                return
+        elif mode in ("key", "scroll"):
+            if d:
+                for _ in range(min(abs(d), 4)):
+                    self.app.play_file(path=c["path"], trigger=None)
+            if press in (K_PSH, K_CONFIRM):
+                self.app.play_file(path=c["path"], trigger=None)
+        elif mode == "fire":  # sequence: CONFIRM runs the whole macro once
+            if press in (K_PSH, K_CONFIRM):
+                self.app.play_file(path=c["path"], trigger=None)
+        elif mode == "adjust":  # volume/brightness knob (standalone fallback)
+            if d:
+                usage = c["up"] if d > 0 else c["down"]
+                if usage:
+                    for _ in range(min(abs(d), 4)):
+                        eng.consumer_tap(usage)
+            if press in (K_PSH, K_CONFIRM) and c.get("conf"):
+                eng.consumer_tap(c["conf"])
+        if press is None and not d and now - self.activity_at > self.idle_secs:
+            self._enter_grid()
+
+    def _optlist_press(self, press):
+        """A tap fires the highlighted option once; a hold reassigns the key to
+        it (device-written macro, so it works standalone)."""
+        c = self.ctx
+        opt = c["opts"][c["sel"]]
+        if self._resolve_hold(press) == "hold":
+            if c["kind"] == "media":
+                res = self._write_media_macro(c["path"], opt)
+            elif c["kind"] == "menu":
+                res = self._write_menu_macro(c["path"], opt)
+            else:
+                res = "error"
+            if res == "ok":
+                c["assigned"] = c["sel"]
+                self._toast(c["title"], tr("assigned"),
+                            self._opt_label(c["kind"], opt))
+            elif res == "readonly":
+                self._toast(c["title"], tr("usb_on"), tr("read_only"))
+            else:
+                self._toast(c["title"], tr("save_fail"), "")
+        elif c["kind"] == "media":
+            self.app.engine.consumer_tap(opt)
+        elif c["kind"] == "menu":
+            self._run_menu_act(opt)  # transitions the UI itself
+
+    def _st_ctx_host(self, now, d, press):
+        c = self.ctx
+        mt = c["mtype"]
+        send = self.app.proto.send
+        if mt == "list":
+            if d and c["items"]:
+                c["sel"] = clamp(c["sel"] + (1 if d > 0 else -1), 0,
+                                 len(c["items"]) - 1)
+                self._draw_host_menu()
+            if press in (K_PSH, K_CONFIRM):
+                it = c["items"][c["sel"]] if c["items"] else None
+                # tap = use it now (switch scene / do the mode); hold = reassign
+                ev = "assign" if self._resolve_hold(press) == "hold" else "pick"
+                send({"t": "menu_ev", "ev": ev,
+                      "id": (it[0] if it else None)})
+            elif press == K_BACK:
+                self._close_host_menu()
+        elif mt == "slider":
+            if d:
+                step = c["step"] or 1
+                c["value"] = clamp((c["value"] or 0) + d * step,
+                                   c["min"], c["max"])
+                self._draw_host_menu()
+                send({"t": "menu_ev", "ev": "value", "v": c["value"]})
+            if press in (K_PSH, K_CONFIRM):
+                send({"t": "menu_ev", "ev": "close"})
+                self._enter_grid()
+            elif press == K_BACK:
+                self._close_host_menu()
+        else:  # card
+            if press in (K_PSH, K_CONFIRM):
+                send({"t": "menu_ev", "ev": "fire"})
+            elif d:
+                send({"t": "menu_ev", "ev": "value", "v": 1 if d > 0 else -1})
+            elif press == K_BACK:
+                self._close_host_menu()
+        if (press is None and not d
+                and now - self.activity_at > self.idle_secs):
+            self._close_host_menu()
 
     def _toast(self, title, line1, line2=""):
         self.state = S_TOAST
@@ -786,6 +1289,8 @@ class Ui:
             self._st_select(now, d, press)
         elif self.state == S_SPEED:
             self._st_speed(now, d, press)
+        elif self.state == S_CTX:
+            self._st_ctx(now, d, press)
         elif self.state == S_SAVED:
             if now - self.saved_at > SAVED_DWELL_S:
                 self._enter_grid()
@@ -955,9 +1460,9 @@ class Ui:
                 # toggles the temporary default-navigation "select mode"
                 self._toggle_sel_mode()
             else:
-                self._enter_speed()
+                self._enter_ctx()
         elif press == K_CONFIRM:
-            self._enter_speed()
+            self._enter_ctx()
         elif press == K_BACK:
             self._go_home()
 

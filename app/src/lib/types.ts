@@ -183,6 +183,8 @@ export interface MacroFile {
     | "combo"
     | "text"
     | "media"
+    | "volume"
+    | "mic_level"
     | "scroll"
     | "menu"
     | "recorded"
@@ -361,6 +363,12 @@ export type Assignment = (
   | { kind: "combo"; mods: string[]; key: string }
   | { kind: "text"; text: string }
   | { kind: "media"; usage: string }
+  // system output-volume level: pressing mutes (HID, standalone); the Vision 6
+  // wheel opens an absolute % slider while the app is running (host)
+  | { kind: "volume" }
+  // microphone input level: the Vision 6 wheel opens an input-gain slider —
+  // host-only (no HID for capture gain)
+  | { kind: "mic_level" }
   // mouse-wheel scroll, optionally with modifiers held (e.g. Alt+wheel to
   // zoom in Illustrator, Ctrl+wheel to zoom a browser) — hardware HID
   | { kind: "scroll"; dir: ScrollDir; amount?: number; mods?: string[] }

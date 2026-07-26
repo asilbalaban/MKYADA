@@ -7,7 +7,10 @@ import { AppWindow, Gauge, HardDrive, Layers, Monitor, Moon, Pin, Power, Rocket,
 import { ipc } from "../lib/ipc";
 import { keysCache } from "../lib/keys-cache";
 import { useDevice } from "../lib/device";
-import { deviceModel, type ObsSnapshot, type UpdateInfo } from "../lib/types";
+import { deviceModel, type Assignment, type ObsSnapshot, type UpdateInfo } from "../lib/types";
+import { allKinds, wheelPreview } from "../lib/kind-registry";
+import { ActionIcon } from "../components/action-icons";
+import { OledPreview } from "../components/OledPreview";
 import {
   type ObsConfig,
   setAlwaysOnTop,
@@ -525,6 +528,52 @@ function KeypadCard() {
   );
 }
 
+/** Vision 6 reference: what pressing the wheel does for each action kind.
+ * Generated from the kind registry so it can never drift from the device. */
+function WheelMenuCard() {
+  const { hello } = useDevice();
+  if (deviceModel(hello) !== "vision6") return null;
+  const examples: { a: Assignment; cap: string }[] = [
+    { a: { kind: "text", text: "" }, cap: "Speed" },
+    { a: { kind: "keystroke", key: "z" }, cap: "Action card" },
+    { a: { kind: "obs", action: "setScene", sceneName: "Live" }, cap: "Scene picker" },
+  ];
+  return (
+    <Card title="Wheel menu (Vision 6)">
+      <p className="text-sm text-fg-muted mb-3">
+        Turn the wheel to pick a key, then press it — the screen opens a menu that fits that
+        key's action instead of always the speed editor. Here's what each action shows.
+      </p>
+      <div className="flex flex-wrap gap-4 mb-4">
+        {examples.map((ex) => (
+          <figure key={ex.cap} className="flex flex-col items-center gap-1.5">
+            <OledPreview preview={wheelPreview(ex.a)} scale={1.6} />
+            <figcaption className="text-xs text-fg-faint">{ex.cap}</figcaption>
+          </figure>
+        ))}
+      </div>
+      <div className="flex flex-col divide-y divide-line">
+        {allKinds()
+          .filter((k) => k.id !== "none" && k.id !== "nothing")
+          .map((k) => (
+            <div key={k.id} className="flex items-center gap-3 py-2">
+              <ActionIcon name={k.icon} size={30} />
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-medium text-fg">{k.label}</span>
+                  <Badge tone={k.host ? "amber" : "green"}>
+                    {k.host ? "needs app" : "standalone"}
+                  </Badge>
+                </div>
+                <p className="text-xs text-fg-faint">{k.wheel.summary}</p>
+              </div>
+            </div>
+          ))}
+      </div>
+    </Card>
+  );
+}
+
 export function SettingsPage() {
   const [version, setVersion] = useState("");
   const [update, setUpdate] = useState<UpdateInfo | null>(null);
@@ -592,6 +641,7 @@ export function SettingsPage() {
 
       {/* Keypad & system access */}
       <KeypadCard />
+      <WheelMenuCard />
       <PermissionsCard />
 
       {/* Integrations */}

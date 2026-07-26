@@ -35,7 +35,8 @@ const PAGES = [
   { id: "profiles", label: "Profiles", settle: 500 },
   { id: "settings", label: "Settings", settle: 500 },
 ];
-const OLED_SHOTS = ["home", "grid", "speed", "settings", "about"];
+const OLED_SHOTS = ["home", "grid", "speed", "settings", "about",
+  "wheel-scene", "wheel-status", "wheel-volume"];
 
 async function waitForServer(url, tries = 100) {
   for (let i = 0; i < tries; i++) {

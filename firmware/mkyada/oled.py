@@ -230,11 +230,16 @@ class Oled:
         g.append(_rect(0, 0, self.W, 13))
         g.append(self._txt(title, self.CX, 6, color=0x000000))
 
-    def _bottom_bar(self, g, action=None, back=True):
+    def _bottom_bar(self, g, action=None, back=True, hold=None):
         y = self.H - 13
         g.append(_rect(0, y, self.W, 1))
         if back:
             g.append(self._txt(tr("back"), 2, self.H - 6, anchor=(0.0, 0.5),
+                               font=self.ui_font))
+        if hold:
+            # centered third-gesture affordance ("hold: assign") so the
+            # reassign gesture is discoverable, not folklore
+            g.append(self._txt(hold, self.CX, self.H - 6, anchor=(0.5, 0.5),
                                font=self.ui_font))
         if action:
             g.append(self._txt(action, self.W - 2, self.H - 6, anchor=(1.0, 0.5),
@@ -423,6 +428,34 @@ class Oled:
         self._bottom_bar(g, action=tr("save"))
         self.paint(g)
 
+    def show_card(self, title, big, line=None, hint=None):
+        """Generic action card for the context-aware wheel menu: a title bar,
+        a bold hero line (the key's action), an optional status line, and a
+        bottom bar whose right-hand label is `hint` (what CONFIRM does)."""
+        if not self.display:
+            return
+        g = displayio.Group()
+        self._top_bar(g, title)
+        g.append(self._txt(big, self.CX, 28, scale=2, font=self.ui_font))
+        if line:
+            g.append(self._txt(line, self.CX, 44, font=self.ui_font))
+        self._bottom_bar(g, action=hint)
+        self.paint(g)
+
+    def show_adjust(self, title, hero, frac, action=None):
+        """Generic value slider (host-backed volume, brightness): title bar,
+        big value, progress bar, bottom action. Generalizes show_speed /
+        show_timeout for the context-aware wheel menu."""
+        if not self.display:
+            return
+        g = displayio.Group()
+        self._top_bar(g, title)
+        g.append(self._txt(hero, self.CX, 28, scale=self.hero_scale,
+                           font=self.hero_font))
+        self._hbar(g, max(0.0, min(1.0, frac)))
+        self._bottom_bar(g, action=action)
+        self.paint(g)
+
     def show_saved(self, layer_name, key_no, t):
         if not self.display:
             return
@@ -463,10 +496,11 @@ class Oled:
 
     MENU_VIS = 3  # rows that fit between the top and bottom bars
 
-    def show_menu(self, title, items, sel, marked=None, action=None):
+    def show_menu(self, title, items, sel, marked=None, action=None, hold=None):
         """Generic list menu (Settings, Font). marked = index tagged with >.
         Longer lists scroll: the selection stays visible and small arrows on
-        the right show there are items above/below."""
+        the right show there are items above/below. `hold`, when set, labels
+        the centre of the bottom bar with the hold-to-reassign gesture."""
         if not self.display:
             return
         g = displayio.Group()
@@ -494,7 +528,7 @@ class Oled:
             g.append(vectorio.Polygon(pixel_shader=WHITE,
                                       points=[(0, 0), (6, 0), (3, 4)],
                                       x=self.W - 7, y=45))
-        self._bottom_bar(g, action=action or tr("select"))
+        self._bottom_bar(g, action=action or tr("select"), hold=hold)
         self.paint(g)
 
     def show_timeout(self, sec, lo, hi):

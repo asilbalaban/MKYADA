@@ -90,7 +90,11 @@ gc.collect()  # the display stack litters the heap; start the app compacted
 
 DEBOUNCE_S = 0.02
 PING_TIMEOUT_S = 5.0
-PROTO_VERSION = 8  # v8: "profile" command — the app activates a per-app
+PROTO_VERSION = 9  # v9: context-aware wheel menu — "hostinfo" (the app
+                   # advertises menu support), "ctx" (device asks the app for a
+                   # host-kind key's menu), "menu"/"menu_ev"/"menu_result"
+                   # (render / events / close for the on-screen wheel menu);
+                   # v8: "profile" command — the app activates a per-app
                    # profile natively (macro paths redirect to its files) so
                    # the on-device grid/wheel/speed editor run it, no host mode;
                    # v7: update_begin/update_end/update_abort (locked update
@@ -228,6 +232,7 @@ class App:
         self.pin_watch_until = 0.0
         self.host_label = None  # app-pushed profile/app label for the band
         self.host_keys = None  # app-pushed profile key names (host-mode grid)
+        self.host_menus = False  # app advertised wheel-menu support (hostinfo)
         # Active per-app profile (issue #23): a file prefix like "p_p123" the
         # app sets via {t:"profile"}. When set, macro paths resolve to that
         # profile's files (falling back to the standalone macro when a key
@@ -661,6 +666,24 @@ class App:
                                  "msg": str(e)})
             else:
                 self.proto.send({"t": "ok", "re": "scroll"})
+        elif t == "hostinfo":
+            # The app advertises which optional features it speaks. Today just
+            # wheel menus (context-aware CONFIRM): without this, the device
+            # keeps host-kind keys on the "app required" toast. An old app
+            # never sends it; the flag clears on disconnect (run_loop).
+            self.host_menus = bool(msg.get("menus"))
+        elif t == "sysvol":
+            # live system output volume for the grid (the device can't read it):
+            # the app pushes it while connected; volume-kind cells show it.
+            self.ui_call("on_sysvol", msg.get("percent"))
+        elif t == "menu":
+            # render / update the on-screen wheel menu (host-fed list, slider
+            # or status card). The UI owns what's currently open.
+            self.ui_call("on_menu", msg)
+        elif t == "menu_result":
+            # the app finished a picked action: close the menu, optionally show
+            # a toast and invalidate a rewritten macro's cached label.
+            self.ui_call("on_menu_result", msg)
         elif t == "led":
             # app feedback color (e.g. mic muted -> red); "off" restores the
             # normal LED grammar. Cleared automatically on app disconnect.
@@ -1241,7 +1264,23 @@ class App:
                 self.set_layer_idx((self.layer + 1) % c["layer_count"])
             return
         if pressed:
+            # Slider-style keys (volume / mic level) have no useful "run": a
+            # bare press opens their wheel menu directly, so the physical key
+            # acts like selecting it and pressing PSH (issue: wheel-menu UX).
+            if self.press_opens_menu(key_no):
+                self.ui_call("open_key_menu", key_no)
+                return
             self.play_file(self.macro_path(key_no), trigger=i)
+
+    def press_opens_menu(self, key_no):
+        """Whether pressing this key should open its wheel menu instead of
+        playing (Vision 6 slider kinds). Safe on core6 (no ui)."""
+        if not self.ui:
+            return False
+        try:
+            return self.ui.wants_press_menu(key_no)
+        except Exception:
+            return False
 
     # --- main loop ---
     def run(self):
@@ -1319,6 +1358,11 @@ class App:
                 self.host_label = None
                 self.host_keys = None
                 self.ui_call("on_label")
+            # the app's wheel-menu support (and any open host menu) can't
+            # outlive the connection either
+            if self.host_menus and not self.proto.connected:
+                self.host_menus = False
+                self.ui_call("on_host_gone")
             # a profile is app-driven too: revert to the standalone config so
             # a crashed/closed app can't strand the device on a profile
             if self.profile_id and not self.proto.connected:

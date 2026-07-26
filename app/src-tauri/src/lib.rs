@@ -7,8 +7,10 @@ mod permissions;
 mod player;
 mod profiles;
 mod recorder;
+mod sound;
 mod updater;
 mod vars;
+mod volume;
 
 use device::bootloader;
 use device::drive::{self, DriveInfo};
@@ -409,6 +411,48 @@ fn read_local_bytes(path: String) -> Result<tauri::ipc::Response, String> {
         .map_err(|e| e.to_string())
 }
 
+/// Play a sound file natively (afplay / MediaPlayer / ffplay). Returns an error
+/// string the UI can show, so a bad path or missing player isn't silent.
+#[tauri::command]
+fn sound_play(path: String) -> Result<(), String> {
+    sound::play(&expand_home(&path))
+}
+
+/// Stop every sound still playing (hold-to-stop key action).
+#[tauri::command]
+fn sound_stop() {
+    sound::stop_all();
+}
+
+/// Fade every playing sound to silence over `ms`, then stop (hold-to-fade).
+#[tauri::command]
+fn sound_fade(ms: u64) {
+    sound::fade(ms);
+}
+
+#[derive(serde::Deserialize)]
+struct SoundKeyDto {
+    /// "layer:keyNo", e.g. "a:5"
+    id: String,
+    path: String,
+    /// hold action: "fade" | "restart" | "stop" (absent = stop)
+    #[serde(default)]
+    hold: Option<String>,
+}
+
+/// Register which keys are "play sound" keys so the native serial reader can
+/// play them even while the app is backgrounded (the webview is suspended
+/// then). The app rebuilds and pushes this whenever assignments or the active
+/// profile change.
+#[tauri::command]
+fn set_sound_keys(keys: Vec<SoundKeyDto>) {
+    let map = keys
+        .into_iter()
+        .map(|k| (k.id, sound::SoundKey { path: k.path, hold: k.hold }))
+        .collect();
+    sound::set_keys(map);
+}
+
 /// Run a user-configured shell command (Stream Deck-style key action).
 /// Fire-and-forget: the command is the user's own, output isn't collected.
 #[tauri::command]
@@ -438,6 +482,38 @@ fn run_command(command: String) -> Result<(), String> {
 #[tauri::command]
 fn mic_action(mode: String) -> Result<(), String> {
     vars::mic_action(&mode)
+}
+
+/// Whether the default microphone is currently muted — for the Vision 6 wheel
+/// menu's live mic status card. None when unknown/unsupported.
+#[tauri::command]
+fn mic_state() -> Option<bool> {
+    vars::mic_state()
+}
+
+/// Current system output volume (0..100 + mute) for the "volume level" wheel
+/// slider. None when there's no default output device.
+#[tauri::command]
+fn output_volume_get() -> Option<volume::VolumeState> {
+    volume::get()
+}
+
+/// Set the system output volume (0..100). Applied live as the wheel turns.
+#[tauri::command]
+fn output_volume_set(percent: u8) -> Result<(), String> {
+    volume::set(percent)
+}
+
+/// Current mic input level (0..100 + mute) for the "mic level" wheel slider.
+#[tauri::command]
+fn mic_level_get() -> Option<volume::VolumeState> {
+    volume::get_mic()
+}
+
+/// Set the mic input level (0..100). Applied live as the wheel turns.
+#[tauri::command]
+fn mic_level_set(percent: u8) -> Result<(), String> {
+    volume::set_mic(percent)
 }
 
 #[derive(serde::Deserialize)]
@@ -472,8 +548,14 @@ async fn http_request(
         .map_err(|e| e.to_string())?;
     let mut req = client.request(method, &url);
     for h in headers.unwrap_or_default() {
+        // skip blank rows: an empty name is an invalid header and makes the
+        // whole request builder error out (issue: undeletable empty header)
+        let name = h.name.trim();
+        if name.is_empty() {
+            continue;
+        }
         // an invalid header name/value is reported by send(), not a panic
-        req = req.header(h.name.trim(), h.value);
+        req = req.header(name, h.value);
     }
     if let Some(b) = body {
         if !b.is_empty() {
@@ -960,6 +1042,69 @@ fn overlay_hide(app: AppHandle) {
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
+/// Keep the app fully active in the background so tray-mode key actions (sound,
+/// webhook, launch…) fire the instant a key is pressed. Without this, macOS App
+/// Nap suspends the process when it isn't the foreground app, stalling the
+/// webview that triggers those actions — serial key events queue up and only
+/// fire when the app is refocused ("sound only plays when the window is active").
+///
+/// `NSProcessInfo -beginActivityWithOptions:reason:` returns an activity token
+/// that must be held for as long as we want App Nap disabled; we deliberately
+/// leak it for the process lifetime. Options = NSActivityUserInitiated with the
+/// idle-sleep bit cleared, so we prevent App Nap but still let the Mac sleep.
+#[cfg(target_os = "macos")]
+fn disable_app_nap() {
+    use std::ffi::c_void;
+    use std::os::raw::c_char;
+
+    type Id = *mut c_void;
+    type Sel = *mut c_void;
+
+    #[link(name = "Foundation", kind = "framework")]
+    extern "C" {}
+    extern "C" {
+        fn objc_getClass(name: *const c_char) -> Id;
+        fn sel_registerName(name: *const c_char) -> Sel;
+        fn objc_msgSend();
+    }
+
+    // NSActivityUserInitiated (0x00FFFFFF) with NSActivityIdleSystemSleepDisabled
+    // (1<<20) cleared: no App Nap, but the display/system may still sleep.
+    const OPTIONS: u64 = 0x00FF_FFFF & !(1u64 << 20);
+
+    unsafe {
+        let ns_process_info = objc_getClass(c"NSProcessInfo".as_ptr());
+        let ns_string = objc_getClass(c"NSString".as_ptr());
+        if ns_process_info.is_null() || ns_string.is_null() {
+            return;
+        }
+        let sel_pi = sel_registerName(c"processInfo".as_ptr());
+        let sel_begin = sel_registerName(c"beginActivityWithOptions:reason:".as_ptr());
+        let sel_str = sel_registerName(c"stringWithUTF8String:".as_ptr());
+        let sel_retain = sel_registerName(c"retain".as_ptr());
+
+        let send_cls: extern "C" fn(Id, Sel) -> Id = std::mem::transmute(objc_msgSend as *const c_void);
+        let pi = send_cls(ns_process_info, sel_pi);
+        if pi.is_null() {
+            return;
+        }
+        let send_str: extern "C" fn(Id, Sel, *const c_char) -> Id =
+            std::mem::transmute(objc_msgSend as *const c_void);
+        let reason = send_str(ns_string, sel_str, c"MKYADA runs key actions in the background".as_ptr());
+
+        let send_begin: extern "C" fn(Id, Sel, u64, Id) -> Id =
+            std::mem::transmute(objc_msgSend as *const c_void);
+        let token = send_begin(pi, sel_begin, OPTIONS, reason);
+        if !token.is_null() {
+            // retain and never release: the activity (and thus the App Nap
+            // exemption) then lasts the whole process lifetime
+            let send_retain: extern "C" fn(Id, Sel) -> Id =
+                std::mem::transmute(objc_msgSend as *const c_void);
+            let _ = send_retain(token, sel_retain);
+        }
+    }
+}
+
 pub fn run() {
     tauri::Builder::default()
         // single-instance must be the first plugin: a second launch hands its
@@ -976,6 +1121,8 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::new().build())
         .setup(|app| {
             use tauri::Listener;
+            #[cfg(target_os = "macos")]
+            disable_app_nap();
             if let Some(w) = app.get_webview_window("main") {
                 let _ = w.set_title(&format!("MKYADA v{}", env!("CARGO_PKG_VERSION")));
             }
@@ -1099,8 +1246,17 @@ pub fn run() {
             drive_list,
             drive_eject,
             run_command,
+            sound_play,
+            sound_stop,
+            sound_fade,
+            set_sound_keys,
             open_target,
             mic_action,
+            mic_state,
+            output_volume_get,
+            output_volume_set,
+            mic_level_get,
+            mic_level_set,
             http_request,
             obs::obs_connect,
             obs::obs_disconnect,

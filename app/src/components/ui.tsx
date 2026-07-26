@@ -21,6 +21,11 @@ export function Button({
   disabled,
   children,
   ref,
+  // Default to a plain button, never a form-submit. An implicit type="submit"
+  // made in-form action buttons (e.g. the webhook "remove header" trash) submit
+  // the surrounding form on click — reverting the edit so the row appeared
+  // undeletable. Callers that want a submit button pass type explicitly.
+  type = "button",
   ...props
 }: ButtonHTMLAttributes<HTMLButtonElement> & {
   variant?: "default" | "primary" | "danger" | "ghost";
@@ -36,6 +41,7 @@ export function Button({
   return (
     <button
       ref={ref}
+      type={type}
       disabled={disabled || loading}
       className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm transition-colors disabled:opacity-40 disabled:pointer-events-none ${styles} ${className}`}
       {...props}
@@ -94,6 +100,9 @@ export type IconOption<V extends string> = {
   /** SVG basename in assets/action-icons; omit for a blank chip slot. */
   icon?: string;
   hint?: string;
+  /** Optional group heading; a non-selectable header row is shown above the
+   * first option of each new group (options must be pre-sorted by group). */
+  group?: string;
 };
 
 /**
@@ -167,10 +176,19 @@ export function IconSelect<V extends string>({
           aria-label={ariaLabel}
           className="absolute z-30 mt-1 max-h-72 w-full min-w-max overflow-auto rounded-md border border-line bg-panel p-1 shadow-lg"
         >
-          {options.map((o) => {
+          {options.map((o, i) => {
             const sel = o.value === value;
+            const newGroup = o.group && o.group !== options[i - 1]?.group;
             return (
               <li key={o.value} role="option" aria-selected={sel}>
+                {newGroup && (
+                  <div
+                    role="presentation"
+                    className="px-2 pt-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-fg-faint"
+                  >
+                    {o.group}
+                  </div>
+                )}
                 <button
                   type="button"
                   onClick={() => {

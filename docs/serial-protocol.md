@@ -1,4 +1,31 @@
-# MKYADA serial protocol (v7)
+# MKYADA serial protocol (v9)
+
+v9 (firmware 0.18.0) adds the **context-aware wheel menu** on the Vision 6.
+Pressing the wheel (CONFIRM) on a selected key no longer always opens the speed
+editor — it opens a menu that fits the key's action. Local kinds (keystroke
+turbo, media, scroll, the speed editor) run entirely on the device. Host kinds
+(OBS, webhook, command, launch, sound, mic, system volume) ask the app for a
+menu over new messages:
+- `{"t":"hostinfo","menus":1}` (host→device) — the app advertises wheel-menu
+  support. Sent on every `hello`. Without it (an old app), host-kind keys keep
+  showing the "app required" toast; the flag clears on disconnect.
+- `{"t":"ctx",...}` (device→host) — a host-kind key was pressed; the app should
+  answer with a `menu`.
+- `{"t":"menu",...}` (host→device) — render/update the on-screen menu (a
+  scrollable `list`, a `slider`, or a status `card`). Re-send to live-update
+  (REC timer, external volume). 
+- `{"t":"menu_ev",...}` (device→host) — the user turned/pressed/closed the menu.
+- `{"t":"menu_result",...}` (host→device) — close the menu, optionally toast and
+  invalidate a rewritten macro's cached label.
+
+All are **additive**: old firmware ignores the unknown `menu`/`hostinfo`/
+`menu_result` types and never sends `ctx`/`menu_ev`; a new device paired with an
+old app simply never sees `hostinfo` and keeps the local behavior.
+
+v8 (firmware 0.15.0) added `{"t":"profile","id":"p_<id>"}` (host→device): the
+app activates a per-app profile natively — macro paths redirect to the
+profile's files so the on-device grid, wheel and speed editor run it without
+host mode. `{"id":null}` clears it. Replies `ok`.
 
 v7 (firmware 0.11.0) is the update-safety release:
 - **Locked update mode** — `{"t":"update_begin","bytes":N}` suspends keys,
@@ -125,6 +152,10 @@ STANDALONE ──(host_enter)──► HOST ──(host_leave | CDC disconnect |
 | `{"t":"label","text":"Photoshop","keys":["Zoom in","Zoom out","Undo","","",""]}` | fw 0.9.0, Vision 6. Name of the app's active profile (≤24 chars) for the grid band shown when config `show_profile` is on. Since v6 the optional `keys` (6 strings, ≤24 chars each) are the profile's key names — the host-mode screen draws them as a grid. Empty text / absent keys clear; the device also drops both on app disconnect. Replies `ok` |
 | `{"t":"scroll","dy":4,"dx":0,"mods":["ctrl_l"]}` | v6. Direct wheel ticks: `dy` vertical, `dx` horizontal (sign = direction, ≤20 per burst), optional `mods` held around the burst (Ctrl+wheel = zoom). No file, no `play_start`/`play_done` — the profile-wheel fast path. Replies `ok`, or `err hid` if the USB stack rejects the report |
 | `{"t":"pin_detect","on":true}` | fw 0.7.0. Key-wiring wizard: normal key handling is suspended, every non-reserved edge GPIO is watched and edges stream back as `pin` messages. Auto-disarms after 120 s, on app disconnect, or on `reload`. `{"on":false}` restores the keys |
+| `{"t":"hostinfo","menus":1}` | v9, Vision 6. The app advertises wheel-menu support. Send once per `hello`. Enables the context-aware wheel menu for host-kind keys; without it they show the "app required" toast. No reply. Cleared on disconnect |
+| `{"t":"sysvol","percent":40}` | v9, Vision 6. The live system output volume (0–100); the device can't read it, so the app pushes it (on change) while connected. Volume-kind grid cells show the `%`. No reply. Cleared on disconnect |
+| `{"t":"menu","mtype":"list","key":3,"layer":"a","title":"SCENE","items":[["Intro","Intro",1],["Game","Game",0]],"sel":0,"action":"Pick"}` | v9, Vision 6. Render/update the open wheel menu. `mtype`: `card` (title + `big` hero line + optional `l1`/`l2` status + `hint` action), `slider` (`value`/`min`/`max`/`step`/`unit` + `action`), `list` (`items` = `[id,label,mark]`, `sel` cursor, `action`). Re-send to live-update; the device keeps the cursor and idle timer. Ignored unless a menu is open for `key` |
+| `{"t":"menu_result","ok":true,"toast":["SCENE","Saved"],"changed":"/macros/key3-a.json"}` | v9, Vision 6. Close the open menu. `toast` (optional `[title,line]`) shows briefly; `changed` (optional path) invalidates that macro's cached label so the grid updates without a `reload`. `ok:false` shows the toast as an error |
 
 ## Device → Host
 
@@ -134,6 +165,8 @@ STANDALONE ──(host_enter)──► HOST ──(host_leave | CDC disconnect |
 | `{"t":"macro_changed","file":"/macros/key3-b.json","reason":"speed"}` | fw 0.7.0, Vision 6. The user edited that macro's `settings.speed` on the device (persisted into the file). The app should re-read the file / refresh its cache |
 | `{"t":"enc","d":1,"n":3}` | fw 0.7.0, Vision 6, host mode. Encoder detents (`d` = direction, `n` = count batched per poll) — lets the app run computer-side wheel actions |
 | `{"t":"btn","slot":"back","down":true}` | fw 0.7.0, Vision 6, host mode. Module buttons (`psh` \| `back` \| `confirm`) — the slot variant of `btn`, distinct from key events |
+| `{"t":"ctx","key":3,"layer":"a","kind":"obs","sub":"setScene","file":"/macros/key3-a.json"}` | v9, Vision 6. The wheel was pressed on a host-kind key (`kind` = `obs`/`webhook`/`command`/`launch`/`sound`/`mic`/`volume`; `sub` = the action detail, e.g. the OBS action or media usage; `file` = the exact macro path, profile-aware). The app answers with a `menu`. Only sent after `hostinfo` |
+| `{"t":"menu_ev","ev":"pick","id":"Intro"}` | v9, Vision 6. The user acted on the open menu: `pick` (a **tap** on a list item — use it live), `assign` (a **hold** on a list item — reassign the key to it), `fire` (a card's CONFIRM), `value` (`v` = a slider's new value, or ±1 on a card), `close` (BACK / idle / disconnect). The app performs it and usually replies `menu`/`menu_result` |
 | `{"t":"pin","pin":"GP13","down":true}` | fw 0.7.0. While `pin_detect` is armed: a watched GPIO changed — the wiring wizard assigns it to the key being probed |
 | `{"t":"btn","key":2,"phys":4,"layer":"a","edge":"down"}` | Every press/release. `key` = logical (after `key_map`), `phys` = GPIO number. Host mode: always; standalone: since v2, while an app is connected |
 | `{"t":"key_action","file":"/macros/key2.json","key":2,"layer":"a","variant":"double"}` | v2. A key with key-logic `variants` resolved its gesture (`tap` \| `double` \| `hold`) in standalone mode. The app uses it to run host-side variants (launch/command/sound). Since fw 0.9.0 a Vision 6 module slot resolving its own gesture announces the same message with `"key": null` and the slot's file path |

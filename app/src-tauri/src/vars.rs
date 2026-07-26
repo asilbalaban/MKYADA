@@ -158,6 +158,12 @@ fn set_mic_muted(_muted: bool) -> Result<(), String> {
     Err("mic control isn't supported on this platform yet".into())
 }
 
+/// Whether the default mic is currently muted, for live status on the Vision 6
+/// wheel menu. None when there's no default input or no mute control.
+pub fn mic_state() -> Option<bool> {
+    mic_muted()
+}
+
 /// Perform a mic key action: "mute" / "unmute" force the state, anything
 /// else (including "toggle") flips it based on the last known read.
 pub fn mic_action(mode: &str) -> Result<(), String> {

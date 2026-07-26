@@ -52,6 +52,9 @@
     <figure><div class="dev" id="oled-speed"><canvas width="128" height="64"></canvas></div><figcaption>Speed editor — 0.1×–10.0× per macro</figcaption></figure>
     <figure><div class="dev" id="oled-settings"><canvas width="128" height="64"></canvas></div><figcaption>Settings menu</figcaption></figure>
     <figure><div class="dev" id="oled-about"><canvas width="128" height="64"></canvas></div><figcaption>About — model, firmware, device id</figcaption></figure>
+    <figure><div class="dev" id="oled-wheel-scene"><canvas width="128" height="64"></canvas></div><figcaption>Wheel menu — OBS scene picker</figcaption></figure>
+    <figure><div class="dev" id="oled-wheel-status"><canvas width="128" height="64"></canvas></div><figcaption>Wheel menu — OBS record status</figcaption></figure>
+    <figure><div class="dev" id="oled-wheel-volume"><canvas width="128" height="64"></canvas></div><figcaption>Wheel menu — system volume</figcaption></figure>
 
     <script>
       const W = 128, H = 64, CX = 64;
@@ -79,10 +82,12 @@
         c.fillStyle = INK; rect(c, 0, 0, W, 13);
         t(c, title, CX, 6, { color: "#000", font: font(7) });
       }
-      // 1px divider + "Back" left, optional action right (oled.py _bottom_bar)
-      function bottomBar(c, action) {
+      // 1px divider + "Back" left, optional centred hold hint, action right
+      // (oled.py _bottom_bar)
+      function bottomBar(c, action, hold) {
         c.fillStyle = INK; rect(c, 0, H - 13, W, 1);
         t(c, "Back", 2, H - 6, { align: "left", font: font(8) });
+        if (hold) t(c, hold, W / 2, H - 6, { align: "center", font: font(8) });
         if (action) t(c, action, W - 2, H - 6, { align: "right", font: font(8) });
       }
 
@@ -172,11 +177,44 @@
         bottomBar(c, null);
       }
 
+      // WHEEL MENU — OBS scene picker (a host-fed list; picking reassigns the key)
+      function drawWheelScene(c) {
+        topBar(c, "SCENE");
+        const rows = [["Intro", 1], ["Game", 0], ["Break", 0]], sel = 1;
+        rows.forEach(([label, live], row) => {
+          const y = 20 + row * 12;
+          let col = INK;
+          if (row === sel) { c.fillStyle = INK; rect(c, 0, y - 6, W - 8, 12); col = "#000"; }
+          t(c, (row === sel ? "▸ " : "  ") + label, 6, y, { align: "left", color: col });
+          if (live) { c.fillStyle = INK; c.beginPath(); c.arc(W - 12, y, 2, 0, 7); c.fill(); }
+        });
+        bottomBar(c, "Pick", "hold: assign");
+      }
+      // WHEEL MENU — OBS record status card (press toggles; live REC dot)
+      function drawWheelStatus(c) {
+        topBar(c, "RECORD");
+        t(c, "REC ●", CX, 30, { font: font(15, true) });
+        bottomBar(c, "toggle");
+      }
+      // WHEEL MENU — system volume slider (turn to set %, applied live)
+      function drawWheelVolume(c) {
+        topBar(c, "VOLUME");
+        t(c, "40%", CX, 28, { font: font(17, true) });
+        const bx = 8, by = 39, bw = W - 16, frac = 0.4;
+        c.fillStyle = INK;
+        rect(c, bx, by + 2, bw, 1);
+        rect(c, bx, by, Math.round(frac * bw), 4);
+        bottomBar(c, "OK");
+      }
+
       drawHome(ctxFor("oled-home"));
       drawGrid(ctxFor("oled-grid"));
       drawSpeed(ctxFor("oled-speed"));
       drawSettings(ctxFor("oled-settings"));
       drawAbout(ctxFor("oled-about"));
+      drawWheelScene(ctxFor("oled-wheel-scene"));
+      drawWheelStatus(ctxFor("oled-wheel-status"));
+      drawWheelVolume(ctxFor("oled-wheel-volume"));
     </script>
   </body>
 </html>

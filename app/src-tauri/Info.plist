@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- MKYADA performs key actions (play sound, run webhook, launch…) while it
+       runs in the background from the tray. macOS App Nap otherwise suspends the
+       process when it isn't the foreground app, which stalls the webview that
+       triggers those actions: serial key events queue up and only fire when the
+       app is refocused ("sound only plays when the window is active"). Disabling
+       App Nap keeps the app fully live in the background. -->
+  <key>LSAppNapIsDisabled</key>
+  <true/>
+</dict>
+</plist>

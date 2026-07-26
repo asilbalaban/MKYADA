@@ -21,6 +21,11 @@ export function slotKey(slot: number | string, layerIndex: number, ctx = "grid")
 
 const cache = new Map<string, KeysSnapshot>();
 
+// Subscribers (e.g. the native sound-key map builder) notified whenever the
+// cached assignments change, so anything derived from them stays in sync.
+const subscribers = new Set<() => void>();
+const notify = () => subscribers.forEach((cb) => cb());
+
 export const keysCache = {
   get(drive: string): KeysSnapshot | undefined {
     return cache.get(drive);
@@ -28,6 +33,7 @@ export const keysCache = {
 
   set(drive: string, snap: KeysSnapshot): void {
     cache.set(drive, { config: snap.config, assignments: new Map(snap.assignments) });
+    notify();
   },
 
   /** Record a saved (or cleared) key without invalidating the snapshot.
@@ -37,6 +43,7 @@ export const keysCache = {
     if (!snap) return;
     if (a) snap.assignments.set(slot, a);
     else snap.assignments.delete(slot);
+    notify();
   },
 
   /** Drop a snapshot after something rewrote the device config (Setup /
@@ -44,5 +51,12 @@ export const keysCache = {
   invalidate(drive?: string): void {
     if (drive) cache.delete(drive);
     else cache.clear();
+    notify();
+  },
+
+  /** Subscribe to assignment-set changes; returns an unsubscribe fn. */
+  onChange(cb: () => void): () => void {
+    subscribers.add(cb);
+    return () => subscribers.delete(cb);
   },
 };

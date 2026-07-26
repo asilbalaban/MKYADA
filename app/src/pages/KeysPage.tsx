@@ -29,6 +29,7 @@ import {
 } from "../lib/macro-model";
 import { serializeForDevice } from "../lib/recorder-model";
 import { keysCache, slotKey } from "../lib/keys-cache";
+import { macroFileCache } from "../lib/macro-cache";
 import { stashRecorderEdit } from "../lib/recorder-handoff";
 import { undoRedoFromEvent, useHistory } from "../lib/history";
 import { Button, Card, EmptyState, Input, Spinner } from "../components/ui";
@@ -43,6 +44,8 @@ type SlotId = number | ModuleSlot;
 function fileFor(slot: SlotId, layer: number, ctx: SlotContext = "grid"): string {
   return typeof slot === "number" ? macroFileName(slot, layer) : slotFileName(slot, layer, ctx);
 }
+
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 /** Cache/state key: keys ignore ctx; module slots are per-ctx (issue #19). */
 function keyOf(slot: SlotId, layer: number, ctx: SlotContext = "grid"): string {
@@ -171,16 +174,53 @@ export function KeysPage() {
     if (focusedRef.current) {
       await send({ t: "test_enter", ui: "keys" }).catch(() => {});
     }
+    // The CIRCUITPY drive can still be settling for a moment right after the
+    // board enumerates: reads then fail or the macros dir lists empty. Treated
+    // naively that looks like a bare keypad — the page shows (and caches) every
+    // key as unassigned until a manual Refresh (issue: "atanmış tuşları
+    // göremiyorum ... hep unassigned"). So wait for the drive to actually be
+    // readable, and retry an empty listing, before believing it.
     let config = defaultConfig();
-    try {
-      config = { ...config, ...JSON.parse(await ipc.driveRead(drive.path, "config.json")) };
-    } catch {
-      // no config yet — defaults are fine
+    let configOk = false;
+    for (let attempt = 0; attempt < 8; attempt++) {
+      try {
+        config = { ...config, ...JSON.parse(await ipc.driveRead(drive.path, "config.json")) };
+        configOk = true;
+        break;
+      } catch {
+        // Either the drive isn't ready yet (retry) or this board genuinely has
+        // no config. Give the mount a few tries to appear before defaulting.
+        if (seq !== reloadSeq.current) return;
+        await sleep(200);
+        if (seq !== reloadSeq.current) return;
+      }
     }
     if (seq !== reloadSeq.current) return;
     setCfg(config);
     const layers = effectiveLayers(config);
-    const existing = new Set(await ipc.driveList(drive.path, "macros").catch(() => [] as string[]));
+    // List the macros dir, retrying while it's empty — a cold/settling drive
+    // returns [] before the filesystem is really browsable. `listOk` records
+    // whether we ever got a successful listing (empty or not) so we never cache
+    // a result produced by a drive that wasn't ready.
+    let existing = new Set<string>();
+    let listOk = false;
+    for (let attempt = 0; attempt < 8; attempt++) {
+      try {
+        const list = await ipc.driveList(drive.path, "macros");
+        existing = new Set(list);
+        listOk = true;
+        // Trust the listing as soon as it has files, or once config.json has
+        // proven the drive is readable (then an empty dir really is "no
+        // macros", not a cold mount). Only keep retrying an empty listing when
+        // readiness is still unknown.
+        if (list.length || configOk) break;
+      } catch {
+        // dir not browsable yet — fall through to the wait
+      }
+      if (seq !== reloadSeq.current) return;
+      await sleep(200);
+      if (seq !== reloadSeq.current) return;
+    }
     if (seq !== reloadSeq.current) return;
     const slots: { k: SlotId; l: number; file: string; ctx: SlotContext }[] = [];
     for (let l = 0; l < layers; l++) {
@@ -239,7 +279,16 @@ export function KeysPage() {
         `Couldn't read the saved macro for ${failed.join(", ")} — it's still on the keypad. Try Refresh.`,
       );
     }
-    keysCache.set(drive.path, { config, assignments: snapshot });
+    // Only cache a snapshot we actually trust: the listing succeeded and we
+    // either found macros or read the config cleanly (a truly bare keypad).
+    // Never cache an empty result from a drive that wasn't ready — that is the
+    // state that used to stick until a manual Refresh.
+    const trustworthy = listOk && (snapshot.size > 0 || configOk);
+    if (trustworthy) {
+      keysCache.set(drive.path, { config, assignments: snapshot });
+    } else if (!snapshot.size) {
+      setStatus("Still reading the keypad… if keys stay blank, press Refresh.");
+    }
   }, [drive, send]);
 
   useEffect(() => {
@@ -455,6 +504,7 @@ export function KeysPage() {
         // cancelled mid-transfer — the key must not keep a half-written
         // macro, so remove the file and leave the slot unassigned (issue #15)
         await ipc.driveDelete(drive.path, file).catch(() => {});
+        macroFileCache.invalidate(drive.path, file);
         const next = new Map(assignments);
         next.delete(keyOf(selected, layer, ctx));
         setAssignments(next);
@@ -469,6 +519,9 @@ export function KeysPage() {
       return;
     }
     setSaving(false);
+    // the host-action runner caches parsed macros per file; the file just
+    // changed, so drop its entry (else a press replays the old action)
+    macroFileCache.invalidate(drive.path, file);
     const next = new Map(assignments);
     if (macro) next.set(keyOf(selected, layer, ctx), draft);
     else next.delete(keyOf(selected, layer, ctx));

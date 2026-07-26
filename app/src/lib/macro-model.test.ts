@@ -148,6 +148,28 @@ describe("assignment round-trip", () => {
     expect(file.settings?.hold_repeat).toBeUndefined();
   });
 
+  it("webhook drops blank header rows (an empty name is an invalid header)", () => {
+    const f = compileAssignment({
+      kind: "webhook",
+      url: "https://example.com/hook",
+      headers: [
+        { name: "", value: "" },
+        { name: "Authorization", value: "Bearer x" },
+        { name: "   ", value: "ignored" },
+      ],
+    })!;
+    expect(f.webhook?.headers).toEqual([{ name: "Authorization", value: "Bearer x" }]);
+  });
+
+  it("webhook with only blank headers omits the headers field entirely", () => {
+    const f = compileAssignment({
+      kind: "webhook",
+      url: "https://example.com/hook",
+      headers: [{ name: "", value: "" }],
+    })!;
+    expect(f.webhook?.headers).toBeUndefined();
+  });
+
   it("single key opted out writes hold_repeat false", () => {
     const file = compileAssignment({ kind: "keystroke", key: "e", behavior: { hold_repeat: false } })!;
     expect(file.settings?.hold_repeat).toBe(false);

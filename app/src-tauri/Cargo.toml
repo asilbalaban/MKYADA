@@ -1,6 +1,6 @@
 [package]
 name = "mkyada"
-version = "0.21.16"
+version = "0.22.0"
 description = "MKYADA — Macro Keypad You Always Dream About"
 authors = ["Asil Balaban"]
 license = "MIT"
@@ -34,6 +34,10 @@ serialport = "4"
 semver = "1"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 active-win-pos-rs = "0.9"
+# In-process sound-effect playback (see sound.rs). Decoding + output happen in
+# the app process, which holds the file-access grant — a spawned player (afplay)
+# is a separate process and can't read ~/Desktop under macOS privacy (TCC).
+rodio = "0.19"
 # OBS Studio control over obs-websocket v5 (persistent connection in obs.rs)
 tokio = { version = "1", features = ["sync", "time", "macros"] }
 tokio-tungstenite = { version = "0.24", default-features = false, features = ["connect"] }

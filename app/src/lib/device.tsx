@@ -91,6 +91,11 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
         setHello(msg as unknown as Hello);
         setLayer(String((msg as { layer?: string }).layer ?? "a"));
         setReloading(false);
+        // Advertise wheel-menu support on every hello (connect / reload /
+        // reboot). Old firmware ignores the unknown message; the flag it sets
+        // is what lets host-kind keys open a menu instead of the "app required"
+        // toast (proto v9).
+        void ipc.deviceSend({ t: "hostinfo", menus: 1 }).catch(() => {});
       }
       if (msg.t === "layer") setLayer(String((msg as { layer?: string }).layer ?? "a"));
       // the device edited its own settings (Vision 6 menu persists straight

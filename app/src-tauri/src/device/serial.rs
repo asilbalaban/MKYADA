@@ -223,6 +223,10 @@ pub fn connect(app: AppHandle, mgr: &DeviceManager, port: &str) -> Result<(), St
                         timeouts = 0;
                     }
                     if let Ok(v) = serde_json::from_slice::<Value>(&line) {
+                        // Play "sound" keys natively from this always-awake
+                        // thread — the webview that would otherwise trigger them
+                        // is suspended when the app is in the background.
+                        crate::sound::on_device_msg(&v);
                         // fs_* responses belong to the serialfs op that asked
                         // for them; everything else streams to the frontend.
                         let routed = super::serialfs::is_fs_msg(&v)

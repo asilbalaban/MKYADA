@@ -13,6 +13,7 @@ import {
 import { OverlayView } from "./components/OverlayView";
 import { DeviceProvider, useDevice } from "./lib/device";
 import { ProfilesProvider } from "./lib/profiles";
+import { WheelMenuProvider } from "./lib/wheel-menu";
 import { deviceName, displayName, onDevnamesChanged } from "./lib/devnames";
 import { useLayoutVersion } from "./lib/layout";
 import { NavContext, Page } from "./lib/nav";
@@ -196,13 +197,15 @@ export default function App() {
   return (
     <DeviceProvider>
       <ProfilesProvider>
-        <ToastProvider>
-          <ConfirmProvider>
-            <WriteGateProvider>
-              <Shell />
-            </WriteGateProvider>
-          </ConfirmProvider>
-        </ToastProvider>
+        <WheelMenuProvider>
+          <ToastProvider>
+            <ConfirmProvider>
+              <WriteGateProvider>
+                <Shell />
+              </WriteGateProvider>
+            </ConfirmProvider>
+          </ToastProvider>
+        </WheelMenuProvider>
       </ProfilesProvider>
     </DeviceProvider>
   );

@@ -179,6 +179,7 @@ export function kindRequiresHost(kind: Assignment["kind"]): boolean {
     kind === "command" ||
     kind === "sound" ||
     kind === "mic" ||
+    kind === "mic_level" ||
     kind === "webhook" ||
     kind === "obs"
   );
@@ -418,6 +419,19 @@ export function compileAssignment(a: Assignment, name?: string): MacroFile | nul
           media: a.usage,
           events: [{ delay: 0, type: "consumer", usage: a.usage }],
         };
+      case "volume":
+        // pressing the key mutes/unmutes (HID consumer key — works standalone);
+        // the Vision 6 wheel opens an absolute % slider while the app is running
+        return {
+          ...base,
+          name: name ?? "Volume",
+          kind: "volume",
+          events: [{ delay: 0, type: "consumer", usage: "mute" }],
+        };
+      case "mic_level":
+        // host-only (no HID for capture gain): a no-op carrier. The Vision 6
+        // opens the input-level slider on press while the app is running.
+        return { ...base, name: name ?? "Mic level", kind: "mic_level", events: [] };
       case "scroll": {
         const amount = a.amount ?? SCROLL_DEFAULT_AMOUNT;
         const mods = a.mods ?? [];
@@ -460,10 +474,13 @@ export function compileAssignment(a: Assignment, name?: string): MacroFile | nul
           events: [],
         };
       case "webhook": {
+        // drop blank header rows — an empty name is an invalid HTTP header and
+        // makes the request builder error out (issue: undeletable empty header)
+        const cleanHeaders = a.headers?.filter((h) => h.name.trim());
         const req: WebhookRequest = {
           url: a.url,
           ...(a.method && a.method !== "GET" ? { method: a.method } : {}),
-          ...(a.headers?.length ? { headers: a.headers } : {}),
+          ...(cleanHeaders?.length ? { headers: cleanHeaders } : {}),
           ...(a.body ? { body: a.body } : {}),
         };
         return {
@@ -672,6 +689,10 @@ function parseAssignmentBase(m: MacroFile): Assignment {
       return { kind: "text", text: m.text ?? "", ...behavior };
     case "media":
       return { kind: "media", usage: m.media ?? "", ...behavior };
+    case "volume":
+      return { kind: "volume", ...behavior };
+    case "mic_level":
+      return { kind: "mic_level", ...behavior };
     case "scroll":
       return {
         kind: "scroll",
@@ -768,6 +789,10 @@ export function describeAssignment(a: Assignment): string {
       return `Type "${a.text.length > 18 ? a.text.slice(0, 18) + "…" : a.text}"`;
     case "media":
       return a.usage.replace(/_/g, " ");
+    case "volume":
+      return "Volume level";
+    case "mic_level":
+      return "Mic level";
     case "scroll": {
       const pre = a.mods?.length ? `${a.mods.map(modifierDisplay).join("+")} ` : "";
       const n = a.amount && a.amount !== SCROLL_DEFAULT_AMOUNT ? ` ×${a.amount}` : "";

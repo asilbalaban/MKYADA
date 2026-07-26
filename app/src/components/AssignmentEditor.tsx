@@ -1,9 +1,9 @@
 // Per-key assignment form. Whatever the user picks compiles to a macro JSON
 // file on the device ("everything is JSON").
 
-import { useEffect, useState } from "react";
+import { ReactNode, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, FolderOpen, Keyboard, Mic, Play, Plus, Send, Trash2, Volume2 } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, ChevronRight, FolderOpen, Keyboard, Mic, Play, Plus, Send, Trash2, Volume2 } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { SOUND_EXTENSIONS, playSound } from "../lib/sound";
 import { readTextFile } from "../lib/fs";
@@ -29,43 +29,17 @@ import {
   stepIsHid,
 } from "../lib/macro-model";
 import { displayKey, untypeableChars } from "../lib/layout";
+import { allKinds, categoryLabel, wheelPreview, wheelSpec } from "../lib/kind-registry";
+import { OledPreview } from "./OledPreview";
 import { Badge, Button, ControlField, Field, IconSelect, Input, Select } from "./ui";
 import type { IconOption } from "./ui";
 import {
   HTTP_METHOD_ICON,
-  KIND_ICON,
   MEDIA_ICON,
   MENU_ICON,
   MIC_ICON,
   SOUND_HOLD_ICON,
 } from "./action-icons";
-
-// Grouped by concept, most-used first (issue #28): the key/typing family
-// together, then input/media, the device screen, and finally host-side
-// actions — with the neutral "Not assigned" on top and the rare "Do nothing"
-// off-switch at the bottom.
-const KINDS: { value: Assignment["kind"]; label: string }[] = [
-  { value: "none", label: "Not assigned" },
-  // key / typing family
-  { value: "keystroke", label: "Single key" },
-  { value: "combo", label: "Key combination" },
-  { value: "sequence", label: "Multi action (sequence)" },
-  { value: "recorded", label: "Recorded macro (JSON)" },
-  { value: "text", label: "Type text" },
-  // input / media
-  { value: "media", label: "Media key" },
-  { value: "scroll", label: "Mouse scroll / zoom" },
-  { value: "mic", label: "Mute/unmute microphone" },
-  // device screen
-  { value: "menu", label: "Device menu (screen models)" },
-  // host / computer
-  { value: "launch", label: "Open app / file / URL" },
-  { value: "command", label: "Run terminal command" },
-  { value: "sound", label: "Play a sound" },
-  { value: "webhook", label: "Call a webhook (HTTP request)" },
-  { value: "obs", label: "Control OBS Studio" },
-  { value: "nothing", label: "Do nothing (turn this control off)" },
-];
 
 const HTTP_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"] as const;
 
@@ -182,22 +156,44 @@ export function AssignmentEditor({
   layerCount?: number;
 }) {
   const [importError, setImportError] = useState("");
-  // On a module slot, "Not assigned" reads as "keep the control's built-in
-  // action" — the concrete built-in is pre-selected under Device menu, so this
-  // is just the fall-back-to-firmware choice (issue #26).
-  const kinds = KINDS.map((k) =>
-    k.value === "none" && slotMode ? { ...k, label: "Keep built-in action" } : k,
-  ).filter(
-    (k) =>
-      (k.value !== "sequence" || !nested) &&
-      // menu nav is device-only; callers opt in (never inside a sequence)
-      (k.value !== "menu" || allowMenu) &&
-      // a true off switch only matters where "none" means the built-in
-      // action (module slots) — on keys, "Not assigned" already is nothing
-      // (but keep it listed if the current value somehow carries it)
-      (k.value !== "nothing" || slotMode || value.kind === "nothing"),
-  );
+  // Action kinds, grouped by category (from the registry). On a module slot,
+  // "Not assigned" reads as "keep the control's built-in action" — the concrete
+  // built-in is pre-selected under Device menu, so this is just the
+  // fall-back-to-firmware choice (issue #26).
+  const kindOptions: IconOption<Assignment["kind"]>[] = allKinds()
+    .filter(
+      (k) =>
+        (k.id !== "sequence" || !nested) &&
+        // menu nav is device-only; callers opt in (never inside a sequence)
+        (k.id !== "menu" || allowMenu) &&
+        // a true off switch only matters where "none" means the built-in
+        // action (module slots) — on keys, "Not assigned" already is nothing
+        // (but keep it listed if the current value somehow carries it)
+        (k.id !== "nothing" || slotMode || value.kind === "nothing"),
+    )
+    .map((k) => ({
+      value: k.id,
+      label: k.id === "none" && slotMode ? "Keep built-in action" : k.label,
+      icon: k.icon,
+      group: categoryLabel(k.category),
+    }));
   const hasVariants = !!(value.variants?.double || value.variants?.hold);
+  // The collapsible "Behavior & key logic" section: playback behavior applies
+  // to standalone HID kinds; key logic (double/hold) applies wherever there's a
+  // press to gesture on. Collapsed by default with a one-line summary so the
+  // editor stays uncluttered for the common case (issue: wheel-menu redesign).
+  const showBehavior =
+    value.kind !== "none" && value.kind !== "nothing" && !kindRequiresHost(value.kind);
+  const showKeyLogic = allowVariants && (value.kind !== "none" || slotMode);
+  const summaryParts: string[] = [];
+  if (value.variants?.double) summaryParts.push(`double: ${describeAssignment(value.variants.double)}`);
+  if (value.variants?.hold) summaryParts.push(`hold: ${describeAssignment(value.variants.hold)}`);
+  if (value.behavior?.on_repress === "restart") summaryParts.push("restart on re-press");
+  if (showBehavior && !hasVariants && !slotMode) {
+    const rep = value.behavior?.hold_repeat ?? holdRepeatDefault(value.kind);
+    if (rep) summaryParts.push("repeat while held");
+  }
+  const behaviorSummary = summaryParts.length ? summaryParts.join(" · ") : "Default";
 
   async function importMacro() {
     setImportError("");
@@ -225,7 +221,7 @@ export function AssignmentEditor({
             className="w-full"
             ariaLabel="Action type"
             value={value.kind}
-            options={kinds.map((k) => ({ value: k.value, label: k.label, icon: KIND_ICON[k.value] }))}
+            options={kindOptions}
             onChange={(kind) => {
               if (kind === "none") onChange({ kind: "none" });
               else if (kind === "nothing") onChange({ kind: "nothing" });
@@ -233,6 +229,8 @@ export function AssignmentEditor({
               else if (kind === "combo") onChange({ kind: "combo", mods: [], key: "" });
               else if (kind === "text") onChange({ kind: "text", text: "" });
               else if (kind === "media") onChange({ kind: "media", usage: "play_pause" });
+              else if (kind === "volume") onChange({ kind: "volume" });
+              else if (kind === "mic_level") onChange({ kind: "mic_level" });
               else if (kind === "scroll") onChange({ kind: "scroll", dir: "up" });
               else if (kind === "menu") onChange({ kind: "menu", action: "confirm" });
               else if (kind === "launch") onChange({ kind: "launch", target: "" });
@@ -339,6 +337,21 @@ export function AssignmentEditor({
             onChange={(usage) => onChange({ ...value, usage })}
           />
         </ControlField>
+      )}
+
+      {value.kind === "volume" && (
+        <p className="text-xs text-fg-faint">
+          Pressing the key mutes/unmutes the computer (works standalone). On a Vision 6, turn
+          the wheel to this key and press to open a volume slider — the exact percentage needs
+          the MKYADA app running; without it the wheel just nudges the volume up and down.
+        </p>
+      )}
+
+      {value.kind === "mic_level" && (
+        <p className="text-xs text-fg-faint">
+          Pressing the key on a Vision 6 opens a microphone input-level slider — turn the wheel to
+          set the recording gain. Needs the MKYADA app running (there's no standalone mic-gain control).
+        </p>
       )}
 
       {value.kind === "scroll" && (
@@ -580,78 +593,99 @@ export function AssignmentEditor({
         <SequenceEditor value={value.steps} onChange={(steps) => onChange({ ...value, steps })} />
       )}
 
-      {!nested && value.kind !== "none" && value.kind !== "nothing" && !kindRequiresHost(value.kind) && (
-        <div className="flex flex-wrap gap-3 border-t border-line pt-3">
-          <Field label="Press again while playing">
-            <Select
-              value={value.behavior?.on_repress ?? "stop"}
-              onChange={(e) =>
-                onChange({
-                  ...value,
-                  behavior: {
-                    ...value.behavior,
-                    on_repress: e.target.value as "stop" | "restart",
-                  },
-                })
-              }
-            >
-              <option value="stop">Stop the macro</option>
-              <option value="restart">Restart it from the top</option>
-            </Select>
-          </Field>
-          {!hasVariants && !slotMode && (
-            <Field label="While the key is held down">
-              <Select
-                value={(value.behavior?.hold_repeat ?? holdRepeatDefault(value.kind)) ? "repeat" : "once"}
-                onChange={(e) =>
-                  onChange({
-                    ...value,
-                    behavior: { ...value.behavior, hold_repeat: e.target.value === "repeat" },
-                  })
-                }
-              >
-                <option value="once">Play once</option>
-                <option value="repeat">Repeat — like holding a letter key</option>
-              </Select>
-            </Field>
-          )}
+      {!nested && !slotMode && allowMenu && value.kind !== "none" && value.kind !== "nothing" && (
+        <div className="flex flex-col gap-2 border-t border-line pt-3">
+          <span className="text-xs font-semibold text-fg-muted">
+            Wheel menu — what turning the wheel to this key and pressing shows on screen
+          </span>
+          <div className="flex items-start gap-3">
+            <OledPreview preview={wheelPreview(value)} />
+            <div className="flex min-w-0 flex-col gap-1 text-xs">
+              <p className="text-fg-muted">{wheelSpec(value.kind).summary}</p>
+              {wheelSpec(value.kind).standaloneFallback && (
+                <p className="text-fg-faint">{wheelSpec(value.kind).standaloneFallback}</p>
+              )}
+            </div>
+          </div>
         </div>
       )}
 
-      {!nested && allowVariants && (value.kind !== "none" || slotMode) && (
-        <div className="flex flex-col gap-3 border-t border-line pt-3">
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-semibold text-fg-muted">
-              Key logic — extra actions on the same {slotMode ? "control" : "key"}
-            </span>
-            {hasVariants && fwVersion && !fwSupportsVariants(fwVersion, slotMode) && (
-              <Badge tone="amber">
-                needs firmware {slotMode ? "0.9.0" : "0.3.0"} — update on the Devices page
-              </Badge>
-            )}
-          </div>
-          {slotMode && value.kind === "none" && (
-            <p className="text-xs text-fg-faint">
-              The tap keeps its built-in menu action — only the gestures below are customized.
-            </p>
+      {!nested && (showBehavior || showKeyLogic) && (
+        <Collapsible title="Behavior & key logic" summary={behaviorSummary}>
+          {showBehavior && (
+            <div className="flex flex-wrap gap-3">
+              <Field label="Press again while playing">
+                <Select
+                  value={value.behavior?.on_repress ?? "stop"}
+                  onChange={(e) =>
+                    onChange({
+                      ...value,
+                      behavior: {
+                        ...value.behavior,
+                        on_repress: e.target.value as "stop" | "restart",
+                      },
+                    })
+                  }
+                >
+                  <option value="stop">Stop the macro</option>
+                  <option value="restart">Restart it from the top</option>
+                </Select>
+              </Field>
+              {!hasVariants && !slotMode && (
+                <Field label="While the key is held down">
+                  <Select
+                    value={(value.behavior?.hold_repeat ?? holdRepeatDefault(value.kind)) ? "repeat" : "once"}
+                    onChange={(e) =>
+                      onChange({
+                        ...value,
+                        behavior: { ...value.behavior, hold_repeat: e.target.value === "repeat" },
+                      })
+                    }
+                  >
+                    <option value="once">Play once</option>
+                    <option value="repeat">Repeat — like holding a letter key</option>
+                  </Select>
+                </Field>
+              )}
+            </div>
           )}
-          <VariantSlot
-            label="Double press"
-            hint="A quick tap then waits a moment before firing — only when this is set."
-            value={value.variants?.double}
-            allowMenu={allowMenu}
-            layerCount={layerCount}
-            onChange={(v) => onChange({ ...value, variants: setVariant(value.variants, "double", v) })}
-          />
-          <VariantSlot
-            label="Long press (hold)"
-            hint="Fires after holding the key ~0.4 s. Replaces the hold-to-repeat option."
-            value={value.variants?.hold}
-            allowMenu={allowMenu}
-            layerCount={layerCount}
-            onChange={(v) => onChange({ ...value, variants: setVariant(value.variants, "hold", v) })}
-          />
-        </div>
+
+          {showKeyLogic && (
+            <div className={`flex flex-col gap-3${showBehavior ? " border-t border-line pt-3" : ""}`}>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-semibold text-fg-muted">
+                  Key logic — extra actions on the same {slotMode ? "control" : "key"}
+                </span>
+                {hasVariants && fwVersion && !fwSupportsVariants(fwVersion, slotMode) && (
+                  <Badge tone="amber">
+                    needs firmware {slotMode ? "0.9.0" : "0.3.0"} — update on the Devices page
+                  </Badge>
+                )}
+              </div>
+              {slotMode && value.kind === "none" && (
+                <p className="text-xs text-fg-faint">
+                  The tap keeps its built-in menu action — only the gestures below are customized.
+                </p>
+              )}
+              <VariantSlot
+                label="Double press"
+                hint="A quick tap then waits a moment before firing — only when this is set."
+                value={value.variants?.double}
+                allowMenu={allowMenu}
+                layerCount={layerCount}
+                onChange={(v) => onChange({ ...value, variants: setVariant(value.variants, "double", v) })}
+              />
+              <VariantSlot
+                label="Long press (hold)"
+                hint="Fires after holding the key ~0.4 s. Replaces the hold-to-repeat option."
+                value={value.variants?.hold}
+                allowMenu={allowMenu}
+                layerCount={layerCount}
+                onChange={(v) => onChange({ ...value, variants: setVariant(value.variants, "hold", v) })}
+              />
+            </div>
+          )}
+        </Collapsible>
       )}
 
       {importError && <p className="text-danger text-xs">{importError}</p>}
@@ -670,11 +704,31 @@ function WebhookFields({
   onChange: (a: Assignment) => void;
 }) {
   const [test, setTest] = useState<{ ok: boolean; text: string } | null>(null);
-  const headers = value.headers ?? [];
 
-  function setHeader(i: number, name: string, hv: string) {
-    const next = headers.map((h, k) => (k === i ? { name, value: hv } : h));
-    onChange({ ...value, headers: next });
+  // Header rows carry a stable id so a React key never reuses a deleted row's
+  // DOM. With index keys, removing a row made the *next* row visually inherit
+  // the deleted one's box — it looked like the inputs "emptied" and a phantom
+  // row stayed, so the list couldn't be cleared to zero. The parent stays the
+  // source of truth for {name,value}; the id is view-only.
+  const nextId = useRef(0);
+  const [rows, setRows] = useState<{ id: number; name: string; value: string }[]>(() =>
+    (value.headers ?? []).map((h) => ({ id: nextId.current++, ...h })),
+  );
+  const externKey = JSON.stringify(value.headers ?? []);
+  const rowsKey = JSON.stringify(rows.map(({ name, value: v }) => ({ name, value: v })));
+  // Re-seed rows only when a *different* assignment loads (selection / undo
+  // swaps the array), never on our own keystroke echoes — that would clobber
+  // the edit in progress.
+  useEffect(() => {
+    if (externKey !== rowsKey) {
+      setRows((value.headers ?? []).map((h) => ({ id: nextId.current++, ...h })));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [externKey]);
+
+  function commit(next: { id: number; name: string; value: string }[]) {
+    setRows(next);
+    onChange({ ...value, headers: next.map(({ name, value: v }) => ({ name, value: v })) });
   }
 
   async function sendTest() {
@@ -725,29 +779,24 @@ function WebhookFields({
 
       <Field label="Headers">
         <div className="flex flex-col gap-2">
-          {headers.map((h, i) => (
-            <div key={i} className="flex gap-2">
+          {rows.map((h, i) => (
+            <div key={h.id} className="flex gap-2">
               <Input
                 className="w-44"
                 value={h.name}
                 placeholder="Content-Type"
-                onChange={(e) => setHeader(i, e.target.value, h.value)}
+                onChange={(e) => commit(rows.map((r, k) => (k === i ? { ...r, name: e.target.value } : r)))}
               />
               <Input
                 className="flex-1"
                 value={h.value}
                 placeholder="application/json"
-                onChange={(e) => setHeader(i, h.name, e.target.value)}
+                onChange={(e) => commit(rows.map((r, k) => (k === i ? { ...r, value: e.target.value } : r)))}
               />
               <Button
                 variant="danger"
                 title="Remove header"
-                onClick={() =>
-                  onChange({
-                    ...value,
-                    headers: headers.filter((_, k) => k !== i),
-                  })
-                }
+                onClick={() => commit(rows.filter((_, k) => k !== i))}
               >
                 <Trash2 size={13} aria-hidden />
               </Button>
@@ -755,7 +804,7 @@ function WebhookFields({
           ))}
           <Button
             className="self-start"
-            onClick={() => onChange({ ...value, headers: [...headers, { name: "", value: "" }] })}
+            onClick={() => commit([...rows, { id: nextId.current++, name: "", value: "" }])}
           >
             <Plus size={14} aria-hidden /> Add header
           </Button>
@@ -923,6 +972,42 @@ function ObsFields({
         )}
       </div>
     </>
+  );
+}
+
+/** Bordered, collapsed-by-default section with a title and a one-line summary
+ * of what's inside — used to fold the advanced Behavior / key-logic controls
+ * away so the editor reads cleanly for the common case. */
+function Collapsible({
+  title,
+  summary,
+  children,
+}: {
+  title: string;
+  summary?: string;
+  children: ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="border-t border-line pt-3">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        className="flex w-full items-center gap-2 text-left"
+      >
+        <ChevronRight
+          size={14}
+          aria-hidden
+          className={`shrink-0 text-fg-faint transition-transform ${open ? "rotate-90" : ""}`}
+        />
+        <span className="text-xs font-semibold text-fg-muted">{title}</span>
+        {!open && summary && (
+          <span className="ml-1 min-w-0 flex-1 truncate text-xs text-fg-faint">{summary}</span>
+        )}
+      </button>
+      {open && <div className="mt-3 flex flex-col gap-3">{children}</div>}
+    </div>
   );
 }
 

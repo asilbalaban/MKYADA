@@ -43,6 +43,7 @@ import type {
   DriveInfo,
   ForegroundInfo,
   Hello,
+  MacroFile,
   ModuleSlot,
   ObsRequest,
   ObsSnapshot,
@@ -66,6 +67,8 @@ import {
   sequencePartFileName,
   stepIsHid,
 } from "./macro-model";
+import { macroFileCache } from "./macro-cache";
+import { keysCache } from "./keys-cache";
 import { serializeForDevice } from "./recorder-model";
 
 /** Perform a computer-side key action (Stream Deck style): open an
@@ -338,6 +341,87 @@ export function ProfilesProvider({ children }: { children: ReactNode }) {
     [],
   );
 
+  // Read a device macro, cached by file path. Reading it fresh from the USB
+  // drive on every key press is slow and, when a key is tapped rapidly, the
+  // reads queue and intermittently fail — sound effects lag or drop. The cache
+  // makes repeat presses instant; macro_changed / in-app saves invalidate it
+  // (below) so it never serves a stale action.
+  const readMacro = useCallback(async (file: string): Promise<MacroFile | null> => {
+    const d = driveRef.current;
+    if (!d) return null;
+    const hit = macroFileCache.get(d.path, file);
+    if (hit) return hit;
+    try {
+      const mf = parseDeviceMacro(await ipc.driveRead(d.path, file.replace(/^\//, "")));
+      macroFileCache.set(d.path, file, mf);
+      return mf;
+    } catch {
+      return null; // unassigned key or drive hiccup — nothing to do
+    }
+  }, []);
+
+  // Drop a cached macro the moment the device reports it changed (on-device
+  // speed edit / wheel reassign), so the next press reads the new action.
+  useEffect(
+    () =>
+      onMsg((m) => {
+        if (m.t !== "macro_changed" || typeof m.file !== "string") return;
+        const d = driveRef.current;
+        if (d) macroFileCache.invalidate(d.path, m.file);
+      }),
+    [onMsg],
+  );
+
+  // A reconnect / re-provisioned drive may carry different macros — start fresh.
+  useEffect(() => {
+    if (drive) macroFileCache.clearDrive(drive.path);
+  }, [drive?.path]);
+
+  // Tell the native serial reader which keys are "play sound" keys so it can
+  // play them from its always-awake thread even while the app is backgrounded
+  // (the webview that would otherwise trigger them is suspended then). Only
+  // plain global sound keys go native; variant keys are announced as key_action
+  // and profile sounds are performed here — for those we push an empty set so
+  // nothing double-plays.
+  //
+  // The map is built from the Keys page's cached assignments (keysCache), NOT a
+  // fresh drive read: the drive is often serial-backed, so sweeping every macro
+  // on connect floods the link with failed reads before it's ready ("data
+  // transfer failed"). keysCache is filled by the Keys page's robust, retrying
+  // loader, so we just mirror it here for free.
+  const rebuildSoundKeys = useCallback(() => {
+    const d = driveRef.current;
+    if (!d || activeRef.current) {
+      // no drive, or a profile is active (performed here in JS) — native off
+      void invoke("set_sound_keys", { keys: [] }).catch(() => {});
+      return;
+    }
+    const snap = keysCache.get(d.path);
+    const keys: { id: string; path: string; hold?: SoundHoldAction }[] = [];
+    if (snap) {
+      for (const [sk, a] of snap.assignments) {
+        const m = /^(\d+):(\d+)$/.exec(sk); // numbered grid keys only ("5:0")
+        if (!m) continue;
+        if (a.variants?.double || a.variants?.hold) continue; // variants → key_action
+        if (a.kind === "sound" && a.file) {
+          keys.push({
+            id: `${"abcdefgh"[Number(m[2])] ?? "a"}:${m[1]}`,
+            path: a.file,
+            ...(a.holdAction ? { hold: a.holdAction } : {}),
+          });
+        }
+      }
+    }
+    void invoke("set_sound_keys", { keys }).catch(() => {});
+  }, []);
+
+  // Rebuild whenever the drive, active profile, or cached assignments change
+  // (the Keys page loading/saving updates keysCache).
+  useEffect(() => {
+    rebuildSoundKeys();
+    return keysCache.onChange(rebuildSoundKeys);
+  }, [rebuildSoundKeys, drive?.path, activeProfile]);
+
   // firmware announcements for GLOBAL keys with variants: the device chose
   // tap/double/hold and played any HID events itself; we perform host-side
   // variants (launch/command/sound, mixed sequences)
@@ -345,35 +429,30 @@ export function ProfilesProvider({ children }: { children: ReactNode }) {
     () =>
       onMsg((m) => {
         if (m.t !== "key_action" || pausedRef.current) return;
-        const d = driveRef.current;
-        if (!d) return;
         const file = String(m.file ?? "").replace(/^\//, "");
-        void ipc
-          .driveRead(d.path, file)
-          .then((raw) => {
-            const mf = parseDeviceMacro(raw);
-            const variant = String(m.variant ?? "tap");
-            const node =
-              variant === "tap" ? mf : mf.variants?.[variant as "double" | "hold"];
-            if (!node) return;
-            if (node.kind === "sound" && node.sound) {
-              void playSound(node.sound).catch(() => {});
-            } else if (
-              node.kind === "launch" ||
-              node.kind === "command" ||
-              node.kind === "mic" ||
-              node.kind === "webhook" ||
-              node.kind === "obs"
-            ) {
-              runHostAction(node);
-            } else if (node.kind === "sequence" && !node.events?.length && node.seq?.length) {
-              void runSequence(`${m.key}:${m.layer}`, node.seq, file);
-            }
-          })
-          .catch(() => {});
+        void readMacro(file).then((mf) => {
+          if (!mf) return;
+          const variant = String(m.variant ?? "tap");
+          const node =
+            variant === "tap" ? mf : mf.variants?.[variant as "double" | "hold"];
+          if (!node) return;
+          if (node.kind === "sound" && node.sound) {
+            void playSound(node.sound).catch(() => {});
+          } else if (
+            node.kind === "launch" ||
+            node.kind === "command" ||
+            node.kind === "mic" ||
+            node.kind === "webhook" ||
+            node.kind === "obs"
+          ) {
+            runHostAction(node);
+          } else if (node.kind === "sequence" && !node.events?.length && node.seq?.length) {
+            void runSequence(`${m.key}:${m.layer}`, node.seq, file);
+          }
+        });
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [onMsg],
+    [onMsg, readMacro],
   );
 
   // Sound keys play on RELEASE: a quick tap plays, holding the key past
@@ -497,33 +576,30 @@ export function ProfilesProvider({ children }: { children: ReactNode }) {
         // keys: the device already played the HID, we perform the
         // launch/command/sound/webhook/mic side from the file it ran.
         if (typeof slot !== "number") return;
-        const d = driveRef.current;
-        if (!d) return;
         const layerIndex = Math.max(0, LAYER_NAMES.indexOf(layer));
-        void ipc
-          .driveRead(d.path, macroFileName(slot, layerIndex))
-          .then((raw) => {
-            const m = parseDeviceMacro(raw);
-            // key logic: the firmware resolves tap/double/hold itself and
-            // announces the choice as "key_action" — handled elsewhere
-            if (m.variants && (m.variants.double || m.variants.hold)) return;
-            if (m.kind === "sequence") {
-              // pure-HID: the keypad already played it standalone; mixed:
-              // the main file is a no-op and the steps run here
-              if (!m.events.length && m.seq?.length) {
-                void runSequence(keyId, m.seq, macroFileName(slot, layerIndex));
-              }
-              return;
+        void readMacro(macroFileName(slot, layerIndex)).then((m) => {
+          if (!m) return;
+          // key logic: the firmware resolves tap/double/hold itself and
+          // announces the choice as "key_action" — handled elsewhere
+          if (m.variants && (m.variants.double || m.variants.hold)) return;
+          if (m.kind === "sequence") {
+            // pure-HID: the keypad already played it standalone; mixed:
+            // the main file is a no-op and the steps run here
+            if (!m.events.length && m.seq?.length) {
+              void runSequence(keyId, m.seq, macroFileName(slot, layerIndex));
             }
-            if (m.kind === "sound" && m.sound) armSound(keyId, m.sound, m.sound_hold);
-            else if (m.kind === "mic" && m.mic_mode === "push_to_talk") {
-              micDownKeys.current.add(keyId);
-              void invoke("mic_action", { mode: "unmute" }).catch(() => {});
-            } else runHostAction(m);
-          })
-          .catch(() => {}); // unassigned key or drive hiccup — nothing to do
+            return;
+          }
+          // sound keys are played natively by the serial reader (works in the
+          // background); skip them here so they never double-play
+          if (m.kind === "sound") return;
+          if (m.kind === "mic" && m.mic_mode === "push_to_talk") {
+            micDownKeys.current.add(keyId);
+            void invoke("mic_action", { mode: "unmute" }).catch(() => {});
+          } else runHostAction(m);
+        });
     },
-    [send, armSound, runSequence, startKeyLogic],
+    [send, armSound, runSequence, startKeyLogic, readMacro],
   );
 
   useEffect(

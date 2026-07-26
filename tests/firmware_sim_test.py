@@ -690,7 +690,7 @@ app.proto.send = _orig_send
 app.proto.ser = None
 
 # --- serial "led" op (proto v2): app feedback override --------------------
-check("hello reports proto v8", app.hello()["proto"] == 8, str(app.hello()["proto"]))
+check("hello reports proto v9", app.hello()["proto"] == 9, str(app.hello()["proto"]))
 check("hello reports usb_drive", app.hello()["usb_drive"] == app.config["usb_drive"], str(app.hello()))
 
 # profile path resolution (issue #23): a profile is a full independent config —
@@ -1233,6 +1233,271 @@ ui.state = uimod.S_HOME
 ui.inject("grid")
 check("inject grid jumps to the key grid", ui.state == uimod.S_SELECT,
       "state=%d" % ui.state)
+ui._enter_grid()
+
+# --- context-aware wheel menu (issue: wheel-menu redesign) ----------------
+# CONFIRM on the selected key opens a menu that fits the key's action kind,
+# not always the speed editor. Each key1 rewrite below is re-read after
+# invalidate_labels drops the (kind, sub) cache.
+def _write_key1(obj):
+    obj.setdefault("format", "mkyada-macro")
+    obj.setdefault("version", 2)
+    obj.setdefault("events", [])
+    with open(vpath(1, 0), "w") as f:
+        json.dump(obj, f)
+    ui.invalidate_labels("/macros/key1.json")
+
+
+def _confirm_key1():
+    ui.state = uimod.S_SELECT
+    ui.sel_mode = False
+    ui.sel_key = 0
+    vplays.clear()
+    ui._dispatch(_t2.monotonic(), 0, uimod.K_CONFIRM)
+
+
+# no kind (a plain recorded/stream macro) still opens the speed editor
+_write_key1({"name": "macro", "stream": True, "settings": {"speed": 1.0}})
+_confirm_key1()
+check("ctx: kindless key opens speed editor", ui.state == uimod.S_SPEED,
+      "state=%d" % ui.state)
+
+# keystroke -> a "key" card (turn = turbo-fire, CONFIRM = fire once)
+_write_key1({"name": "Undo", "kind": "keystroke", "combo": {"mods": [], "key": "z"}})
+_confirm_key1()
+check("ctx: keystroke opens an action card",
+      ui.state == uimod.S_CTX and ui.ctx["mode"] == "key",
+      "state=%d ctx=%s" % (ui.state, ui.ctx))
+ui.enc.position += 2  # turn -> fire the key twice
+vplays.clear()
+ui.tick(_t2.monotonic())
+check("ctx: keystroke card turbo-fires per detent",
+      vplays == [vpath(1, 0)] * 2, str(vplays))
+
+# media -> an options browser: cursor starts on the assigned usage; a tap
+# fires the highlighted one, a hold reassigns the key to it (issue: grammar)
+_write_key1({"name": "Vol+", "kind": "media", "media": "volume_up",
+             "events": [{"delay": 0, "type": "consumer", "usage": "volume_up"}]})
+_confirm_key1()
+check("ctx: media opens an options browser",
+      ui.state == uimod.S_CTX and ui.ctx["mode"] == "optlist"
+      and ui.ctx["assigned"] == uimod.MEDIA_OPTS.index("volume_up"),
+      "ctx=%s" % (ui.ctx,))
+# tap the highlighted option -> fires it once (queue a release so it reads tap)
+_creports = len(sent_reports)
+ui.nav.events.queue.append(FakeKeyEvent(uimod.K_CONFIRM, True))
+ui.nav.events.queue.append(FakeKeyEvent(uimod.K_CONFIRM, False))
+ui.tick(_t2.monotonic())
+check("ctx: media tap fires the highlighted key",
+      len(sent_reports) > _creports, "reports+%d" % (len(sent_reports) - _creports))
+# hold on a different option -> reassigns the key (device writes the macro)
+ui.ctx["sel"] = uimod.MEDIA_OPTS.index("play_pause")
+ui.nav.events.queue.append(FakeKeyEvent(uimod.K_CONFIRM, True))  # never released -> hold
+ui.tick(_t2.monotonic())
+with open(vpath(1, 0)) as f:
+    _reassigned = json.load(f)
+check("ctx: media hold reassigns the key",
+      _reassigned.get("kind") == "media" and _reassigned.get("media") == "play_pause",
+      str(_reassigned))
+
+# discoverability: the browser's bottom bar must advertise hold-to-reassign,
+# otherwise a first-timer never learns the gesture (issue: hold hint on screen)
+_menu_kw = {}
+_orig_show_menu = ui.oled.show_menu
+def _cap_show_menu(*a, **k):
+    _menu_kw.clear()
+    _menu_kw.update(k)
+    return _orig_show_menu(*a, **k)
+ui.oled.show_menu = _cap_show_menu
+_write_key1({"name": "Vol+", "kind": "media", "media": "volume_up",
+             "events": [{"delay": 0, "type": "consumer", "usage": "volume_up"}]})
+_confirm_key1()
+ui._draw_optlist()
+check("ctx: media browser shows the hold-to-reassign hint",
+      bool(_menu_kw.get("hold")), str(_menu_kw))
+
+# menu (layer / nav) key: the wheel browses the whole family, taps run the
+# highlighted one live and holds reassign — not just "run next layer" forever
+# (issue: layer keys only ran next layer, no prev/goto/reassign)
+vapp.config["layer_count"] = 2
+_write_key1({"name": "Layer+", "kind": "menu", "menu": "layer_next"})
+_confirm_key1()
+check("ctx: menu opens the layer browser",
+      ui.state == uimod.S_CTX and ui.ctx.get("mode") == "optlist"
+      and ui.ctx.get("kind") == "menu"
+      and ui.ctx["opts"][ui.ctx["assigned"]] == "layer_next",
+      "ctx=%s" % (ui.ctx,))
+check("ctx: layer browser shows the hold-to-reassign hint",
+      bool(_menu_kw.get("hold")), str(_menu_kw))
+# turn to "layer_prev" and hold -> the device rewrites the key standalone
+ui.ctx["sel"] = ui.ctx["opts"].index("layer_prev")
+ui.nav.events.queue.append(FakeKeyEvent(uimod.K_CONFIRM, True))  # never released
+ui.tick(_t2.monotonic())
+with open(vpath(1, 0)) as f:
+    _mre = json.load(f)
+check("ctx: menu hold reassigns the key to prev layer",
+      _mre.get("kind") == "menu" and _mre.get("menu") == "layer_prev", str(_mre))
+# a tap on a layer action runs it live and leaves the wheel menu
+_write_key1({"name": "Layer+", "kind": "menu", "menu": "layer_next"})
+_confirm_key1()
+_lyr_before = vapp.layer
+ui.ctx["sel"] = ui.ctx["opts"].index("layer_next")
+ui.nav.events.queue.append(FakeKeyEvent(uimod.K_CONFIRM, True))
+ui.nav.events.queue.append(FakeKeyEvent(uimod.K_CONFIRM, False))  # release -> tap
+ui.tick(_t2.monotonic())
+check("ctx: menu tap runs the layer action and leaves the menu",
+      ui.state != uimod.S_CTX and vapp.layer == (_lyr_before + 1) % 2,
+      "state=%d layer=%d" % (ui.state, vapp.layer))
+vapp.set_layer_idx(0)  # the tap switched layers; restore for the tests below
+vapp.config["layer_count"] = 1  # restore the single-layer vision6 fixture
+ui.invalidate_labels("/macros/key1.json")
+
+# a host-only kind (OBS) with no app menu support -> the app-needed toast
+vapp.host_menus = False
+_write_key1({"name": "Scene", "kind": "obs", "obs": {"action": "setScene"}})
+_confirm_key1()
+check("ctx: host kind shows the app-needed toast", ui.state == uimod.S_TOAST,
+      "state=%d" % ui.state)
+
+# with the app advertising menu support (hostinfo): CONFIRM asks the app for a
+# menu (ctx message) and shows a waiting card until the app answers
+vapp.handle_msg({"t": "hostinfo", "menus": 1})
+check("ctx: hostinfo sets host_menus", vapp.host_menus is True)
+voutbox.clear()
+_confirm_key1()
+_ctxmsg = next((m for m in voutbox if m.get("t") == "ctx"), None)
+check("ctx: host kind asks the app (ctx message)",
+      _ctxmsg is not None and _ctxmsg.get("kind") == "obs"
+      and _ctxmsg.get("sub") == "setScene" and _ctxmsg.get("key") == 1,
+      str(_ctxmsg))
+check("ctx: host kind waits for the menu",
+      ui.state == uimod.S_CTX and ui.ctx["mode"] == "wait", "ctx=%s" % (ui.ctx,))
+
+# the app answers with a list menu (scene picker) -> rendered, cursor navigable
+ui.on_menu({"t": "menu", "mtype": "list", "key": 1, "title": "SCENE",
+            "items": [["Intro", "Intro", 0], ["Game", "Game", 1]], "sel": 1})
+check("ctx: menu switches to host list", ui.ctx["mode"] == "host"
+      and ui.ctx["mtype"] == "list" and ui.ctx["sel"] == 1, "ctx=%s" % (ui.ctx,))
+# a plain host list (no hold flag) shows no reassign hint...
+_menu_kw.clear()
+ui._draw_host_menu()
+check("ctx: host list without hold flag has no reassign hint",
+      not _menu_kw.get("hold"), str(_menu_kw))
+# ...but when the app marks the menu reassignable (OBS scene / mic mode), the
+# device shows the hold-to-reassign affordance so the gesture is discoverable
+ui.on_menu({"t": "menu", "mtype": "list", "key": 1, "title": "SCENE",
+            "items": [["Intro", "Intro", 0], ["Game", "Game", 1]], "sel": 1,
+            "hold": True})
+_menu_kw.clear()
+ui._draw_host_menu()
+check("ctx: reassignable host list shows the hold hint",
+      bool(_menu_kw.get("hold")), str(_menu_kw))
+ui.oled.show_menu = _orig_show_menu
+voutbox.clear()
+ui.enc.position -= 1  # turn up -> select the first scene
+ui.tick(_t2.monotonic())
+check("ctx: list turn moves the cursor", ui.ctx["sel"] == 0, "sel=%d" % ui.ctx["sel"])
+# a tap on a list item = "pick" (use it live); a hold = "assign" (reassign)
+ui.nav.events.queue.append(FakeKeyEvent(uimod.K_CONFIRM, True))
+ui.nav.events.queue.append(FakeKeyEvent(uimod.K_CONFIRM, False))
+ui.tick(_t2.monotonic())
+_pick = next((m for m in voutbox if m.get("t") == "menu_ev"), None)
+check("ctx: list tap picks the item (live)",
+      _pick is not None and _pick.get("ev") == "pick" and _pick.get("id") == "Intro",
+      str(_pick))
+voutbox.clear()
+ui.nav.events.queue.append(FakeKeyEvent(uimod.K_CONFIRM, True))  # held -> assign
+ui.tick(_t2.monotonic())
+_assign = next((m for m in voutbox if m.get("t") == "menu_ev"), None)
+check("ctx: list hold reassigns the item",
+      _assign is not None and _assign.get("ev") == "assign" and _assign.get("id") == "Intro",
+      str(_assign))
+
+# the app answers menu_result -> the menu closes with a toast
+ui.on_menu_result({"t": "menu_result", "ok": True, "toast": ["SCENE", "Saved"]})
+check("ctx: menu_result closes to a toast", ui.state == uimod.S_TOAST)
+
+# a status card: CONFIRM sends a "fire" event, the app performs the action
+ui._enter_grid()
+ui.state = uimod.S_SELECT
+vapp.host_menus = True
+_write_key1({"name": "Rec", "kind": "obs", "obs": {"action": "recordToggle"}})
+_confirm_key1()
+ui.on_menu({"t": "menu", "mtype": "card", "key": 1, "title": "RECORD",
+            "big": "REC", "l1": "ready", "hint": "toggle"})
+check("ctx: card menu renders", ui.ctx["mtype"] == "card")
+voutbox.clear()
+ui.nav.events.queue.append(FakeKeyEvent(uimod.K_CONFIRM, True))
+ui.tick(_t2.monotonic())
+_fire = next((m for m in voutbox if m.get("t") == "menu_ev"), None)
+check("ctx: card CONFIRM fires", _fire is not None and _fire.get("ev") == "fire",
+      str(_fire))
+
+# the app going away abandons an open host menu
+ui.on_menu({"t": "menu", "mtype": "card", "key": 1, "title": "RECORD", "big": "REC"})
+ui.on_host_gone()
+check("ctx: host disconnect closes the menu", ui.state == uimod.S_SELECT)
+
+# volume kind: app present -> host slider (ctx asked); app absent -> a local
+# HID volume knob card (press mutes)
+ui.state = uimod.S_SELECT
+vapp.host_menus = True
+_write_key1({"name": "Vol", "kind": "volume",
+             "events": [{"delay": 0, "type": "consumer", "usage": "mute"}]})
+voutbox.clear()
+_confirm_key1()
+check("ctx: volume with app asks for a host slider",
+      any(m.get("t") == "ctx" and m.get("kind") == "volume" for m in voutbox)
+      and ui.ctx["mode"] == "wait", "ctx=%s" % (ui.ctx,))
+vapp.host_menus = False
+_confirm_key1()
+check("ctx: volume without app falls back to a local knob",
+      ui.state == uimod.S_CTX and ui.ctx["mode"] == "adjust"
+      and ui.ctx["conf"] == "mute", "ctx=%s" % (ui.ctx,))
+
+# a volume key opens its wheel menu when the PHYSICAL key is pressed (acts as
+# PSH) — a slider kind has no useful "run"
+_write_key1({"name": "Vol", "kind": "volume",
+             "events": [{"delay": 0, "type": "consumer", "usage": "mute"}]})
+ui._enter_grid()
+check("press: volume key wants the menu on press", ui.wants_press_menu(1) is True)
+ui.open_key_menu(1)
+check("press: pressing a volume key opens its menu",
+      ui.state == uimod.S_CTX and ui.ctx["mode"] == "adjust", "state=%d" % ui.state)
+_write_key1({"name": "Play", "kind": "media", "media": "play_pause",
+             "events": [{"delay": 0, "type": "consumer", "usage": "play_pause"}]})
+ui._enter_grid()
+check("press: a media key still runs (no press-menu)", ui.wants_press_menu(1) is False)
+
+# live system volume shows on volume-kind grid cells (app pushes sysvol)
+_write_key1({"name": "Vol", "kind": "volume",
+             "events": [{"delay": 0, "type": "consumer", "usage": "mute"}]})
+ui._enter_grid()
+ui.on_sysvol(40)
+check("sysvol: stored", ui.sysvol == 40)
+_gl = ui._grid_labels(0)
+check("sysvol: volume cell shows the percent", _gl[0][1] == "%40", str(_gl[0]))
+ui.on_host_gone()
+check("sysvol: cleared when the app disconnects", ui.sysvol is None)
+
+# mic level is host-only: pressing asks the app for a slider
+vapp.host_menus = True
+_write_key1({"name": "MicLvl", "kind": "mic_level", "events": []})
+ui._enter_grid()
+voutbox.clear()
+ui.open_key_menu(1)
+check("ctx: mic_level asks the app for a slider",
+      any(m.get("t") == "ctx" and m.get("kind") == "mic_level" for m in voutbox)
+      and ui.ctx["mode"] == "wait", "ctx=%s" % (ui.ctx,))
+vapp.host_menus = False
+
+# restore key1 to its original stream file for any later expectations
+with open(vpath(1, 0), "w") as f:
+    f.write(json.dumps({"format": "mkyada-macro", "version": 4, "stream": True,
+                        "name": "volume up", "settings": {"speed": 3.0}}) + "\n")
+    f.write(json.dumps({"delay": 0, "type": "key", "action": "down", "key": "a"}) + "\n")
+    f.write(json.dumps({"delay": 0, "type": "key", "action": "up", "key": "a"}) + "\n")
+ui.invalidate_labels("/macros/key1.json")
 ui._enter_grid()
 
 # per-context overrides: enc-cw@home plays on the layer picker; the other
