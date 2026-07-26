@@ -138,6 +138,10 @@ OOM_RECOVERIES = 20
 # upload that goes quiet for longer so its file handle — and the UI, which
 # is held still during transfers — are never stuck waiting for a dead one.
 UPLOAD_IDLE_S = 12.0
+# Periodic heap telemetry on the CDC console. Off in shipping firmware — it is
+# only useful with something actually reading /dev/cu.usbmodem101, and the
+# noise buries the rare lines that matter (line drops, OOM recoveries).
+DEBUG_TELEMETRY = False
 # UI hooks deferred while a file transfer is in flight (see ui_call). Purely
 # cosmetic: the band label, the live volume readout, the idle tick. NOT
 # on_profile — that one drops stale caches, so deferring it would leave the
@@ -487,10 +491,6 @@ class App:
         self.layer = i
         self.led.set(layer=i)
         self.announce_layer()
-        # console-only memory telemetry: layer switches were the first thing
-        # to die when the heap ran out (84-byte MemoryError painting the
-        # grid); the trend line on the CDC console is how we catch it early
-        print("memfree", _mem_free(), "layer", LAYER_NAMES[i])
         self.ui_call("on_layer")
 
     def menu_layer_jump(self, menu):
@@ -749,9 +749,6 @@ class App:
                 self.host_keys = keys
                 self.host_rec = rec
                 self.host_live = live
-                # console telemetry: one line per change, shows exactly what
-                # the app pushed (band bugs are invisible otherwise)
-                print("label:", text, "rec", rec, "live", live)
                 self.ui_call("on_label")
         elif t == "scroll":
             # direct wheel ticks (proto v6): the app drives profile wheel
@@ -1567,13 +1564,11 @@ class App:
                     self.ui_call("on_label")
                 self.ui_call("tick", now)
             self.led.tick()
-            # heap trend on the console (~10s cadence): a monotonic decline
-            # here is a reference leak — the failure mode behind "layer B
-            # never paints" (repaints dying on double-digit-byte allocations)
-            if now - self._mem_report_at > 10:
+            # Heap trend on the console (~10s). OFF by default: the console
+            # CDC is a shared resource and this is the line that made a debug
+            # session unusable. Flip DEBUG_TELEMETRY to bring it back.
+            if DEBUG_TELEMETRY and now - self._mem_report_at > 10:
                 self._mem_report_at = now
-                # alloc rising while free falls names a retainer; the cache
-                # sizes say which one
                 stats = None
                 if self.ui:
                     try:
