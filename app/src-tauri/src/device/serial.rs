@@ -342,6 +342,8 @@ pub fn send(mgr: &DeviceManager, msg: &Value) -> Result<(), String> {
     if super::serialfs::BUSY.load(std::sync::atomic::Ordering::SeqCst)
         && super::serialfs::is_cosmetic(msg)
     {
+        // held back, NOT forgotten — the op re-sends it on completion
+        super::serialfs::defer(msg);
         return Ok(());
     }
     let mut guard = mgr.0.lock().unwrap();

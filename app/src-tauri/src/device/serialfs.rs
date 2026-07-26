@@ -11,6 +11,7 @@ use super::serial::{self, DeviceManager};
 use base64::{engine::general_purpose::STANDARD as B64, Engine as _};
 use serde_json::{json, Value};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::collections::HashMap;
 use std::sync::mpsc::Receiver;
 use std::sync::{Mutex, MutexGuard};
 use std::time::Duration;
@@ -147,6 +148,10 @@ impl<'a> Op<'a> {
 impl Drop for Op<'_> {
     fn drop(&mut self) {
         BUSY.store(false, std::sync::atomic::Ordering::SeqCst);
+        // the link is ours again: deliver whatever we held back
+        for msg in take_deferred() {
+            let _ = serial::send(self.mgr, &msg);
+        }
         let _ = self.mgr.set_fs_route(None);
     }
 }
@@ -159,7 +164,29 @@ impl Drop for Op<'_> {
 /// `serial::send` drops cosmetic messages while this is set.
 pub static BUSY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-/// Message types safe to drop while a transfer owns the link: all of them are
+/// Latest deferred message per type, re-sent once the transfer finishes.
+/// Holding them back is safe; FORGETTING them is not. A recording started from
+/// a key ON THE DEVICE pushed its `rec:true` label inside the 480ms macro read
+/// that same key press triggers — dropped and never re-sent, the band only
+/// learned about it at the next scene change ("(R) shows if I start recording
+/// in OBS, but not from the keypad").
+static PENDING: Mutex<Option<HashMap<String, Value>>> = Mutex::new(None);
+
+/// Remember a message held back by `serial::send` (latest of each type wins).
+pub fn defer(msg: &Value) {
+    if let Some(t) = msg.get("t").and_then(Value::as_str) {
+        let mut g = PENDING.lock().unwrap_or_else(|e| e.into_inner());
+        g.get_or_insert_with(HashMap::new)
+            .insert(t.to_string(), msg.clone());
+    }
+}
+
+fn take_deferred() -> Vec<Value> {
+    let mut g = PENDING.lock().unwrap_or_else(|e| e.into_inner());
+    g.take().map(|m| m.into_values().collect()).unwrap_or_default()
+}
+
+/// Message types safe to defer while a transfer owns the link: all of them are
 /// either re-asserted on a timer (profile, sysvol) or purely cosmetic and
 /// refreshed by the next change (label). Nothing here carries user intent.
 pub fn is_cosmetic(v: &Value) -> bool {
