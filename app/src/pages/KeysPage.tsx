@@ -2,17 +2,18 @@
 // save. Every assignment is compiled to a macro JSON on the device drive.
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Play, RefreshCw, SquarePen, Usb } from "lucide-react";
+import { ArrowRightLeft, Play, RefreshCw, SquarePen, Usb } from "lucide-react";
 import { useDevice } from "../lib/device";
 import { useTestMode, useWindowFocused } from "../lib/focus";
 import { TestModeBanner } from "../components/TestModeBanner";
 import { useNav } from "../lib/nav";
 import { ipc } from "../lib/ipc";
-import type { Assignment, DeviceConfig, ModuleSlot, SlotContext } from "../lib/types";
+import type { Assignment, DeviceConfig, MacroFile, ModuleSlot, SlotContext } from "../lib/types";
 import { MODULE_SLOTS, MODULE_SLOT_LABELS, deviceModel, layerLabel } from "../lib/types";
 import {
   AUX_FILE_RE,
   compileAssignment,
+  describeAssignment,
   compileSequenceParts,
   compileSlotAssignment,
   defaultConfig,
@@ -54,6 +55,54 @@ function keyOf(slot: SlotId, layer: number, ctx: SlotContext = "grid"): string {
 
 function slotTitle(slot: SlotId): string {
   return typeof slot === "number" ? `Key ${slot}` : MODULE_SLOT_LABELS[slot];
+}
+
+/** Delete the sibling part files (key3.s0.json…) a mixed sequence left behind,
+ * except the ones we just wrote. A shorter sequence — or a slot that stopped
+ * being a sequence at all — would otherwise keep replaying its old tail. */
+async function sweepParts(drivePath: string, file: string, keep: Set<string>) {
+  const stem = file.split("/").pop()!.replace(/\.json$/, ".");
+  const existing = await ipc.driveList(drivePath, "macros").catch(() => [] as string[]);
+  for (const f of existing) {
+    if (f.startsWith(stem) && AUX_FILE_RE.test(f) && !keep.has(f)) {
+      await ipc.driveDelete(drivePath, `macros/${f}`).catch(() => {});
+    }
+  }
+}
+
+/** Put one assignment on one slot file: the macro itself (verified), the part
+ * files a mixed sequence needs, and a sweep of stale ones. A null `macro`
+ * means "unassigned" — the file goes away. Shared by Save and by Move/Copy so
+ * a moved macro lands byte-for-byte the way a saved one does. */
+async function writeSlotFiles(
+  drivePath: string,
+  file: string,
+  a: Assignment,
+  macro: MacroFile | null,
+  screen: DeviceConfig["screen"],
+  proto: number,
+  bail: () => void,
+) {
+  if (macro) {
+    macro.screen = screen;
+    await ipc.driveWrite(drivePath, file, serializeForDevice(macro, proto));
+    bail();
+    // verify the write landed before claiming success
+    const back = await ipc.driveRead(drivePath, file);
+    if (!back.includes("mkyada-macro")) throw new Error("verification read failed");
+  } else {
+    try {
+      await ipc.driveDelete(drivePath, file);
+    } catch {
+      // was already unassigned
+    }
+  }
+  const parts = a.kind === "sequence" ? compileSequenceParts(a, file) : [];
+  for (const p of parts) {
+    bail();
+    await ipc.driveWrite(drivePath, p.path, serializeForDevice(p.file, proto));
+  }
+  await sweepParts(drivePath, file, new Set(parts.map((p) => p.path.split("/").pop()!)));
 }
 
 /** Where a module-control assignment applies, and what the built-in menu
@@ -113,6 +162,9 @@ export function KeysPage() {
   const draft = draftHistory.present;
   const setDraft = draftHistory.reset;
   const [saving, setSaving] = useState(false);
+  // The "put this macro on another key" picker (issue: moving an assignment
+  // used to mean building it again from scratch).
+  const [moving, setMoving] = useState(false);
   const [status, setStatus] = useState("");
   // Slots whose macro is still streaming in from the keypad (issue #12) —
   // their keys show a spinner and unlock one by one as reads complete.
@@ -467,36 +519,17 @@ export function KeysPage() {
         const bail = () => {
           if (ctx.cancelRequested()) throw writeCancelledError();
         };
-        if (macro) {
-          macro.screen = cfg!.screen;
-          await ipc.driveWrite(drive.path, file, serializeForDevice(macro, hello?.proto ?? 0));
-          bail();
-          // verify the write landed before claiming success
-          const back = await ipc.driveRead(drive.path, file);
-          if (!back.includes("mkyada-macro")) throw new Error("verification read failed");
-        } else {
-          try {
-            await ipc.driveDelete(drive.path, file);
-          } catch {
-            // was already unassigned
-          }
-        }
         // mixed sequences keep their HID steps in sibling part files
-        // (key3.s0.json…) the app plays over serial; write the current set and
-        // sweep any stale ones from a previous, longer sequence
-        const parts = draft!.kind === "sequence" ? compileSequenceParts(draft!, file) : [];
-        for (const p of parts) {
-          bail();
-          await ipc.driveWrite(drive.path, p.path, serializeForDevice(p.file, hello?.proto ?? 0));
-        }
-        const stem = file.split("/").pop()!.replace(/\.json$/, ".");
-        const keep = new Set(parts.map((p) => p.path.split("/").pop()));
-        const existing = await ipc.driveList(drive.path, "macros").catch(() => [] as string[]);
-        for (const f of existing) {
-          if (f.startsWith(stem) && AUX_FILE_RE.test(f) && !keep.has(f)) {
-            await ipc.driveDelete(drive.path, `macros/${f}`).catch(() => {});
-          }
-        }
+        // (key3.s0.json…) the app plays over serial
+        await writeSlotFiles(
+          drive!.path,
+          file,
+          draft!,
+          macro,
+          cfg!.screen,
+          hello?.proto ?? 0,
+          bail,
+        );
       });
     } catch (e) {
       setSaving(false);
@@ -537,6 +570,75 @@ export function KeysPage() {
     } else {
       toast.info(`${slotTitle(selected)} cleared`);
     }
+  }
+
+  /**
+   * Put the selected key's assignment on another key (any layer) without
+   * building it again — the thing you used to have to redo from scratch just
+   * to shift a macro one key over. Moving onto an occupied key SWAPS the two:
+   * rearranging a keypad is the whole point, and nothing gets destroyed.
+   * Copy leaves the source alone and overwrites the target.
+   */
+  async function moveAssignment(to: number, toLayer: number, mode: "move" | "copy") {
+    if (typeof selected !== "number" || !current || !cfg || !drive) return;
+    const srcFile = fileFor(selected, layer);
+    const dstFile = fileFor(to, toLayer);
+    if (srcFile === dstFile) return;
+    const displaced = mode === "move" ? assignments.get(slotKey(to, toLayer)) : undefined;
+    const proto = hello?.proto ?? 0;
+    setMoving(false);
+    setSaving(true);
+    try {
+      await writeToKeypad(`${slotTitle(selected)} → Key ${to}`, async (wctx) => {
+        const bail = () => {
+          if (wctx.cancelRequested()) throw writeCancelledError();
+        };
+        await writeSlotFiles(drive.path, dstFile, current, compileAssignment(current), cfg.screen, proto, bail);
+        if (mode === "move") {
+          bail();
+          if (displaced) {
+            await writeSlotFiles(drive.path, srcFile, displaced, compileAssignment(displaced), cfg.screen, proto, bail);
+          } else {
+            await ipc.driveDelete(drive.path, srcFile).catch(() => {});
+            await sweepParts(drive.path, srcFile, new Set());
+          }
+        }
+      });
+    } catch (e) {
+      setSaving(false);
+      if (isWriteCancelled(e)) {
+        // A half-finished move would leave the macro on two keys or none —
+        // re-read both slots and tell the truth about where it ended up.
+        await refreshSlot(selected, layer);
+        await refreshSlot(to, toLayer);
+        toast.info("Move cancelled", "Both keys were re-read from the keypad.");
+        return;
+      }
+      toast.error("Could not move the macro", String(e));
+      return;
+    }
+    setSaving(false);
+    macroFileCache.invalidate(drive.path, srcFile);
+    macroFileCache.invalidate(drive.path, dstFile);
+    const next = new Map(assignments);
+    next.set(slotKey(to, toLayer), current);
+    const leftBehind = mode === "copy" ? current : displaced ?? null;
+    if (leftBehind) next.set(slotKey(selected, layer), leftBehind);
+    else next.delete(slotKey(selected, layer));
+    setAssignments(next);
+    keysCache.setAssignment(drive.path, slotKey(to, toLayer), current);
+    keysCache.setAssignment(drive.path, slotKey(selected, layer), leftBehind);
+    setDraft(null);
+    setChangedNotice(null);
+    if (toLayer !== layer) {
+      setLayer(toLayer);
+      void send({ t: "set_layer", layer: "abcdefgh"[toLayer] });
+    }
+    setSelected(to);
+    const where = `Key ${to}${layers > 1 ? ` on layer ${layerLabel(toLayer)}` : ""}`;
+    toast.success(
+      mode === "copy" ? `Copied to ${where}` : displaced ? `Swapped with ${where}` : `Moved to ${where}`,
+    );
   }
 
   async function testPlay(slot: SlotId) {
@@ -692,6 +794,19 @@ export function KeysPage() {
           selected !== null &&
           current && (
             <div className="flex gap-1.5">
+              {typeof selected === "number" && (
+                <Button
+                  title={
+                    draft
+                      ? "Save or revert your edits first"
+                      : "Put this key's action on another key — moving onto a used key swaps the two"
+                  }
+                  disabled={!!draft}
+                  onClick={() => setMoving(true)}
+                >
+                  <ArrowRightLeft size={14} aria-hidden /> Move…
+                </Button>
+              )}
               {current.kind === "recorded" && typeof selected === "number" && (
                 <Button
                   title="Open this macro in the Recorder's editor — tweak it and save it back"
@@ -809,6 +924,125 @@ export function KeysPage() {
         )}
         {status && <p className="text-xs text-fg-faint mt-3">{status}</p>}
       </Card>
+      </div>
+      {moving && typeof selected === "number" && current && (
+        <MoveDialog
+          cfg={cfg}
+          layers={layers}
+          from={{ key: selected, layer }}
+          what={current.label || describeAssignment(current)}
+          assignments={assignments}
+          onClose={() => setMoving(false)}
+          onPick={(to, toLayer, mode) => void moveAssignment(to, toLayer, mode)}
+        />
+      )}
+    </div>
+  );
+}
+
+/** Target picker for "put this macro on another key": the real keypad layout,
+ * one layer at a time, with what's already on each key. Occupied targets are
+ * labelled as a swap so the outcome is never a surprise. */
+function MoveDialog({
+  cfg,
+  layers,
+  from,
+  what,
+  assignments,
+  onClose,
+  onPick,
+}: {
+  cfg: DeviceConfig;
+  layers: number;
+  from: { key: number; layer: number };
+  what: string;
+  assignments: Map<string, Assignment>;
+  onClose: () => void;
+  onPick: (key: number, layer: number, mode: "move" | "copy") => void;
+}) {
+  const [targetLayer, setTargetLayer] = useState(from.layer);
+  const [target, setTarget] = useState<number | null>(null);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const shown = new Map<number, Assignment>();
+  for (let k = 1; k <= cfg.key_count; k++) {
+    const a = assignments.get(slotKey(k, targetLayer));
+    if (a) shown.set(k, a);
+  }
+  const isSelf = target !== null && target === from.key && targetLayer === from.layer;
+  const occupied = target !== null && !isSelf && shown.has(target);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+      onMouseDown={(e) => e.target === e.currentTarget && onClose()}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Move this action to another key"
+        className="bg-panel border border-line rounded-xl shadow-2xl w-[30rem] max-w-[92vw] p-5 flex flex-col gap-3"
+      >
+        <h2 className="text-base font-semibold text-fg">
+          Move “{what}” to another key
+        </h2>
+        {layers > 1 && (
+          <div className="flex gap-1">
+            {Array.from({ length: layers }, (_, i) => (
+              <Button
+                key={i}
+                variant={targetLayer === i ? "primary" : "default"}
+                onClick={() => {
+                  setTargetLayer(i);
+                  setTarget(null);
+                }}
+              >
+                {layerLabel(i)}
+              </Button>
+            ))}
+          </div>
+        )}
+        <Keypad
+          config={cfg}
+          selected={target}
+          onSelect={(n) => {
+            if (cfg.layer_key === n) return;
+            setTarget(n);
+          }}
+          assignments={shown}
+        />
+        <p className="text-xs text-fg-faint min-h-8">
+          {target === null
+            ? "Pick the key this action should live on."
+            : isSelf
+              ? "That's the key it's already on."
+              : occupied
+                ? `Key ${target} already has “${
+                    shown.get(target)!.label || describeAssignment(shown.get(target)!)
+                  }” — Move swaps the two, Copy replaces it.`
+                : `Key ${target}${layers > 1 ? ` on layer ${layerLabel(targetLayer)}` : ""} is empty.`}
+        </p>
+        <div className="flex justify-end gap-2">
+          <Button onClick={onClose}>Cancel</Button>
+          <Button
+            disabled={target === null || isSelf}
+            onClick={() => target !== null && onPick(target, targetLayer, "copy")}
+          >
+            Copy here
+          </Button>
+          <Button
+            variant="primary"
+            disabled={target === null || isSelf}
+            onClick={() => target !== null && onPick(target, targetLayer, "move")}
+          >
+            {occupied ? "Swap" : "Move here"}
+          </Button>
+        </div>
       </div>
     </div>
   );

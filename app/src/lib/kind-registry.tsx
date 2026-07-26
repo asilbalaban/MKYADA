@@ -57,6 +57,22 @@ export interface KindMeta {
 const KINDS: KindMeta[] = [
   // ── Keyboard & text ──────────────────────────────────────────────────────
   {
+    // A sequence is how most people write "a macro" by hand — a few keystrokes
+    // in a row — so it opens the keyboard group rather than hiding under
+    // Automation next to webhooks and shell commands.
+    id: "sequence",
+    label: "Multi action (sequence)",
+    icon: KIND_ICON.sequence,
+    category: "keyboard",
+    host: false,
+    wheel: {
+      mtype: "card",
+      title: "SEQUENCE",
+      summary: "Press to run the whole sequence from the top.",
+      standaloneFallback: "Steps that need the app are skipped when it's closed; the rest still run.",
+    },
+  },
+  {
     id: "keystroke",
     label: "Single key",
     icon: KIND_ICON.keystroke,
@@ -107,7 +123,7 @@ const KINDS: KindMeta[] = [
   },
   {
     id: "volume",
-    label: "System volume level",
+    label: "Volume level",
     icon: KIND_ICON.volume,
     category: "media",
     host: false,
@@ -119,28 +135,16 @@ const KINDS: KindMeta[] = [
     },
   },
   {
-    id: "scroll",
-    label: "Mouse scroll / zoom",
-    icon: KIND_ICON.scroll,
-    category: "media",
-    host: false,
-    wheel: {
-      mtype: "card",
-      title: "SCROLL",
-      summary: "Turn the wheel to scroll in the assigned direction; press for a single step.",
-    },
-  },
-  {
-    id: "sound",
-    label: "Play a sound",
-    icon: KIND_ICON.sound,
+    id: "mic_level",
+    label: "Microphone level",
+    icon: KIND_ICON.mic_level,
     category: "media",
     host: true,
     wheel: {
-      mtype: "card",
-      title: "SOUND",
-      summary: "Press to play or stop the sound; shows whether it's playing.",
-      standaloneFallback: "Needs the MKYADA app — the wheel shows a short reminder.",
+      mtype: "slider",
+      title: "MIC LEVEL",
+      summary: "Pressing the key opens a mic input-level slider — turn to set the recording gain.",
+      standaloneFallback: "Needs the MKYADA app — mic gain has no standalone control.",
     },
   },
   {
@@ -157,16 +161,28 @@ const KINDS: KindMeta[] = [
     },
   },
   {
-    id: "mic_level",
-    label: "Microphone level",
-    icon: KIND_ICON.mic_level,
+    id: "sound",
+    label: "Play a sound",
+    icon: KIND_ICON.sound,
     category: "media",
     host: true,
     wheel: {
-      mtype: "slider",
-      title: "MIC LEVEL",
-      summary: "Pressing the key opens a mic input-level slider — turn to set the recording gain.",
-      standaloneFallback: "Needs the MKYADA app — mic gain has no standalone control.",
+      mtype: "card",
+      title: "SOUND",
+      summary: "Press to play or stop the sound; shows whether it's playing.",
+      standaloneFallback: "Needs the MKYADA app — the wheel shows a short reminder.",
+    },
+  },
+  {
+    id: "scroll",
+    label: "Mouse scroll / zoom",
+    icon: KIND_ICON.scroll,
+    category: "media",
+    host: false,
+    wheel: {
+      mtype: "card",
+      title: "SCROLL",
+      summary: "Turn the wheel to scroll in the assigned direction; press for a single step.",
     },
   },
   // ── Automation ───────────────────────────────────────────────────────────
@@ -180,19 +196,6 @@ const KINDS: KindMeta[] = [
       mtype: "speed",
       title: "SPEED",
       summary: "Turn to set the playback speed (0.1×–10×); press to save it on the device.",
-    },
-  },
-  {
-    id: "sequence",
-    label: "Multi action (sequence)",
-    icon: KIND_ICON.sequence,
-    category: "automation",
-    host: false,
-    wheel: {
-      mtype: "card",
-      title: "SEQUENCE",
-      summary: "Press to run the whole sequence from the top.",
-      standaloneFallback: "Steps that need the app are skipped when it's closed; the rest still run.",
     },
   },
   {
@@ -362,7 +365,7 @@ export function wheelPreview(a: Assignment): WheelPreview {
       // a browser of every media key, cursor on the assigned one
       const label = (u: string) =>
         ({ play_pause: "Play/Pause", next_track: "Next", prev_track: "Prev", stop: "Stop", mute: "Mute", volume_up: "Vol +", volume_down: "Vol -", brightness_up: "Bright +", brightness_down: "Bright -" })[u] ?? u;
-      const opts = ["play_pause", "next_track", "prev_track", "stop", "mute", "volume_up", "volume_down"];
+      const opts = ["play_pause", "prev_track", "next_track", "stop", "mute", "volume_up", "volume_down"];
       const items = opts.map((u) => ({ label: label(u), mark: u === a.usage ? ("cursor" as const) : undefined }));
       if (!opts.includes(a.usage)) items[0] = { label: label(a.usage), mark: "cursor" };
       return { screen: "picker", title: "MEDIA", items, action: "Use", hold: "hold: assign" };
@@ -426,7 +429,7 @@ export function wheelPreview(a: Assignment): WheelPreview {
         act.length === 7 && act.startsWith("layer_")
           ? `Layer ${act[6].toUpperCase()}`
           : ({ layer_next: "Next layer", layer_prev: "Prev layer", home: "Home", grid: "Grid", settings: "Settings" } as Record<string, string>)[act] ?? act;
-      const opts = ["layer_next", "layer_prev", "home", "grid", "settings"];
+      const opts = ["layer_prev", "layer_next", "home", "grid", "settings"];
       const items = opts.map((o) => ({ label: label(o), mark: o === a.action ? ("cursor" as const) : undefined }));
       if (!opts.includes(a.action)) items[0] = { label: label(a.action), mark: "cursor" };
       return { screen: "picker", title: "LAYER", items, action: "Run", hold: "hold: assign" };

@@ -80,7 +80,9 @@ BRIGHT_USAGES = ("brightness_up", "brightness_down")
 # the media wheel menu is a browser of every consumer usage: turn to highlight
 # one, tap to fire it once, hold to reassign the key to it (issue: wheel-menu
 # grammar). Order is the on-screen list order.
-MEDIA_OPTS = ("play_pause", "next_track", "prev_track", "stop", "mute",
+# Prev before Next everywhere a pair like this is listed — the order the
+# transport controls sit in on any physical remote.
+MEDIA_OPTS = ("play_pause", "prev_track", "next_track", "stop", "mute",
               "volume_up", "volume_down", "brightness_up", "brightness_down")
 MEDIA_LABEL = {"play_pause": "Play/Pause", "next_track": "Next",
                "prev_track": "Prev", "stop": "Stop", "mute": "Mute",
@@ -91,7 +93,7 @@ MEDIA_LABEL = {"play_pause": "Play/Pause", "next_track": "Next",
 # jump to a screen. The absolute layer_a.. entries are appended per device from
 # layer_count. All are runnable on-device with no host, so the browser reassigns
 # standalone just like the media one (issue: layer keys only ran "next layer").
-MENU_FIXED_OPTS = ("layer_next", "layer_prev", "home", "grid", "settings")
+MENU_FIXED_OPTS = ("layer_prev", "layer_next", "home", "grid", "settings")
 MENU_LABEL = {"layer_next": "Next layer", "layer_prev": "Prev layer",
               "home": "Home", "grid": "Grid", "settings": "Settings"}
 

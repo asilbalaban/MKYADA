@@ -24,7 +24,7 @@ import { ipc } from "../lib/ipc";
 import { keysCache } from "../lib/keys-cache";
 import { useDevice } from "../lib/device";
 import { deviceModel, type Assignment, type ObsSnapshot, type UpdateInfo } from "../lib/types";
-import { allKinds, wheelPreview } from "../lib/kind-registry";
+import { allKinds, categoryLabel, wheelPreview } from "../lib/kind-registry";
 import { ActionIcon } from "../components/action-icons";
 import { OledPreview } from "../components/OledPreview";
 import {
@@ -592,20 +592,31 @@ function WheelMenuCard() {
           </figure>
         ))}
       </div>
+      {/* Same order AND the same group headings as the action-type dropdown in
+        * the editor: this is that list, annotated. Two different orders for the
+        * same set of actions made the reader hunt for the row they had just
+        * picked. */}
       <div className="flex flex-col divide-y divide-line">
         {allKinds()
           .filter((k) => k.id !== "none" && k.id !== "nothing")
-          .map((k) => (
-            <div key={k.id} className="flex items-center gap-3 py-2">
-              <ActionIcon name={k.icon} size={30} />
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-medium text-fg">{k.label}</span>
-                  <Badge tone={k.host ? "amber" : "green"}>
-                    {k.host ? "needs app" : "standalone"}
-                  </Badge>
+          .map((k, i, list) => (
+            <div key={k.id} className="flex flex-col">
+              {k.category !== list[i - 1]?.category && (
+                <div className="pt-3 pb-1 text-[11px] font-semibold uppercase tracking-wide text-fg-faint">
+                  {categoryLabel(k.category)}
                 </div>
-                <p className="text-xs text-fg-faint">{k.wheel.summary}</p>
+              )}
+              <div className="flex items-center gap-3 py-2">
+                <ActionIcon name={k.icon} size={30} />
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium text-fg">{k.label}</span>
+                    <Badge tone={k.host ? "amber" : "green"}>
+                      {k.host ? "needs app" : "standalone"}
+                    </Badge>
+                  </div>
+                  <p className="text-xs text-fg-faint">{k.wheel.summary}</p>
+                </div>
               </div>
             </div>
           ))}

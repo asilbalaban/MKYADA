@@ -40,7 +40,7 @@ export interface Fixture {
   appVersion: string;
 }
 
-const APP_VERSION = "0.27.0";
+const APP_VERSION = "0.28.0";
 
 // -------------------------------------------------------------- assignments ---
 // key number (per layer) -> what it does. Chosen to show the range of action
@@ -233,7 +233,7 @@ function core6(): Fixture {
   };
   const hello: Hello = {
     t: "hello",
-    fw: "0.21.0",
+    fw: "0.21.1",
     proto: 10,
     format: "mkyada-config",
     uid: "E6605481DB334C2A",
@@ -286,7 +286,7 @@ function vision6(): Fixture {
   };
   const hello: Hello = {
     t: "hello",
-    fw: "0.21.0",
+    fw: "0.21.1",
     proto: 10,
     format: "mkyada-config",
     uid: "E6605481DB119A7F",

@@ -22,8 +22,8 @@ import { charToKeystroke, displayKey } from "./layout";
 
 export const MEDIA_USAGES = [
   "play_pause",
-  "next_track",
   "prev_track",
+  "next_track",
   "stop",
   "mute",
   "volume_up",

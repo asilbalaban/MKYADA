@@ -22,7 +22,7 @@ Two families:
 | **Shortcut (combo)** | A chord such as `Ctrl+Shift+S` or `Cmd+Space`. |
 | **Text snippet** | Types a block of text — signatures, boilerplate, prompts. |
 | **Media key** | Consumer-control usages: Play/Pause, Mute, Volume, Brightness, etc. |
-| **System volume level** | Pressing the key mutes/unmutes (standalone). On a Vision 6, the wheel opens an absolute volume slider — the exact percentage needs the app running (see [Wheel menu](#wheel-menu-vision-6)). |
+| **Volume level** | Pressing the key mutes/unmutes (standalone). On a Vision 6, the wheel opens an absolute volume slider — the exact percentage needs the app running (see [Wheel menu](#wheel-menu-vision-6)). |
 | **Mouse scroll** | Wheel up/down or horizontal pan, optionally with modifiers held (e.g. `Ctrl+wheel` to zoom, `Alt+wheel` in Illustrator). |
 | **Recorded macro** | A recording from the [Recorder](macro-format.md): mouse paths, clicks and keystrokes replayed 1:1 as real HID. |
 | **Device menu** *(Vision 6)* | Drive the OLED's own menu from a key — scroll ←/→, CONFIRM, BACK, open Home/Grid/Settings. |
@@ -72,7 +72,7 @@ poor default for a volume key).
 | Recorded macro / Text | Adjust playback/typing speed | Save the speed | — |
 | Keystroke / Shortcut | Fire the key repeatedly | Fire once | — |
 | Media key | Browse every media key | Use the highlighted one | Reassign the key to it |
-| **System volume level** | Set the % (slider) | Confirm & close | — *(press the key = open this)* |
+| **Volume level** | Set the % (slider) | Confirm & close | — *(press the key = open this)* |
 | **Microphone level** | Set the input gain (slider) | Confirm & close | — *(press the key = open this)* |
 | Mouse scroll | Scroll in the assigned direction | One step | — |
 | OBS · switch scene | Browse scenes (live one marked) | **Switch OBS live** | **Reassign** the key to that scene |

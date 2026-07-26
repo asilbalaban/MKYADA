@@ -52,7 +52,9 @@ flash.
 
 ## Screens & controls
 
-Real renders of the 128×64 OLED (layer A named "Stream") — produced by
+Real renders of the 128×64 OLED (layer A, nicknamed "Stream" — the nickname
+shows in the grid's band; the layer picker always shows the plain letter) —
+produced by
 `scripts/render-oled.py`, which drives `firmware/mkyada/oled.py` and the shipped
 `mkyada.fnt` through the software displayio in `tests/`, so these are the
 device's pixels rather than a drawing of them.

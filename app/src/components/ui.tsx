@@ -111,6 +111,12 @@ export type IconOption<V extends string> = {
  * Same visual language as <Select>; opens on click or ↓/↑, closes on Escape or
  * outside click.
  */
+// Icon chip sizes for the action pickers. A quarter smaller than the sizes we
+// shipped first: at 52/60 the artwork was the loudest thing in the row and the
+// option list only fitted four entries on screen.
+const ICON_TRIGGER = 39;
+const ICON_OPTION = 45;
+
 export function IconSelect<V extends string>({
   value,
   options,
@@ -166,7 +172,7 @@ export function IconSelect<V extends string>({
         }}
         className="flex w-full items-center gap-2 rounded-md border border-line bg-panel2 px-2.5 py-1.5 text-sm text-fg outline-none focus:border-accent"
       >
-        <ActionIcon name={current?.icon} size={52} />
+        <ActionIcon name={current?.icon} size={ICON_TRIGGER} />
         <span className="truncate text-left">{current?.label}</span>
         <ChevronDown size={14} aria-hidden className="ml-auto shrink-0 text-fg-faint" />
       </button>
@@ -199,7 +205,7 @@ export function IconSelect<V extends string>({
                     sel ? "bg-accent-dim text-accent-fg" : "text-fg hover:bg-panel2"
                   }`}
                 >
-                  <ActionIcon name={o.icon} size={60} />
+                  <ActionIcon name={o.icon} size={ICON_OPTION} />
                   <span className="flex min-w-0 flex-col">
                     <span className="truncate">{o.label}</span>
                     {o.hint && <span className="text-xs text-fg-faint">{o.hint}</span>}

@@ -48,16 +48,9 @@ export function AssignmentPanel({
   const showLabel = !["none", "nothing"].includes(value.kind);
   return (
     <div className="flex flex-col gap-4">
-      <AssignmentEditor
-        value={value}
-        onChange={onChange}
-        allowMenu={allowMenu}
-        slotMode={slotMode}
-        builtinDesc={builtinDesc}
-        allowVariants={allowVariants}
-        fwVersion={fwVersion}
-        layerCount={layerCount}
-      />
+      {/* The name comes first: it is what the key is *called* — on the device's
+        * screen and everywhere in this app — so it belongs above the machinery
+        * that decides what the key does, not buried under it. */}
       {showLabel && (
         <label className="flex flex-col gap-1 text-sm">
           <span className="text-xs font-medium text-fg-muted">
@@ -72,6 +65,16 @@ export function AssignmentPanel({
           <span className="text-[11px] text-fg-faint">Leave empty to use the automatic name.</span>
         </label>
       )}
+      <AssignmentEditor
+        value={value}
+        onChange={onChange}
+        allowMenu={allowMenu}
+        slotMode={slotMode}
+        builtinDesc={builtinDesc}
+        allowVariants={allowVariants}
+        fwVersion={fwVersion}
+        layerCount={layerCount}
+      />
       <div className="flex justify-end gap-2">
         <Button onClick={onRevert} disabled={!dirty}>
           Revert

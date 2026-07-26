@@ -66,17 +66,20 @@ GRID = [("Go Live", ""), ("Record", ""), ("Push-to", "talk"),
         ("Discord", ""), ("Mute", ""), ("Post the", "clip")]
 
 SCREENS = [
+    # ui.py always hands show_home/show_speed a LAYER LETTER, never the layer's
+    # nickname — the nickname only appears in the grid's band. Passing "Stream"
+    # here published a screen the device cannot draw.
     ("home", "Home — the layer carousel",
-     lambda d: d.show_home(0, 3, ["Stream", "Edit", "Dev"])),
+     lambda d: d.show_home(0, 4, ["A", "B", "C", "D"])),
     ("grid", "Grid — the active layer's six macros",
      lambda d: d.show_grid(GRID, 1, band="STREAM")),
     ("speed", "Speed editor — 0.1x-10.0x per macro",
-     lambda d: d.show_speed("Stream", 6, 15)),
+     lambda d: d.show_speed("A", 6, 15)),
     ("settings", "Settings menu",
      lambda d: d.show_menu("SETTINGS", ["Auto return", "Language", "Layer band",
                                         "Profile band", "About", "Restart"], 1)),
     ("about", "About — model, firmware, device id",
-     lambda d: d.show_about((("Model", "vision6"), ("Firmware", "0.21.0"),
+     lambda d: d.show_about((("Model", "vision6"), ("Firmware", "0.21.1"),
                              ("Device ID", "5035586072b9")))),
     ("wheel-scene", "Wheel menu — OBS scene picker",
      lambda d: d.show_menu("SCENE", ["Camera", "Desktop", "Cam + Desk",

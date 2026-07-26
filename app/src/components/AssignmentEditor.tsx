@@ -428,13 +428,15 @@ export function AssignmentEditor({
             options={[
               { value: "left", label: "Scroll menu ← (encoder left)", icon: MENU_ICON.left },
               { value: "right", label: "Scroll menu → (encoder right)", icon: MENU_ICON.right },
-              { value: "confirm", label: "Confirm (encoder press)", icon: MENU_ICON.confirm },
+              // back before confirm, prev before next: the "go back / go
+              // down" half of a pair always reads first, as on the device
               { value: "back", label: "Back", icon: MENU_ICON.back },
+              { value: "confirm", label: "Confirm (encoder press)", icon: MENU_ICON.confirm },
               { value: "home", label: "Open the layer screen", icon: MENU_ICON.home },
               { value: "settings", label: "Open the settings menu", icon: MENU_ICON.settings },
               { value: "grid", label: "Open the key grid", icon: MENU_ICON.grid },
-              { value: "layer_next", label: "Switch to the next layer", icon: MENU_ICON.layer_next },
               { value: "layer_prev", label: "Switch to the previous layer", icon: MENU_ICON.layer_prev },
+              { value: "layer_next", label: "Switch to the next layer", icon: MENU_ICON.layer_next },
               // absolute "go to layer X" — one row per layer that exists
               ...Array.from({ length: Math.min(Math.max(layerCount, 0), 8) }, (_, i) => {
                 const a = `layer_${"abcdefgh"[i]}` as typeof value.action;

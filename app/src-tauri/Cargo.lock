@@ -2529,7 +2529,7 @@ dependencies = [
 
 [[package]]
 name = "mkyada"
-version = "0.27.0"
+version = "0.28.0"
 dependencies = [
  "active-win-pos-rs",
  "base64 0.22.1",
