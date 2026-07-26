@@ -152,6 +152,7 @@ class Ui:
         self.activity_at = time.monotonic()
         self.playing_cell = None
         self.ctx = None  # active context-menu (S_CTX) descriptor
+        self._degraded_at = 0  # last degraded-grid repair repaint
         self.sysvol = None  # live system output volume % pushed by the app
         self._pending_layer = clamp(last_layer, 0,
                                     app.config["layer_count"] - 1)
@@ -1489,6 +1490,13 @@ class Ui:
         if (not d and press is None and self.sel_mode
                 and now - self.activity_at > self.idle_secs):
             self.sel_mode = False  # back to the customized resting grid
+            self._draw_grid()
+        # Self-healing labels: a paint under memory pressure may have skipped
+        # a cell ("6. kutu önce gözüküyor sonra kayboluyor"). Once things calm
+        # down (~1s later), quietly repaint so no label stays missing.
+        if (self.oled.grid_degraded and not d and press is None
+                and now - self._degraded_at > 1.0):
+            self._degraded_at = now
             self._draw_grid()
 
     def _select_default(self, now, d, press):

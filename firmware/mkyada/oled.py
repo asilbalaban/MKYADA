@@ -120,6 +120,9 @@ class Oled:
         self.H = self.display.height if self.display else 64
         self.CX = self.W // 2
         self._font_cache = {}
+        # last grid paint dropped a cell label (or failed whole) under memory
+        # pressure — the UI repaints it once the heap has recovered
+        self.grid_degraded = False
         self.grid_font = terminalio.FONT
         self.grid_cpx = 6
         self.grid_tr_ok = False  # grid font renders real Turkish glyphs?
@@ -388,6 +391,7 @@ class Oled:
         # layer ("B never appears"). Protecting it HERE covers every caller.
         # Loop (not a nested retry inside `except`): the handler frame would
         # stay live under the retried call and exhaust the fixed pystack.
+        self.grid_degraded = False
         for _ in range(2):
             gc.collect()
             try:
@@ -395,6 +399,7 @@ class Oled:
                 return
             except MemoryError:
                 continue
+        self.grid_degraded = True  # both attempts died — repaint when calmer
 
     def _show_grid(self, labels, active, invert, band):
         g = displayio.Group()
@@ -434,7 +439,9 @@ class Oled:
             # even with plenty of total free RAM (no contiguous hole). One
             # missing cell text is invisible damage; the whole screen failing
             # left the OLD layer on screen after the state had switched — the
-            # worst possible outcome for muscle memory. Paint what fits.
+            # worst possible outcome for muscle memory. Paint what fits, and
+            # flag the screen as degraded so the UI quietly repaints it once
+            # the heap recovers (labels used to just stay missing).
             try:
                 if l2:
                     g.append(self._gtxt(l1[:maxc], x + cw // 2, y + y1, color=col))
@@ -443,6 +450,7 @@ class Oled:
                     g.append(self._gtxt(l1[:maxc], x + cw // 2, y + ch // 2, color=col))
             except MemoryError:
                 gc.collect()  # cell skipped; keep painting the rest
+                self.grid_degraded = True
         self.paint(g)
 
     def show_speed(self, layer_name, key_no, t):
