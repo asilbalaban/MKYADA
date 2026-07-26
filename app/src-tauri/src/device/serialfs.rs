@@ -150,6 +150,7 @@ impl Drop for Op<'_> {
         BUSY.store(false, std::sync::atomic::Ordering::SeqCst);
         // the link is ours again: deliver whatever we held back
         for msg in take_deferred() {
+            crate::dbg_log!("replay deferred {msg}");
             let _ = serial::send(self.mgr, &msg);
         }
         let _ = self.mgr.set_fs_route(None);

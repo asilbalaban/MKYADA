@@ -117,7 +117,15 @@ fn on_event(app: &AppHandle, d: &Value) {
                 .map(|s| s.to_string());
             update_snapshot(app, |s| s.current_scene = name);
         }
+        // Logged because the keypad's blinking (R) hangs off this one event:
+        // when the band is wrong, the first question is always whether OBS
+        // announced the state change at all (it sends STARTING with
+        // outputActive:false, then STARTED with true — two labels, 8ms apart).
         "RecordStateChanged" => {
+            crate::dbg_log!(
+                "obs RecordStateChanged active={}",
+                output_active(d, false)
+            );
             update_snapshot(app, |s| s.recording = output_active(d, s.recording));
         }
         "StreamStateChanged" => {

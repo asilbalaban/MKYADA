@@ -339,6 +339,18 @@ pub fn send(mgr: &DeviceManager, msg: &Value) -> Result<(), String> {
     // device logged a 1024-byte chunk arriving as 642 bytes of base64, then
     // dropped the next line entirely — which the app saw only as "the keypad did
     // not answer in time", i.e. every recorded-macro save failing.
+    // The band's whole state in one line: this is what separates "the app
+    // never pushed it" from "the keypad ignored it" when (R)/(L) or the scene
+    // name look stale — the question that cost a whole session to answer once.
+    if msg.get("t").and_then(Value::as_str) == Some("label") {
+        crate::dbg_log!(
+            "label -> rec={} live={} text={} busy={}",
+            msg.get("rec").and_then(Value::as_bool).unwrap_or(false),
+            msg.get("live").and_then(Value::as_bool).unwrap_or(false),
+            msg.get("text").and_then(Value::as_str).unwrap_or(""),
+            super::serialfs::BUSY.load(std::sync::atomic::Ordering::SeqCst)
+        );
+    }
     if super::serialfs::BUSY.load(std::sync::atomic::Ordering::SeqCst)
         && super::serialfs::is_cosmetic(msg)
     {
