@@ -380,6 +380,23 @@ class Oled:
         names squeeze into the remaining height."""
         if not self.display:
             return
+        # The grid is the label-heaviest screen and every caller repaints it
+        # (layer switch, play start/done, selection ticks). Building its group
+        # transiently uses most of the free heap, so start compacted and, if
+        # the build still dies mid-way, drop the half-built group and try once
+        # more — a failed repaint used to leave the screen showing the OLD
+        # layer ("B never appears"). Protecting it HERE covers every caller.
+        # Loop (not a nested retry inside `except`): the handler frame would
+        # stay live under the retried call and exhaust the fixed pystack.
+        for _ in range(2):
+            gc.collect()
+            try:
+                self._show_grid(labels, active, invert, band)
+                return
+            except MemoryError:
+                continue
+
+    def _show_grid(self, labels, active, invert, band):
         g = displayio.Group()
         top = 0
         if band:
@@ -391,8 +408,11 @@ class Oled:
                     self.ui_font.load_glyphs(set(band))
                 except Exception:
                     pass
-            g.append(self._txt(band, self.CX, top // 2 - 1, color=0x000000,
-                               font=self.ui_font))
+            try:
+                g.append(self._txt(band, self.CX, top // 2 - 1, color=0x000000,
+                                   font=self.ui_font))
+            except MemoryError:
+                gc.collect()  # band text skipped; the grid still paints
         cols, rows = 3, 2
         cw = self.W // cols        # 42
         ch = (self.H - top) // rows  # 32 full-height, 27 under the band
@@ -410,11 +430,19 @@ class Oled:
             else:
                 col = 0xFFFFFF
             l1, l2 = labels[k] if k < len(labels) else ("", "")
-            if l2:
-                g.append(self._gtxt(l1[:maxc], x + cw // 2, y + y1, color=col))
-                g.append(self._gtxt(l2[:maxc], x + cw // 2, y + y2, color=col))
-            elif l1:
-                g.append(self._gtxt(l1[:maxc], x + cw // 2, y + ch // 2, color=col))
+            # Per-cell resilience: on a shredded heap a single Label can fail
+            # even with plenty of total free RAM (no contiguous hole). One
+            # missing cell text is invisible damage; the whole screen failing
+            # left the OLD layer on screen after the state had switched — the
+            # worst possible outcome for muscle memory. Paint what fits.
+            try:
+                if l2:
+                    g.append(self._gtxt(l1[:maxc], x + cw // 2, y + y1, color=col))
+                    g.append(self._gtxt(l2[:maxc], x + cw // 2, y + y2, color=col))
+                elif l1:
+                    g.append(self._gtxt(l1[:maxc], x + cw // 2, y + ch // 2, color=col))
+            except MemoryError:
+                gc.collect()  # cell skipped; keep painting the rest
         self.paint(g)
 
     def show_speed(self, layer_name, key_no, t):

@@ -40,12 +40,10 @@ pub struct SoundKey {
 }
 
 /// How long the key must be held (down→up) before the hold action, not a plain
-/// tap-and-play, applies. Matches the JS foreground path (SOUND_HOLD_STOP_MS).
-const HOLD_MS: u128 = 400;
+/// tap-and-play, applies.
+const HOLD_MS: u128 = 600;
 
 static KEYS: Mutex<Option<HashMap<String, SoundKey>>> = Mutex::new(None);
-// When each sound key went down, so the up edge can measure the real hold time.
-static DOWN: Mutex<Option<HashMap<String, Instant>>> = Mutex::new(None);
 
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
@@ -61,15 +59,18 @@ pub fn set_keys(map: HashMap<String, SoundKey>) {
     *lock(&KEYS) = Some(map);
 }
 
-/// Inspect a parsed device message and drive sound-key playback:
-///   * DOWN — play immediately (instant feel) and remember the press time.
-///   * UP   — if the key was held past `HOLD_MS`, apply its hold action
-///            (fade / restart / stop) to whatever is playing.
+/// Inspect a parsed device message and forward sound-key edges to the audio
+/// thread, which owns the playback decision (it alone knows synchronously
+/// whether anything is still playing):
+///   * nothing playing + DOWN  → play IMMEDIATELY (instant feel);
+///   * something playing + DOWN → defer to the release: a quick tap layers
+///     the sound again, a long hold applies the key's hold action
+///     (fade/restart/stop) — WITHOUT re-triggering the sound first.
 ///
-/// The hold decision is made on the real up edge, from the down→up elapsed
-/// time — NOT an independent timer. An earlier timer-based version fired the
-/// fade on its own schedule and, when the up edge lagged in the background, cut
-/// a plain tap off mid-play; measuring the actual gap can't misfire that way.
+/// This composes the two field reports: "basınca anında çalsın" (play on
+/// press) and "durdurmak için basılı tutunca önce tekrar çalmasın" (no replay
+/// on a hold meant to stop). Timer-free — every decision comes from real
+/// edges, so a lagging up edge can never cut a tap off mid-play.
 pub fn on_device_msg(v: &serde_json::Value) {
     if v.get("t").and_then(serde_json::Value::as_str) != Some("btn") {
         return;
@@ -90,31 +91,13 @@ pub fn on_device_msg(v: &serde_json::Value) {
         return;
     };
 
+    let Some(tx) = tx() else { return };
     match edge {
         "down" => {
-            let r = play(&entry.path);
-            crate::dbg_log!("btn {id} down: play {} -> {:?}", entry.path, r.as_ref().err());
-            lock(&DOWN)
-                .get_or_insert_with(HashMap::new)
-                .insert(id, Instant::now());
+            let _ = tx.send(Cmd::KeyDown(id, entry));
         }
         "up" => {
-            let held = lock(&DOWN)
-                .as_mut()
-                .and_then(|m| m.remove(&id))
-                .map(|t| t.elapsed().as_millis());
-            if let Some(ms) = held {
-                if ms >= HOLD_MS {
-                    match entry.hold.as_deref() {
-                        Some("fade") => fade(600),
-                        Some("restart") => {
-                            stop_all();
-                            let _ = play(&entry.path);
-                        }
-                        _ => stop_all(), // "stop" or unset
-                    }
-                }
-            }
+            let _ = tx.send(Cmd::KeyUp(id));
         }
         _ => {}
     }
@@ -125,6 +108,10 @@ enum Cmd {
     Stop,
     // fade every playing sound to silence over `ms`, then drop it
     Fade(u64),
+    // sound-key edges: the audio thread decides play vs hold-action because
+    // it alone knows synchronously whether sinks are still playing
+    KeyDown(String, SoundKey),
+    KeyUp(String),
 }
 
 static TX: OnceLock<Sender<Cmd>> = OnceLock::new();
@@ -142,6 +129,48 @@ fn tx() -> Option<&'static Sender<Cmd>> {
                 Err(_) => return, // no audio device — drain nothing, exit
             };
             let mut sinks: Vec<Sink> = Vec::new();
+            // sound keys currently held down: id -> (press time, deferred?).
+            // deferred = something was playing at the press, so the decision
+            // (tap = play again, hold = the key's hold action) waits for
+            // the release instead of re-triggering the sound immediately.
+            let mut down: HashMap<String, (Instant, bool, SoundKey)> = HashMap::new();
+            let play_bytes = |sinks: &mut Vec<Sink>, handle: &rodio::OutputStreamHandle, path: &str| {
+                match std::fs::read(path) {
+                    Ok(bytes) => {
+                        if let Ok(sink) = Sink::try_new(handle) {
+                            match Decoder::new(Cursor::new(bytes)) {
+                                Ok(dec) => {
+                                    sink.append(dec);
+                                    sinks.push(sink);
+                                    crate::dbg_log!("audio: play {path}");
+                                }
+                                Err(e) => crate::dbg_log!("audio: undecodable {path}: {e}"),
+                            }
+                        }
+                    }
+                    Err(e) => crate::dbg_log!("audio: can't read {path}: {e}"),
+                }
+            };
+            let stop_sinks = |sinks: &mut Vec<Sink>| {
+                for s in sinks.iter() {
+                    s.stop();
+                }
+                sinks.clear();
+            };
+            let fade_sinks = |sinks: &mut Vec<Sink>, ms: u64| {
+                // rodio has no live fade; approximate with a short volume
+                // ramp on this thread, then stop.
+                let steps = 16u32;
+                let dt = ms / u64::from(steps);
+                for i in 0..steps {
+                    let v = 1.0 - (i as f32 + 1.0) / steps as f32;
+                    for s in sinks.iter() {
+                        s.set_volume(v.max(0.0));
+                    }
+                    thread::sleep(std::time::Duration::from_millis(dt.max(1)));
+                }
+                stop_sinks(sinks);
+            };
             for cmd in rx {
                 sinks.retain(|s| !s.empty()); // reap finished sounds
                 match cmd {
@@ -156,28 +185,42 @@ fn tx() -> Option<&'static Sender<Cmd>> {
                             }
                         }
                     }
-                    Cmd::Stop => {
-                        for s in &sinks {
-                            s.stop();
+                    Cmd::Stop => stop_sinks(&mut sinks),
+                    Cmd::Fade(ms) => fade_sinks(&mut sinks, ms),
+                    Cmd::KeyDown(id, entry) => {
+                        let playing = !sinks.is_empty();
+                        if !playing {
+                            play_bytes(&mut sinks, &handle, &entry.path);
+                        } else {
+                            crate::dbg_log!("audio: {id} down while playing — deferred");
                         }
-                        sinks.clear();
+                        down.insert(id, (Instant::now(), playing, entry));
                     }
-                    Cmd::Fade(ms) => {
-                        // rodio has no live fade; approximate with a short
-                        // volume ramp on this thread, then stop.
-                        let steps = 16u32;
-                        let dt = ms / steps as u64;
-                        for i in 0..steps {
-                            let v = 1.0 - (i as f32 + 1.0) / steps as f32;
-                            for s in &sinks {
-                                s.set_volume(v.max(0.0));
+                    Cmd::KeyUp(id) => {
+                        let Some((at, deferred, entry)) = down.remove(&id) else {
+                            continue;
+                        };
+                        if !deferred {
+                            continue; // already played on the down edge
+                        }
+                        let ms = at.elapsed().as_millis();
+                        if ms < HOLD_MS {
+                            crate::dbg_log!("audio: {id} tap({ms}ms) while playing — layer");
+                            play_bytes(&mut sinks, &handle, &entry.path);
+                        } else {
+                            crate::dbg_log!(
+                                "audio: {id} hold({ms}ms): {}",
+                                entry.hold.as_deref().unwrap_or("stop")
+                            );
+                            match entry.hold.as_deref() {
+                                Some("fade") => fade_sinks(&mut sinks, 600),
+                                Some("restart") => {
+                                    stop_sinks(&mut sinks);
+                                    play_bytes(&mut sinks, &handle, &entry.path);
+                                }
+                                _ => stop_sinks(&mut sinks),
                             }
-                            thread::sleep(std::time::Duration::from_millis(dt.max(1)));
                         }
-                        for s in &sinks {
-                            s.stop();
-                        }
-                        sinks.clear();
                     }
                 }
             }

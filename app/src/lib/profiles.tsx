@@ -574,24 +574,49 @@ export function ProfilesProvider({ children }: { children: ReactNode }) {
         }
         // No profile active — standalone computer-side actions for numbered
         // keys: the device already played the HID, we perform the
-        // launch/command/sound/webhook/mic side from the file it ran.
+        // launch/command/sound/webhook/mic side.
         if (typeof slot !== "number") return;
         const layerIndex = Math.max(0, LAYER_NAMES.indexOf(layer));
-        void readMacro(macroFileName(slot, layerIndex)).then((m) => {
-          if (!m) return;
+        // Resolve from the connect-time snapshot, NEVER a serial read: the
+        // keypad is single-threaded, so serving a file request blocks its key
+        // scanning and screen painting — on-press reads made layer changes
+        // visibly skip frames and delayed wheel-menu (ctx) replies past the
+        // device's fallback timeout ("the volume slider never shows").
+        const snap = driveRef.current ? keysCache.get(driveRef.current.path) : undefined;
+        const cachedA = snap?.assignments.get(`${slot}:${layerIndex}`);
+        if (snap) {
+          const a = cachedA;
+          if (!a || a.kind === "none") return; // unassigned or truly blank
           // key logic: the firmware resolves tap/double/hold itself and
           // announces the choice as "key_action" — handled elsewhere
+          if (a.variants?.double || a.variants?.hold) return;
+          // sound keys are played natively by the serial reader (works in the
+          // background); skip them here so they never double-play
+          if (a.kind === "sound") return;
+          if (a.kind === "sequence") {
+            if (a.steps && !sequenceIsPureHid(a.steps)) {
+              void runSequence(keyId, a.steps, macroFileName(slot, layerIndex));
+            }
+            return;
+          }
+          if (a.kind === "mic" && a.mode === "push_to_talk") {
+            micDownKeys.current.add(keyId);
+            void invoke("mic_action", { mode: "unmute" }).catch(() => {});
+            return;
+          }
+          runHostAction(a);
+          return;
+        }
+        // Cache not loaded yet (connect still in flight) — old read path.
+        void readMacro(macroFileName(slot, layerIndex)).then((m) => {
+          if (!m) return;
           if (m.variants && (m.variants.double || m.variants.hold)) return;
           if (m.kind === "sequence") {
-            // pure-HID: the keypad already played it standalone; mixed:
-            // the main file is a no-op and the steps run here
             if (!m.events.length && m.seq?.length) {
               void runSequence(keyId, m.seq, macroFileName(slot, layerIndex));
             }
             return;
           }
-          // sound keys are played natively by the serial reader (works in the
-          // background); skip them here so they never double-play
           if (m.kind === "sound") return;
           if (m.kind === "mic" && m.mic_mode === "push_to_talk") {
             micDownKeys.current.add(keyId);

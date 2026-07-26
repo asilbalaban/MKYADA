@@ -13,6 +13,7 @@ import { listen } from "@tauri-apps/api/event";
 import { useDevice } from "./device";
 import { useProfiles } from "./profiles";
 import { ipc } from "./ipc";
+import { macroFileCache } from "./macro-cache";
 import { compileAssignment, obsActionToRequest, parseDeviceMacro } from "./macro-model";
 import { serializeForDevice } from "./recorder-model";
 import { playSound } from "./sound";
@@ -299,7 +300,16 @@ export function WheelMenuProvider({ children }: { children: ReactNode }) {
       const d = driveRef.current;
       const file = String(m.file ?? "").replace(/^\//, "");
       let mf: MacroFile | null = null;
-      if (d && file) mf = await ipc.driveRead(d.path, file).then((raw) => parseDeviceMacro(raw)).catch(() => null);
+      if (d && file) {
+        // Cache first — a serial read here blocks the single-threaded keypad
+        // (it is literally waiting for this reply to draw the menu) and used
+        // to push past its fallback timeout, so sliders never appeared.
+        mf = macroFileCache.get(d.path, file) ?? null;
+        if (!mf) {
+          mf = await ipc.driveRead(d.path, file).then((raw) => parseDeviceMacro(raw)).catch(() => null);
+          if (mf) macroFileCache.set(d.path, file, mf);
+        }
+      }
       openRef.current = {
         key: Number(m.key),
         layer: String(m.layer ?? "a"),

@@ -16,6 +16,10 @@ import gc
 import json
 import os
 import time
+
+# CircuitPython-only heap gauges; the desktop simulator's gc lacks them
+_mem_free = getattr(gc, "mem_free", lambda: -1)
+_mem_alloc = getattr(gc, "mem_alloc", lambda: -1)
 from binascii import a2b_base64, b2a_base64, crc32
 
 import board
@@ -227,6 +231,7 @@ class App:
         self.last_rx = 0.0
         self.playing_key = None  # 0-based index of the key that started playback
         self.pending_play = None  # (path, trigger) queued by restart/switch policies
+        self._mem_report_at = 0  # last heap-telemetry print (console)
         self.upload = None  # in-flight fs_write: {"path", "tmp", "f", "seq"}
         self.pin_watch = None  # ("names", Buttons) while pin-detect mode is on
         self.pin_watch_until = 0.0
@@ -424,6 +429,10 @@ class App:
         self.layer = i
         self.led.set(layer=i)
         self.announce_layer()
+        # console-only memory telemetry: layer switches were the first thing
+        # to die when the heap ran out (84-byte MemoryError painting the
+        # grid); the trend line on the CDC console is how we catch it early
+        print("memfree", _mem_free(), "layer", LAYER_NAMES[i])
         self.ui_call("on_layer")
 
     def menu_layer_jump(self, menu):
@@ -462,6 +471,13 @@ class App:
             getattr(self.ui, name)(*args)
         except Exception as e:
             print("ui error in", name, ":", repr(e))
+            try:
+                # full traceback on the console — a bare repr made the layer
+                # MemoryError hunt blind guesswork
+                import traceback
+                traceback.print_exception(e)
+            except Exception:
+                pass
             gc.collect()
 
     def send_config(self):
@@ -1423,6 +1439,21 @@ class App:
             if not self.updating:
                 self.ui_call("tick", now)
             self.led.tick()
+            # heap trend on the console (~10s cadence): a monotonic decline
+            # here is a reference leak — the failure mode behind "layer B
+            # never paints" (repaints dying on double-digit-byte allocations)
+            if now - self._mem_report_at > 10:
+                self._mem_report_at = now
+                # alloc rising while free falls names a retainer; the cache
+                # sizes say which one
+                stats = None
+                if self.ui:
+                    try:
+                        stats = self.ui.cache_stats()
+                    except Exception:
+                        pass
+                print("memfree", _mem_free(), "alloc", _mem_alloc(),
+                      "caches", stats)
             time.sleep(0.002)
 
 

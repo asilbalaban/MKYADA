@@ -354,6 +354,12 @@ class Ui:
             self.load_layer(l)
         return self._kinds.get((l, key0), (None, None))
 
+    def cache_stats(self):
+        """Container sizes for the console heap telemetry — the growing one
+        names the retainer when free memory declines over a session."""
+        return (len(self._labels), len(self._slots), len(self._kinds),
+                len(self._speeds), len(self._ctx_slots))
+
     def invalidate_labels(self, path=None):
         """A macro file changed (app upload / delete). Drop the affected
         layer's cache; None drops everything."""
@@ -368,14 +374,25 @@ class Ui:
                 # context override (enc-cw@home) — global, not layered
                 self._ctx_slots.pop(name.rsplit("@", 1)[-1], None)
                 return
-            l = 0
+            base, l = name, 0
             if "-" in name:
-                suffix = name.rsplit("-", 1)[-1]
+                stem, suffix = name.rsplit("-", 1)
                 if len(suffix) == 1 and suffix in LAYER_NAMES:
-                    l = LAYER_NAMES.index(suffix)
+                    base, l = stem, LAYER_NAMES.index(suffix)
+            # Only grid key files (keyN[-l]) and slot files (enc-cw[-l], ...)
+            # live in these caches. Anything else — profile copies
+            # (p_<id>_key1) and sequence/variant part files (key3-b.2) — used
+            # to be misread as "layer A changed" and wipe EVERY layer: the
+            # app's connect-time profile sync then caused ~15 back-to-back
+            # full wipes + repaints, refilling the caches mid-session and
+            # shredding the heap until repaints died.
+            if not ((base.startswith("key") and base[3:].isdigit())
+                    or base in UI_SLOTS):
+                return
             layers = [l]
-            if l == 0:
-                layers = list(set([0] + list(self._slots.keys())))  # slot fallback
+            if l == 0 and base in UI_SLOTS:
+                # layer-A slot files are the fallback other layers inherit
+                layers = list(set([0] + list(self._slots.keys())))
         for l in set(layers):
             self._labels.pop(l, None)
             self._slots.pop(l, None)
@@ -471,8 +488,27 @@ class Ui:
         if self._pending_layer:
             self.app.set_layer_idx(self._pending_layer)  # re-enters on_layer
         l = self.app.layer
-        self.oled.load_grid_font(self.font_idx, self._glyphs_for(l))
+        # Preload EVERY layer now, while the heap is young. These caches are
+        # small but long-lived; loading them lazily on first visit used to pin
+        # them into the middle of an aging heap, and since CircuitPython's GC
+        # never compacts, the heap shredded until layer repaints died on
+        # double-digit-byte allocations ("B never shows"). Front-loading them
+        # (and every layer's glyphs, in one font pass) keeps the long-lived
+        # objects low and the rest of the heap in one piece.
+        n = self.app.config["layer_count"]
+        chars = ""
+        try:
+            for i in range(n):
+                chars += self._glyphs_for(i)
+        except MemoryError:
+            gc.collect()  # boot must survive; missing glyphs load lazily
+        self.oled.load_grid_font(self.font_idx, chars or self._glyphs_for(l))
         self._labels.clear()  # re-split with the real font metrics
+        try:
+            for i in range(n):
+                self.labels(i)
+        except MemoryError:
+            gc.collect()
         # Boot straight into the last active layer's macro grid, not the layer
         # picker: the common case is "use the keypad", and the picker still
         # sits one BACK away. Avoids the boot-time picker feeling stuck while
@@ -773,6 +809,9 @@ class Ui:
         return out if out is not None else labels
 
     def _draw_grid(self):
+        # show_grid itself compacts, retries and degrades per-cell — no
+        # wrapper here: the extra nested handler frames exhausted the fixed
+        # pystack ("pystack exhausted" in on_layer).
         l = self.app.layer
         invert = self.sel_mode or not self._enc_custom()
         self.oled.show_grid(self._grid_labels(l), self.sel_key, invert,
@@ -1440,6 +1479,8 @@ class Ui:
         if 0 <= idx < self.app.config["layer_count"]:
             self.app.set_layer_idx(idx)
             self._nvm_save()
+            # no retry wrapper: show_grid is self-healing, and nested
+            # except-handler retries exhausted the pystack
             self._enter_grid()
 
     def _st_select(self, now, d, press):
