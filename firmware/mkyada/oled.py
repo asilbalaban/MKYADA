@@ -34,6 +34,11 @@ BOT_SEP = 53      # hairline above the bottom bar
 BOT_Y = 58        # cap-centre of the bottom bar text
 HBAR_Y = 41      # value slider (same y the design viewer shows)
 HBAR_H = 5
+HERO_Y = 27          # cap-centre of the big value on the two editor screens
+HERO_SCALE = 3
+# Top of the hero's glyph box — derived the same way Fb.big derives it, so the
+# band an incremental repaint clears cannot drift away from what it redraws.
+HERO_TOP = HERO_Y - (7 * HERO_SCALE) // 2
 ROW_H = 10        # menu row pitch
 # Cap-centre of the first menu row. Four rows of 10px start at y=11 (just under
 # the bar) and the last one ends at 50, two rows clear of the hairline — the
@@ -61,6 +66,8 @@ class Oled:
         self._bar = None   # (x, y, w, h) of the boot/update progress bar
         self._last = None  # key of the screen currently on the glass
         self._cells = None # per-cell (line1, line2, inverted) cache
+        self._menu = None  # (chrome, rows) cache, same idea for the menu
+        self._val = None   # (chrome, (hero, frac)) for the two value editors
         self._band_txt = None
         for _ in range(INIT_TRIES):
             try:
@@ -189,6 +196,10 @@ class Oled:
         if key != "grid":
             self._cells = None
             self._band_txt = None
+        if key != "menu":
+            self._menu = None
+        if key not in ("speed", "adjust"):
+            self._val = None
         self.fb.clear()
         return True
 
@@ -322,14 +333,37 @@ class Oled:
         self.paint("grid")
         return True
 
-    def show_speed(self, layer_name, key_no, t):
-        if not self._begin("speed"):
+    def _value_screen(self, key, title, hero, frac, action):
+        """Title bar, big number, slider, bottom bar — the shape both encoder
+        value editors share.
+
+        Only the number and the slider move as the encoder turns, and they sit
+        in one horizontal band, so a detent repaints that band alone. The bars
+        above and below are chrome: drawn once, then left alone, which is what
+        keeps displayio's dirty box (and the I2C push behind it) small."""
+        if not self.display:
             return
-        self._top_bar("%s > K%d  %s" % (layer_name.upper(), key_no, tr("speed")))
-        self.fb.big(fmt_hero(t), self.CX, 27, scale=3)
-        self._hbar((t - 1) / 99.0)
-        self._bottom_bar(action=tr("save"))
-        self.paint("speed")
+        chrome = (title, action)
+        fresh = self._last != key or self._val is None or self._val[0] != chrome
+        if fresh:
+            self._begin(key)
+            self._top_bar(title)
+            self._bottom_bar(action=action)
+        elif self._val[1] == (hero, frac):
+            self.paint(key)
+            return
+        else:
+            self.fb.rect(0, HERO_TOP, self.W, HBAR_Y + HBAR_H - HERO_TOP, 0)
+        self.fb.big(hero, self.CX, HERO_Y, scale=HERO_SCALE)
+        self._hbar(frac)
+        self._val = (chrome, (hero, frac))
+        self.paint(key)
+
+    def show_speed(self, layer_name, key_no, t):
+        self._value_screen(
+            "speed",
+            "%s > K%d  %s" % (layer_name.upper(), key_no, tr("speed")),
+            fmt_hero(t), (t - 1) / 99.0, tr("save"))
 
     def show_card(self, title, big, line=None, hint=None):
         """Generic action card for the context-aware wheel menu: a title bar,
@@ -350,13 +384,8 @@ class Oled:
     def show_adjust(self, title, hero, frac, action=None):
         """Generic value slider (host-backed volume, brightness): title bar,
         big value, progress bar, bottom action."""
-        if not self._begin("adjust"):
-            return
-        self._top_bar(title)
-        self.fb.big(hero, self.CX, 27, scale=3)
-        self._hbar(max(0.0, min(1.0, frac)))
-        self._bottom_bar(action=action)
-        self.paint("adjust")
+        self._value_screen("adjust", title, hero,
+                           max(0.0, min(1.0, frac)), action)
 
     def show_saved(self, layer_name, key_no, t):
         if not self._begin("saved"):
@@ -402,27 +431,51 @@ class Oled:
         the glass, so the wheel looked stuck at the row it opened on while the
         selection moved invisibly underneath. There is nothing left to
         allocate here, so there is nothing left to fail."""
-        if not self._begin("menu"):
+        if not self.display:
             return
-        self._top_bar(title, hint=hold)
         n = len(items)
         top = sel - self.MENU_VIS + 1 if sel >= self.MENU_VIS else 0
         # keep the arrow strip clear of the selection rectangle
         rw = self.W - 8 if n > self.MENU_VIS else self.W
+        act = action or tr("select")
+        # Everything that isn't a row. Any change here means a full repaint;
+        # scrolling counts, because `top` moving renumbers every row.
+        chrome = (title, hold, act, top, n, rw)
+        want = []
         for row in range(min(self.MENU_VIS, n)):
             i = top + row
-            y = MENU_TOP + row * ROW_H
-            on = i == sel
-            if on:
-                self.fb.rect(0, y - 4, rw, ROW_H)
             text = items[i] if marked is None else (
                 "%s %s" % (">" if i == marked else " ", items[i]))
-            self.fb.text(self.font.fit(str(text), rw - 4), self.CX, y, invert=on)
-        if top > 0:
-            self.fb.tri(self.W - 7, BAR_H + 2, 7, 4, down=False)
-        if top + self.MENU_VIS < n:
-            self.fb.tri(self.W - 7, BOT_SEP - 6, 7, 4, down=True)
-        self._bottom_bar(action=action or tr("select"))
+            want.append((self.font.fit(str(text), rw - 4), i == sel))
+
+        # A detent changes exactly two rows, so redraw two rows — not the
+        # screen. Drawing the whole thing was 26ms, but the real cost was
+        # displayio then pushing all 64 rows over I2C at 78ms; two rows push in
+        # about 9. This is the wheel from issue #39, the one interaction whose
+        # latency anyone actually feels.
+        fresh = self._last != "menu" or self._menu is None or \
+            self._menu[0] != chrome
+        if fresh:
+            self._begin("menu")
+            self._top_bar(title, hint=hold)
+            if top > 0:
+                self.fb.tri(self.W - 7, BAR_H + 2, 7, 4, down=False)
+            if top + self.MENU_VIS < n:
+                self.fb.tri(self.W - 7, BOT_SEP - 6, 7, 4, down=True)
+            self._bottom_bar(action=act)
+            was = None
+        else:
+            was = self._menu[1]
+        for row in range(len(want)):
+            w = want[row]
+            if was is not None and was[row] == w:
+                continue
+            y = MENU_TOP + row * ROW_H
+            # Clear only up to rw: past it live the scroll arrows, which are
+            # chrome and are drawn once.
+            self.fb.rect(0, y - 4, rw, ROW_H, 1 if w[1] else 0)
+            self.fb.text(w[0], self.CX, y, invert=w[1])
+        self._menu = (chrome, want)
         self.paint("menu")
 
     def show_timeout(self, sec, lo, hi):

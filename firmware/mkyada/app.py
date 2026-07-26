@@ -95,7 +95,12 @@ gc.collect()  # the display stack litters the heap; start the app compacted
 
 DEBOUNCE_S = 0.02
 PING_TIMEOUT_S = 5.0
-PROTO_VERSION = 9  # v9: context-aware wheel menu — "hostinfo" (the app
+PROTO_VERSION = 10 # v10: "font" is gone from hello and config.json. One font
+                   # ships now, so the setting had nothing left to choose; an
+                   # older app reading hello sees the field missing and simply
+                   # reports the keypad as pre-0.14.0 for prefs, which is a
+                   # cosmetic downgrade rather than a break;
+                   # v9: context-aware wheel menu — "hostinfo" (the app
                    # advertises menu support), "ctx" (device asks the app for a
                    # host-kind key's menu), "menu"/"menu_ev"/"menu_result"
                    # (render / events / close for the on-screen wheel menu);
@@ -174,9 +179,6 @@ DEFAULT_CONFIG = {
                          # debugging — a paused debugger trips it)
     "show_layer": False,    # vision6: band over the grid with the active layer
     "show_profile": False,  # vision6: band shows the app-pushed profile label
-    "font": None,        # vision6: grid font index (mirror of the on-device
-                         # Settings > Font choice, so the app can set/read it);
-                         # null = keep whatever the device's own NVM holds
     "timeout": None,     # vision6: auto-return idle seconds (mirror of the
                          # on-device Settings > Auto-return); null = NVM value
     "nav": None,         # vision6: PSH/BACK/CONFIRM pin order override, e.g.
@@ -404,10 +406,8 @@ class App:
         cfg["usb_drive"] = cfg.get("usb_drive") is True  # same rule as boot.py
         cfg["show_layer"] = cfg.get("show_layer") is True
         cfg["show_profile"] = cfg.get("show_profile") is True
-        # font / timeout: light bounds here (the UI clamps to its exact
-        # FONTS length / TMO range); null means "use the device's NVM value".
-        f = cfg.get("font")
-        cfg["font"] = f if isinstance(f, int) and 0 <= f <= 7 else None
+        # timeout: light bounds here (the UI clamps to its exact TMO range);
+        # null means "use the device's NVM value".
         tmo = cfg.get("timeout")
         cfg["timeout"] = tmo if isinstance(tmo, int) and 3 <= tmo <= 60 else None
         cfg["nav"] = validate_nav_pins(cfg.get("nav"), MODEL)
@@ -567,7 +567,7 @@ class App:
                 "key_map": c["key_map"], "usb_drive": c["usb_drive"],
                 "pins": self.key_pin_names(), "nav": self.nav_pin_names(),
                 "show_layer": c["show_layer"], "show_profile": c["show_profile"],
-                "font": c.get("font"), "timeout": c.get("timeout"),
+                "timeout": c.get("timeout"),
                 "enc_swap": c.get("enc_swap"), "layer_names": c.get("layer_names"),
                 # Biggest raw fs_write chunk this board can digest. A chunk
                 # arrives as ONE base64 line needing a single contiguous heap

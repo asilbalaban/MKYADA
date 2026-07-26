@@ -295,10 +295,11 @@ function KeypadCard() {
   const wheelAccel = useWheelAccel();
   const [bandBusy, setBandBusy] = useState<"show_layer" | "show_profile" | null>(null);
   const [fieldBusy, setFieldBusy] = useState<string | null>(null);
-  // firmware < 0.14.0 doesn't mirror prefs into config.json. `font` is a
-  // dead setting since firmware 0.20.0 (one font ships now) but it is still
-  // reported, and it stays the cheapest probe for a prefs-capable keypad.
-  const prefsSupported = hello?.font !== undefined;
+  // firmware < 0.14.0 doesn't mirror prefs into config.json. This used to
+  // probe `font`, which firmware 0.20.0 dropped along with the setting itself;
+  // `timeout` is the field the control below actually needs, so probing for it
+  // is both correct and self-explanatory.
+  const prefsSupported = hello?.timeout !== undefined;
 
   /** Merge one field into the keypad's config.json and reload the firmware. */
   async function setKeypadField(key: string, value: unknown) {

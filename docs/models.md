@@ -27,7 +27,7 @@ The desktop app adapts to whichever model is connected:
 - **Setup** — the Vision 6 wires the encoder and nav buttons and tests them;
   the Core 6 picks a layer key.
 - **Settings → Keypad** — the Vision 6 exposes screen options (layer band,
-  profile band, font size, auto-return timeout, wheel acceleration); the Core 6
+  profile band, auto-return timeout, wheel acceleration); the Core 6
   shows only the drive-hide (finished-product) toggle.
 
 | Core 6 · Keys | Vision 6 · Keys |

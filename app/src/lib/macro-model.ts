@@ -959,14 +959,13 @@ export function defaultConfig(): DeviceConfig {
     // firmware fell back to both-off — the "settings disappeared" of issue #27.
     show_layer: false,
     show_profile: true,
-    // null passthroughs: device-set model/wiring/language/font/timeout/nav
+    // null passthroughs: device-set model/wiring/language/timeout/nav
     // survive a config rewrite (the firmware keeps its own value on null)
     model: null,
     pins: null,
     nav: null,
     enc_swap: false,
     lang: null,
-    font: null,
     timeout: null,
     layer_names: null,
     screen: { width: screen.width, height: screen.height },

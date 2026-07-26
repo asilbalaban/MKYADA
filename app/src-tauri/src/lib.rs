@@ -813,12 +813,57 @@ fn firmware_update_run(app: &AppHandle, drive: &str) -> Result<Vec<String>, Stri
         );
     }
     let result = firmware_write_all(app, drive, &files, total_bytes, total_files);
+    if result.is_ok() {
+        firmware_prune_obsolete(app, drive);
+    }
     if result.is_err() {
         // release the lock so the keypad goes back to being a keypad
         let mgr = app.state::<DeviceManager>();
         let _ = serial::send(&mgr, &serde_json::json!({"t": "update_abort"}));
     }
     result
+}
+
+/// Files earlier firmware shipped that the current bundle has no use for.
+///
+/// An update only ever writes, so nothing on the board is ever reclaimed. The
+/// framebuffer rewrite (firmware 0.20.0) dropped adafruit_display_text,
+/// adafruit_bitmap_font and both BDFs — about 248KB of a 1MB flash — and
+/// without this they sit there forever on every keypad that upgrades rather
+/// than being flashed fresh. Deletes are best-effort: a board that never had
+/// the file answers "not found", which is the outcome we want anyway.
+const OBSOLETE_FILES: &[&str] = &[
+    "fonts/4x6.bdf",
+    "fonts/spleen-5x8.bdf",
+    "lib/adafruit_display_text/__init__.mpy",
+    "lib/adafruit_display_text/__init__.py",
+    "lib/adafruit_display_text/bitmap_label.mpy",
+    "lib/adafruit_display_text/bitmap_label.py",
+    "lib/adafruit_display_text/label.mpy",
+    "lib/adafruit_display_text/label.py",
+    "lib/adafruit_display_text/outlined_label.mpy",
+    "lib/adafruit_display_text/scrolling_label.mpy",
+    "lib/adafruit_display_text/text_box.mpy",
+    "lib/adafruit_bitmap_font/__init__.mpy",
+    "lib/adafruit_bitmap_font/__init__.py",
+    "lib/adafruit_bitmap_font/bdf.mpy",
+    "lib/adafruit_bitmap_font/bdf.py",
+    "lib/adafruit_bitmap_font/bitmap_font.mpy",
+    "lib/adafruit_bitmap_font/bitmap_font.py",
+    "lib/adafruit_bitmap_font/glyph_cache.mpy",
+    "lib/adafruit_bitmap_font/glyph_cache.py",
+    "lib/adafruit_bitmap_font/pcf.mpy",
+    "lib/adafruit_bitmap_font/ttf.mpy",
+];
+
+fn firmware_prune_obsolete(app: &AppHandle, drive: &str) {
+    for rel in OBSOLETE_FILES {
+        let _ = if serialfs::is_serial(drive) {
+            serialfs::delete_file(&app.state::<DeviceManager>(), rel)
+        } else {
+            drive::delete_file(drive, rel)
+        };
+    }
 }
 
 fn firmware_write_all(

@@ -39,7 +39,16 @@ using MKYADA's own bitmap font, instead of building `displayio` Labels over
 BDF fonts per screen. Measured on the board, ten full repaints now allocate
 48 bytes in total; the font and text libraries the bundle used to carry went
 from 248 KB to 716 bytes, and Turkish letters are drawn rather than folded to
-ASCII. See [the font and screen reference](font.html).
+ASCII. Free heap on a running board went from a median 14 KB to 56 KB. See
+[the font and screen reference](font.html).
+
+**0.21.0** made the repaints incremental: a menu detent or a turn of the speed
+editor redraws only the rows that changed, so displayio's push shrinks with
+them — 104 ms to 51 ms end to end for a detent, measured on the board. The
+`font` field left `config.json` and `hello` in the same release (protocol v10),
+and updating from 0.19.0 or earlier now deletes the BDF fonts and the two
+Adafruit text libraries from the board, reclaiming about 248 KB of its 1 MB
+flash.
 
 ## Screens & controls
 
@@ -75,7 +84,8 @@ Representative renders of the 128×64 OLED (layer A named "Stream"):
   and firmware updates.
   The font-size entry is gone as of 0.20.0: one font ships now, and its
   proportional spacing fits more into a grid cell than the old fixed 4×6
-  did. Old configs keep their `font` value; it is simply ignored.
+  did. The `font` field left `config.json` and `hello` in 0.21.0 (protocol
+  v10); a `font` key in an old config file is ignored.
 - **Host mode** (a per-app profile is active) — key, encoder and button
   events stream to the app. Since fw 0.10.0 the screen shows the active
   profile's six key names as a grid (the app pushes them over serial), with

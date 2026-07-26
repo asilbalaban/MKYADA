@@ -644,7 +644,7 @@ app.proto.send = _orig_send
 app.proto.ser = None
 
 # --- serial "led" op (proto v2): app feedback override --------------------
-check("hello reports proto v9", app.hello()["proto"] == 9, str(app.hello()["proto"]))
+check("hello reports proto v10", app.hello()["proto"] == 10, str(app.hello()["proto"]))
 check("hello reports usb_drive", app.hello()["usb_drive"] == app.config["usb_drive"], str(app.hello()))
 
 # profile path resolution (issue #23): a profile is a full independent config —
@@ -1681,17 +1681,24 @@ i18nmod.set_lang("en")
 vapp.config["lang"] = "en"
 shutil.rmtree(_lang_dir, ignore_errors=True)
 
-# NVM prefs roundtrip (magic 0x4E: font, idle timeout, last layer)
+# NVM prefs roundtrip (magic 0x4F: idle timeout, last layer). The magic moved
+# from 0x4E when the font byte left the layout, so a board written by older
+# firmware is read as unset rather than as garbage shifted by one.
 class FakeNvm(bytearray):
     pass
 
 
 uimod.NVM = FakeNvm(16)
-ui.font_idx, ui.idle_secs = 1, 42
+ui.idle_secs = 42
 vapp.layer = 0
 ui._nvm_save()
-check("nvm magic", uimod.NVM[0] == 0x4E)
-check("nvm roundtrip", ui._nvm_load() == (1, 42, 0), str(ui._nvm_load()))
+check("nvm magic", uimod.NVM[0] == 0x4F)
+check("nvm roundtrip", ui._nvm_load() == (42, 0), str(ui._nvm_load()))
+# An NVM written by pre-0.20.0 firmware must not be trusted: its second byte is
+# a font index, which would land in idle_secs.
+uimod.NVM = FakeNvm(bytes((0x4E, 1, 42, 0)) + bytes(12))
+check("stale nvm layout falls back to defaults",
+      ui._nvm_load() == (uimod.DEFAULT_TIMEOUT, 0), str(ui._nvm_load()))
 uimod.NVM = None
 
 vapp.proto.send = _orig_send

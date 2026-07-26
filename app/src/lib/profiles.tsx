@@ -26,9 +26,10 @@ const SOUND_HOLD_STOP_MS = 1000; // keep in sync with sound.rs HOLD_MS
 
 /** The keypad OLED band's view of the live OBS state: the active scene as
  * text, recording/streaming as flags the firmware renders as blinking (R)/(L)
- * markers. Only ASCII reaches the band — the spleen UI font has no ● or ·
- * glyphs (the old "● REC" prefix rendered as blank space). Empty text when
- * OBS is disconnected so the band falls back to the profile name. */
+ * markers. The flags are sent as flags rather than as a "● REC" prefix so the
+ * device can blink them; MKYADA's own font does draw ●, and Turkish scene
+ * names arrive intact, so nothing here needs folding. Empty text when OBS is
+ * disconnected, so the band falls back to the profile name. */
 function formatObsStatus(s: ObsSnapshot | null): { text: string; rec: boolean; live: boolean } {
   if (!s?.connected) return { text: "", rec: false, live: false };
   return {

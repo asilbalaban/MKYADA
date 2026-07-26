@@ -129,7 +129,6 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
       if (msg.t === "config" && "show_layer" in msg) {
         const c = msg as {
           show_profile?: unknown;
-          font?: unknown;
           timeout?: unknown;
         };
         setHello((h) =>
@@ -138,9 +137,8 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
                 ...h,
                 show_layer: msg.show_layer === true,
                 show_profile: c.show_profile === true,
-                // font/timeout mirror the on-device Settings menu (firmware
+                // timeout mirrors the on-device Settings menu (firmware
                 // ≥ 0.14.0 rewrites config.json + announces it)
-                ...(typeof c.font === "number" ? { font: c.font } : {}),
                 ...(typeof c.timeout === "number" ? { timeout: c.timeout } : {}),
               }
             : h,

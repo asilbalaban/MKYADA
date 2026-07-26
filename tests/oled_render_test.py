@@ -70,6 +70,7 @@ def make_oled():
     o._bar = None
     o._last = None
     o._cells = None
+    o._menu = None
     o._band_txt = None
     o.W, o.H, o.CX = 128, 64, 64
     o.font = oledmod.Font(os.path.join(REPO, "firmware", "fonts", "mkyada.fnt"))
@@ -288,6 +289,99 @@ for k in range(3):
     if col < 128:
         check("cell %d never crosses its divider" % k,
               all(r[col] in "#." for r in rows(o3)))
+
+# ---------- the menu's incremental repaint ----------
+# An incremental screen can be right once and drift as you walk it. The check
+# that matters is not "does one repaint look correct" but "does any route to a
+# state produce the same pixels as drawing that state from scratch".
+i18n.set_lang("en")
+ITEMS = ["Auto return", "Language", "Layer band", "Profile band",
+         "About", "Restart"]
+
+
+def fresh_menu(sel, **kw):
+    d = make_oled()
+    d.show_menu("SETTINGS", ITEMS, sel, **kw)
+    return rows(d)
+
+
+m = make_oled()
+m.show_menu("SETTINGS", ITEMS, 0)
+before = rows(m)
+m.show_menu("SETTINGS", ITEMS, 1)
+changed = sum(1 for a, b in zip(before, rows(m)) if a != b)
+check("a detent repaints two rows, not the screen", changed <= 20,
+      "%d rows changed" % changed)
+
+# walk down past the scroll point, back up, and around again
+for sel in (1, 2, 3, 4, 5, 4, 3, 2, 1, 0, 5, 0):
+    m.show_menu("SETTINGS", ITEMS, sel)
+    check("menu sel=%d matches a fresh draw" % sel, rows(m) == fresh_menu(sel),
+          "incremental repaint drifted")
+
+# chrome changes must force the full redraw, not leave the old one behind
+m.show_menu("SETTINGS", ITEMS, 1)
+m.show_menu("OTHER", ITEMS, 1)
+mt = make_oled()
+mt.show_menu("OTHER", ITEMS, 1)
+check("a new title matches a fresh draw", rows(m) == rows(mt))
+m2 = make_oled()
+m2.show_menu("SETTINGS", ITEMS, 1)
+m2.show_menu("SETTINGS", ITEMS, 1, action="ok")
+m3 = make_oled()
+m3.show_menu("SETTINGS", ITEMS, 1, action="ok")
+check("a new action label matches a fresh draw", rows(m2) == rows(m3))
+m2.show_menu("SETTINGS", ITEMS, 1, marked=1)
+m3 = make_oled()
+m3.show_menu("SETTINGS", ITEMS, 1, marked=1)
+check("a new marked item matches a fresh draw", rows(m2) == rows(m3))
+# leaving the menu and coming back must not reuse the stale row cache
+m2.show_speed("A", 3, 15)
+m2.show_menu("SETTINGS", ITEMS, 1)
+check("returning from another screen matches a fresh draw",
+      rows(m2) == fresh_menu(1))
+
+# ---------- the value editors' incremental repaint ----------
+def fresh_speed(t):
+    d = make_oled()
+    d.show_speed("A", 3, t)
+    return rows(d)
+
+
+v = make_oled()
+v.show_speed("A", 3, 15)
+before = rows(v)
+v.show_speed("A", 3, 16)
+changed = sum(1 for a, b in zip(before, rows(v)) if a != b)
+check("a speed detent repaints the hero band only", changed <= 30,
+      "%d rows changed" % changed)
+for t in (16, 17, 30, 99, 100, 1, 15, 55):
+    v.show_speed("A", 3, t)
+    check("speed t=%d matches a fresh draw" % t, rows(v) == fresh_speed(t),
+          "incremental repaint drifted")
+# the widest hero must not survive under a narrower one
+v.show_speed("A", 3, 100)
+v.show_speed("A", 3, 10)
+check("a shorter hero leaves no ghost", rows(v) == fresh_speed(10))
+# a different key means different chrome, so a full redraw
+v.show_speed("B", 5, 10)
+w = make_oled()
+w.show_speed("B", 5, 10)
+check("a new title matches a fresh draw", rows(v) == rows(w))
+# and leaving the screen must drop the cache
+v.show_menu("SETTINGS", ITEMS, 0)
+v.show_speed("A", 3, 10)
+check("returning to the editor matches a fresh draw", rows(v) == fresh_speed(10))
+# show_adjust shares the helper; its clamp must still hold
+a1 = make_oled()
+a1.show_adjust("SES", "44%", 0.44, action="ok")
+a2 = make_oled()
+a2.show_adjust("SES", "44%", 5.0, action="ok")
+a3 = make_oled()
+a3.show_adjust("SES", "44%", 1.0, action="ok")
+check("adjust clamps frac over 1.0", rows(a2) == rows(a3))
+check("adjust still draws its slider",
+      band_of(a1, oledmod.HBAR_Y, oledmod.HBAR_Y + oledmod.HBAR_H) > 0)
 
 # ---------- goldens for the rest ----------
 i18n.set_lang("en")

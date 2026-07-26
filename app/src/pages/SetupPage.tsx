@@ -49,7 +49,6 @@ export function SetupPage({ onDone }: { onDone: () => void }) {
       ...(hello.show_profile !== undefined ? { show_profile: hello.show_profile } : {}),
       ...(hello.nav !== undefined ? { nav: hello.nav } : {}),
       ...(hello.enc_swap !== undefined ? { enc_swap: hello.enc_swap } : {}),
-      ...(typeof hello.font === "number" ? { font: hello.font } : {}),
       ...(typeof hello.timeout === "number" ? { timeout: hello.timeout } : {}),
     }));
   }, [hello]);

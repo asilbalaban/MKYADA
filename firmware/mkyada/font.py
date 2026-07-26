@@ -117,29 +117,37 @@ class Font:
             return ord(f) - self.first
         return 0x3F - self.first  # '?'
 
+    # Every hot loop below inlines the ASCII case instead of calling index().
+    # On the RP2040 a Python-level call costs ~90us, which was HALF the price
+    # of drawing a character — the glyph blit itself is ~106us. Turkish and
+    # anything foldable still go through index(); they are the rare path.
+
     def measure(self, s):
         """Pixel width of a string. Replaces the old fixed `maxc` character
         count — with proportional advances, 'Kamera' and 'WWWWWW' are not the
         same width, and the grid used to truncate both at 10 characters."""
         w = 0
         adv = self.adv
+        first = self.first
+        last = self.last
         for ch in s:
-            i = self.index(ch)
-            if i >= 0:
-                w += adv[i]
+            c = ord(ch)
+            w += adv[c - first if first <= c <= last else self.index(ch)]
         return w
 
     def fit(self, s, px):
         """The longest prefix of `s` that fits in `px` pixels."""
         w = 0
         adv = self.adv
-        for n, ch in enumerate(s):
-            i = self.index(ch)
-            if i < 0:
-                continue
-            w += adv[i]
+        first = self.first
+        last = self.last
+        n = 0
+        for ch in s:
+            c = ord(ch)
+            w += adv[c - first if first <= c <= last else self.index(ch)]
             if w > px:
                 return s[:n]
+            n += 1
         return s
 
 
@@ -165,7 +173,13 @@ class Fb:
 
     # --- primitives ---
     def clear(self):
-        bitmaptools.fill_region(self.bmp, 0, 0, self.W, self.H, 0)
+        # Bitmap.fill is a memset; bitmaptools.fill_region is a per-pixel C
+        # loop, which on this board is 9.3ms for the full screen against
+        # 0.06ms — 145x, and it was the single largest line item in a repaint.
+        # Measured on the board: fill() marks the whole bitmap dirty just like
+        # fill_region (a push after either takes the same 78.5ms), so nothing
+        # downstream can tell the difference.
+        self.bmp.fill(0)
 
     def rect(self, x, y, w, h, c=1):
         x2 = x + w
@@ -218,11 +232,13 @@ class Fb:
         bw = f.box_w
         bh = f.box_h
         adv = f.adv
+        first = f.first
+        last = f.last
         W = self.W
+        bmp = self.bmp
         for ch in s:
-            i = f.index(ch)
-            if i < 0:
-                continue
+            c = ord(ch)
+            i = c - first if first <= c <= last else f.index(ch)
             a = adv[i]
             if x + a > 0 and x < W:
                 # Narrow the SOURCE rather than relying on blit to clip a
@@ -231,7 +247,7 @@ class Fb:
                 # inside a paint, and a paint that raises leaves the previous
                 # screen frozen on the glass (issue #39's failure mode).
                 w = bw if x + bw <= W else W - x
-                bitmaptools.blit(self.bmp, src, x, y,
+                bitmaptools.blit(bmp, src, x, y,
                                  x1=i * bw, y1=0, x2=i * bw + w, y2=bh,
                                  skip_source_index=skip)
             x += a
@@ -242,8 +258,13 @@ class Fb:
 
         Drawn by expanding lit pixels rather than from a pre-scaled atlas: the
         hero lines are at most a handful of characters and never on a hot path,
-        so a few hundred fill_region calls are cheaper than the ~500 bytes a
-        second atlas would cost forever."""
+        so a few fill_region calls are cheaper than the ~500 bytes a second
+        atlas would cost forever.
+
+        Scanned by ROW, emitting one rect per run of lit pixels. Per-pixel
+        rects meant ~40 fill_region calls for a two-digit hero at ~50us of call
+        overhead each; a glyph's lit pixels come in horizontal runs of 3-5, so
+        this is the same picture for a third of the calls."""
         f = self.font
         if not s:
             return x
@@ -252,14 +273,26 @@ class Fb:
         y -= (7 * scale) // 2
         atlas = f.atlas
         bw = f.box_w
+        bh = f.box_h
+        adv = f.adv
+        first = f.first
+        last = f.last
         for ch in s:
-            i = f.index(ch)
-            if i < 0:
-                continue
+            c = ord(ch)
+            i = c - first if first <= c <= last else f.index(ch)
             gx = i * bw
-            for cx in range(bw):
-                for cy in range(f.box_h):
+            for cy in range(bh):
+                run = 0
+                for cx in range(bw):
                     if atlas[gx + cx, cy]:
-                        self.rect(x + cx * scale, y + cy * scale, scale, scale)
-            x += f.adv[i] * scale
+                        run += 1
+                        continue
+                    if run:
+                        self.rect(x + (cx - run) * scale, y + cy * scale,
+                                  run * scale, scale)
+                        run = 0
+                if run:
+                    self.rect(x + (bw - run) * scale, y + cy * scale,
+                              run * scale, scale)
+            x += adv[i] * scale
         return x

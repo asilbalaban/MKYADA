@@ -20,7 +20,7 @@
 # unless the user deliberately gave PSH its own hold action (then the menu
 # stays reachable via keys mapped to menu actions, or the app).
 #
-# NVM keeps only UI prefs: [magic, font_idx, idle_secs, last_layer].
+# NVM keeps only UI prefs: [magic, idle_secs, last_layer].
 # Macro speeds live in the macro files — single source of truth.
 
 import gc
@@ -48,8 +48,12 @@ from mkyada.oled import fmt_speed
 
 LAYER_NAMES = "abcdefgh"
 
-MAGIC = 0x4E
-NVM_LEN = 4
+# Bumped from 0x4E when the font byte left the layout: a board written by an
+# older firmware holds [magic, font_idx, idle_secs, last_layer], and reading
+# that as the new layout would restore a font index as the idle timeout.
+# A mismatched magic just falls back to defaults, which is the right answer.
+MAGIC = 0x4F
+NVM_LEN = 3
 
 SPEED_MIN_T, SPEED_MAX_T, SPEED_DEF_T = 1, 100, 10
 TMO_MIN, TMO_MAX, DEFAULT_TIMEOUT = 3, 60, 10
@@ -123,18 +127,14 @@ class Ui:
         self.last_enc = self.enc.position
 
         i18n.set_lang(app.config.get("lang"))
-        self.font_idx, self.idle_secs, last_layer = self._nvm_load()
-        # config.json can carry font/timeout (the app-facing mirror). When it
-        # does, it wins over NVM so a value set from the app applies; either
-        # way we publish the resolved values into app.config so hello reports
-        # them without waiting for the first on-device change.
-        cf = app.config.get("font")
-        if isinstance(cf, int):
-            self.font_idx = cf  # kept for wire/NVM compatibility; unused
+        self.idle_secs, last_layer = self._nvm_load()
+        # config.json can carry timeout (the app-facing mirror). When it does,
+        # it wins over NVM so a value set from the app applies; either way we
+        # publish the resolved value into app.config so hello reports it
+        # without waiting for the first on-device change.
         ct = app.config.get("timeout")
         if isinstance(ct, int) and TMO_MIN <= ct <= TMO_MAX:
             self.idle_secs = ct
-        app.config["font"] = self.font_idx
         app.config["timeout"] = self.idle_secs
         self.lang_sel = 0
         self.state = S_HOME
@@ -167,20 +167,19 @@ class Ui:
     # --- NVM prefs ---
     def _nvm_load(self):
         if NVM is not None and len(NVM) >= NVM_LEN and NVM[0] == MAGIC:
-            fi, tmo, lyr = NVM[1], NVM[2], NVM[3]
+            tmo, lyr = NVM[1], NVM[2]
             if not TMO_MIN <= tmo <= TMO_MAX:
                 tmo = DEFAULT_TIMEOUT
             if not 0 <= lyr < len(LAYER_NAMES):
                 lyr = 0
-            return fi, tmo, lyr
-        return 0, DEFAULT_TIMEOUT, 0
+            return tmo, lyr
+        return DEFAULT_TIMEOUT, 0
 
     def _nvm_save(self):
         if NVM is None:
             return
         try:
-            NVM[0:NVM_LEN] = bytes((MAGIC, self.font_idx, self.idle_secs,
-                                    self.app.layer))
+            NVM[0:NVM_LEN] = bytes((MAGIC, self.idle_secs, self.app.layer))
         except Exception:
             pass
 
@@ -561,19 +560,11 @@ class Ui:
 
     def on_reload(self):
         i18n.set_lang(self.app.config.get("lang"))
-        # the app may have changed font/timeout in config.json — apply them
-        changed = False
+        # the app may have changed timeout in config.json — apply it
         ct = self.app.config.get("timeout")
         if isinstance(ct, int) and TMO_MIN <= ct <= TMO_MAX and ct != self.idle_secs:
             self.idle_secs = ct
-            changed = True
-        cf = self.app.config.get("font")
-        if isinstance(cf, int) and cf != self.font_idx:
-            self.font_idx = cf  # mirrored back to the app, not acted on
-            changed = True
-        if changed:
             self._nvm_save()
-        self.app.config["font"] = self.font_idx
         self.app.config["timeout"] = self.idle_secs
         self._labels.clear()
         self._speeds.clear()

@@ -58,7 +58,7 @@ Unlike most DIY macro pads that just remap keys, MKYADA plays back **full record
 **On the Vision 6 (screen model):**
 - **On-device menu system** — a 128×64 OLED shows your six live macro names, a layer picker, a per-macro speed editor (0.1×–10.0×) and a settings menu, all driven by the **EC11 rotary wheel** with BACK/CONFIRM. No app required to read or tune your keypad.
 - **Encoder + nav buttons as macro slots** — the wheel (→ / ←), its push, and BACK/CONFIRM each carry their own assignable action, per layer and per context. Great for volume, scroll/zoom or scene switching.
-- **On-screen bands** — optional strips name the active **layer** and the desktop app's active **per-app profile**; font size and auto-return timeout are adjustable on the device or in the app. See [docs/vision6.md](docs/vision6.md).
+- **On-screen bands** — optional strips name the active **layer** and the desktop app's active **per-app profile**; the auto-return timeout is adjustable on the device or in the app. See [docs/vision6.md](docs/vision6.md).
 
 **In the desktop app (Windows / macOS, Linux planned):**
 - **Point-and-click key setup** — click a key, press the shortcut you want (single keys, combos, text snippets, media keys), save. Live key test shows every physical press.

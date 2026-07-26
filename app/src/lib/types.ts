@@ -26,8 +26,6 @@ export interface Hello {
   show_layer?: boolean;
   /** Vision 6 grid band: show the app-pushed profile label; absent on firmware < 0.9.0 */
   show_profile?: boolean;
-  /** Vision 6 grid font index (0=Small,1=Medium,2=Large); absent on firmware < 0.14.0 */
-  font?: number;
   /** Vision 6 auto-return idle seconds (3–60); absent on firmware < 0.14.0 */
   timeout?: number;
   /** Vision 6 encoder wired backwards (CW/CCW flipped); absent on firmware < 0.14.0 */
@@ -81,9 +79,6 @@ export interface DeviceConfig {
   show_layer?: boolean;
   /** Vision 6: the band shows the app's active profile label — also on the device */
   show_profile?: boolean;
-  /** Vision 6 grid font index (0=Small,1=Medium,2=Large); null = keep the
-   * device's own value. Set from the app or the on-device Settings menu. */
-  font?: number | null;
   /** Vision 6 auto-return idle seconds (3–60); null = keep the device's value */
   timeout?: number | null;
   /** Vision 6 encoder wired backwards — true flips the wheel's CW/CCW */
