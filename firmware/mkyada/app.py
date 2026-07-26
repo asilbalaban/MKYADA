@@ -124,6 +124,10 @@ LAYER_NAMES = "abcdefgh"
 # the extra ack round-trips are ~ms on CDC. Core 6 has the whole heap free.
 FS_CHUNK = 1024 if MODELS[MODEL]["display"] else 8192
 FS_ACK_TIMEOUT_S = 3.0
+# Consecutive MemoryErrors the main loop absorbs (compact + resume) before it
+# gives up and takes the branded reset. A fragmented heap refusing ONE big
+# serial line is normal under load; refusing many in a row is a real leak.
+OOM_RECOVERIES = 20
 
 DEFAULT_CONFIG = {
     "model": None,       # "core6" | "vision6"; null = auto (I2C probe once)
@@ -533,6 +537,13 @@ class App:
                 "show_layer": c["show_layer"], "show_profile": c["show_profile"],
                 "font": c.get("font"), "timeout": c.get("timeout"),
                 "enc_swap": c.get("enc_swap"), "layer_names": c.get("layer_names"),
+                # Biggest raw fs_write chunk this board can digest. A chunk
+                # arrives as ONE base64 line needing a single contiguous heap
+                # block, and the display model's heap is fragmented enough to
+                # refuse 2KB while reporting 13KB free — so it names its own
+                # safe size instead of letting the host discover it by
+                # crashing the transfer. Older apps ignore the field.
+                "fs_chunk": FS_CHUNK,
                 "layer": LAYER_NAMES[self.layer], "mode": self.mode}
 
     def handle_msg(self, msg, in_playback=False):
@@ -710,6 +721,9 @@ class App:
                 self.host_keys = keys
                 self.host_rec = rec
                 self.host_live = live
+                # console telemetry: one line per change, shows exactly what
+                # the app pushed (band bugs are invisible otherwise)
+                print("label:", text, "rec", rec, "live", live)
                 self.ui_call("on_label")
         elif t == "scroll":
             # direct wheel ticks (proto v6): the app drives profile wheel
@@ -1383,27 +1397,47 @@ class App:
 
     # --- main loop ---
     def run(self):
-        try:
-            self.run_loop()
-        except Exception as e:
-            # Finished-product UX: a branded error screen instead of a raw
-            # traceback (which CircuitPython would otherwise paint onto the
-            # OLED once code stops), then a self-heal restart — a transient
-            # failure (e.g. a MemoryError under load) must not leave a dead
-            # keypad, and the console must never own the screen. The hard
-            # reset (vs a soft reload) also disarms the watchdog and re-runs
-            # boot.py, so the retry starts from a fully clean state.
-            print("fatal:", repr(e))
-            if OLED:
-                try:
-                    OLED.show_error(repr(e))
-                except Exception:
-                    pass
-            t0 = time.monotonic()
-            while time.monotonic() - t0 < 5:
-                self.feed()  # keep the watchdog quiet while the error shows
-                time.sleep(0.1)
-            microcontroller.reset()
+        # A MemoryError is a MOMENT, not a broken keypad: the heap is
+        # fragmented right now, and the allocation that failed (usually a
+        # serial line during a macro save) will fit again after a collect.
+        # Resetting for it aborted the transfer AND rebooted the board
+        # mid-save. So: compact, resume the loop, and only fall through to
+        # the branded reset if the failures keep coming (a real leak).
+        oom = 0
+        while True:
+            try:
+                self.run_loop() if oom == 0 else self.spin()
+                return
+            except MemoryError as e:
+                oom += 1
+                gc.collect()
+                print("recovered from", repr(e), "free", _mem_free(),
+                      "count", oom)
+                if oom <= OOM_RECOVERIES:
+                    continue
+                return self.crash(e)
+            except Exception as e:
+                return self.crash(e)
+
+    def crash(self, e):
+        # Finished-product UX: a branded error screen instead of a raw
+        # traceback (which CircuitPython would otherwise paint onto the
+        # OLED once code stops), then a self-heal restart — a transient
+        # failure (e.g. a MemoryError under load) must not leave a dead
+        # keypad, and the console must never own the screen. The hard
+        # reset (vs a soft reload) also disarms the watchdog and re-runs
+        # boot.py, so the retry starts from a fully clean state.
+        print("fatal:", repr(e))
+        if OLED:
+            try:
+                OLED.show_error(repr(e))
+            except Exception:
+                pass
+        t0 = time.monotonic()
+        while time.monotonic() - t0 < 5:
+            self.feed()  # keep the watchdog quiet while the error shows
+            time.sleep(0.1)
+        microcontroller.reset()
 
     def run_loop(self):
         self.led.set(state=ledmod.IDLE, layer=0)
@@ -1420,6 +1454,11 @@ class App:
             except Exception:
                 pass
         self.arm_watchdog()
+        self.spin()
+
+    def spin(self):
+        """The main loop proper. Split from run_loop's one-time setup so an
+        absorbed MemoryError can resume it without re-running boot."""
         while True:
             self.feed()
             now = time.monotonic()
@@ -1480,7 +1519,11 @@ class App:
             # ...and neither must a locked update session
             if self.updating and not self.proto.connected:
                 self.end_update()
-            if not self.updating:
+            # A file transfer needs every contiguous byte it can get: the UI's
+            # repaints allocate in the SAME size class as an incoming chunk,
+            # so hold the screen still until the upload lands. (A save is a
+            # second or two; a crash mid-save costs the whole macro.)
+            if not self.updating and not self.upload:
                 self.ui_call("tick", now)
             self.led.tick()
             # heap trend on the console (~10s cadence): a monotonic decline

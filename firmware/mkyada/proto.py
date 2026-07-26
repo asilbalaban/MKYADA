@@ -38,16 +38,47 @@ class Proto:
         try:
             n = self.ser.in_waiting
             if n:
+                # A file-transfer chunk arrives as one ~1.5-3KB line, and
+                # CircuitPython's GC never compacts: buffering and slicing it
+                # each need ONE contiguous block, which a fragmented heap may
+                # not have even with 13KB "free". Compact before the big
+                # allocation — unguarded, this exact path hard-reset the board
+                # on the first chunk of every recorded-macro save.
+                if n > 256:
+                    gc.collect()
                 self.buf += self.ser.read(n)
-        except Exception:
+        except Exception:  # MemoryError included: the host re-sends
+            gc.collect()
             return msgs
         while True:
             i = self.buf.find(b"\n")
             if i < 0:
                 break
             # CircuitPython bytearrays don't support `del buf[:i]`
-            line = bytes(self.buf[:i]).strip()
-            self.buf = self.buf[i + 1 :]
+            line = None
+            for _ in range(2):  # loop, not a retry inside except (pystack)
+                try:
+                    line = bytes(self.buf[:i]).strip()
+                    self.buf = self.buf[i + 1 :]
+                    break
+                except MemoryError:
+                    gc.collect()
+            if line is None:
+                # Couldn't copy the line out even after compacting. Drop what
+                # we have rather than die — but NAME the op first (only file
+                # transfers are this big, and "t" leads the JSON), so the host
+                # retries with a smaller chunk NOW instead of waiting out its
+                # timeout. A silent drop here is the failure that read as
+                # "macro save failed" with no error anywhere.
+                head = bytes(self.buf[:64])
+                self.buf = bytearray()
+                gc.collect()
+                for op in (b"fs_write", b"fs_read", b"fs_list", b"fs_delete"):
+                    if op in head:
+                        self.send({"t": "err", "re": op.decode(),
+                                   "code": "oom", "msg": "line too big"})
+                        break
+                break
             if line:
                 try:
                     msg = json.loads(line)

@@ -64,9 +64,30 @@ pub fn cancel_requested() -> bool {
 /// The old 9KB chunks (~12KB lines) fit the line buffer (MAX_LINE 16KB) but
 /// MemoryError'd the Vision 6, whose display stack fragments the RP2040
 /// heap — a 12KB contiguous allocation routinely fails there mid-upload.
-/// 2KB (~2.7KB lines) is what the display model reliably digests; the extra
-/// round-trips cost little (stop-and-wait acks are ~ms on CDC).
+/// 2KB (~2.7KB lines) is what the display model digests when its heap is
+/// healthy; the extra round-trips cost little (stop-and-wait acks are ~ms on
+/// CDC). `write_file` halves this down to MIN_CHUNK when a transfer fails,
+/// so a fragmented heap costs round-trips instead of the whole save.
 const CHUNK: usize = 2048;
+/// Floor for the adaptive halving above: a 512B chunk is a ~700B line, small
+/// enough to land in the gaps a churned RP2040 heap still has. Below that the
+/// round-trip count stops being worth it — the device is wedged, not busy.
+const MIN_CHUNK: usize = 512;
+
+/// What the connected board said it can digest (`hello.fs_chunk`, fw 0.19.1+).
+/// The display model answers 1024: measured, 2048 fails outright on its
+/// fragmented heap. Firmware without the field keeps the CHUNK default.
+static DEV_CHUNK: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(CHUNK);
+
+/// Called by the serial reader for every `hello`.
+pub fn note_hello(hello: &Value) {
+    let n = hello
+        .get("fs_chunk")
+        .and_then(Value::as_u64)
+        .map_or(CHUNK, |v| (v as usize).clamp(MIN_CHUNK, CHUNK));
+    DEV_CHUNK.store(n, std::sync::atomic::Ordering::Relaxed);
+    crate::dbg_log!("device fs_chunk: {n}");
+}
 const TIMEOUT: Duration = Duration::from_secs(8);
 
 /// A macro playing on the single-threaded firmware starves the serial link,
@@ -250,13 +271,34 @@ pub fn write_file(
     mut progress: impl FnMut(usize, usize),
 ) -> Result<(), String> {
     let path = rel(path)?;
-    with_recovery(mgr, true, |mgr| write_once(mgr, path, bytes, &mut progress))
+    // Adaptive chunk size, mirroring the device-side fs_read. A chunk reaches
+    // the keypad as ONE base64 line that its heap must hold in a single
+    // CONTIGUOUS block — and CircuitPython never compacts, so a fragmented
+    // heap can refuse 1.4KB while reporting 13KB free. Big chunks stay the
+    // default (fewer round-trips, which matters most on Windows where each
+    // one costs more); a transient failure halves them and starts over rather
+    // than failing the save.
+    let mut size = DEV_CHUNK.load(std::sync::atomic::Ordering::Relaxed);
+    loop {
+        let r = with_recovery(mgr, true, |mgr| {
+            write_once(mgr, path, bytes, size, &mut progress)
+        });
+        match r {
+            Ok(()) => return Ok(()),
+            Err(e) if size > MIN_CHUNK && is_transient(&e) => {
+                size /= 2;
+                crate::dbg_log!("write {path}: {e} -> retrying with {size}B chunks");
+            }
+            Err(e) => return Err(e),
+        }
+    }
 }
 
 fn write_once(
     mgr: &DeviceManager,
     path: &str,
     bytes: &[u8],
+    chunk_size: usize,
     progress: &mut impl FnMut(usize, usize),
 ) -> Result<(), String> {
     let op = Op::begin(mgr)?;
@@ -264,7 +306,7 @@ fn write_once(
     let chunks: Vec<&[u8]> = if bytes.is_empty() {
         vec![&[]]
     } else {
-        bytes.chunks(CHUNK).collect()
+        bytes.chunks(chunk_size).collect()
     };
     let last = chunks.len() - 1;
     progress(0, total);

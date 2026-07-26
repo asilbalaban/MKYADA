@@ -461,6 +461,35 @@ class Oled:
                 self.grid_degraded = True
         self.paint(st["g"])
 
+    def update_band(self, band):
+        """Repaint ONLY the band strip's text on the live grid group, leaving
+        the six cells untouched. The blink markers change twice a second and
+        the OBS scene changes on every switch; driving those through a full
+        show_grid() allocated a whole label set each time — in the same size
+        class as an incoming serial chunk. Returns False if the caller must
+        fall back to a full paint (no persistent group yet / band-less grid)."""
+        st = self._grid
+        if not self.display or not st or not st["banded"] or st["band"] is None:
+            return False
+        b = fold_ascii(band or "")[:21]
+        if st["band"].text == b:
+            return True
+        try:
+            if self.ui_font is not terminalio.FONT:
+                try:  # scene names carry chars outside UI_GLYPHS
+                    self.ui_font.load_glyphs(set(b))
+                except Exception:
+                    pass
+            st["band"].text = b
+            self.display.refresh()
+        except MemoryError:
+            gc.collect()
+            self.grid_degraded = True
+            return False
+        except Exception:
+            return False
+        return True
+
     def _grid_build(self, banded):
         cols, rows = 3, 2
         top = self.BAND_H if banded else 0

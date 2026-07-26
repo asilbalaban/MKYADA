@@ -528,10 +528,23 @@ class Ui:
         return "".join(a + b for a, b in pairs)
 
     def on_label(self):
-        """The app pushed (or cleared) its profile label / key names."""
+        """The app pushed (or cleared) its profile label, key names or live
+        OBS state."""
         if self.state == S_HOST:
             self._draw_host()
-        elif self.state == S_SELECT and self.app.config["show_profile"]:
+        elif self.state == S_SELECT:
+            # Gating this on show_profile alone was issue #37: with only the
+            # LAYER band on, the band still renders the pushed text and the
+            # (R)/(L) markers — but nothing repainted until the next unrelated
+            # redraw, so "R" appeared one action late (or never).
+            cfg = self.app.config
+            if cfg["show_layer"] or cfg["show_profile"]:
+                self._band_repaint()
+
+    def _band_repaint(self):
+        """Update just the band strip (blink markers, live OBS scene). Falls
+        back to a full grid paint when there's no persistent group to poke."""
+        if not self.oled.update_band(self._band()):
             self._draw_grid()
 
     def on_profile(self):
@@ -1527,7 +1540,7 @@ class Ui:
                 and now - self._blink_at > 0.6):
             self._blink_at = now
             self._blink_on = not self._blink_on
-            self._draw_grid()
+            self._band_repaint()
 
     def _select_default(self, now, d, press):
         if d:
