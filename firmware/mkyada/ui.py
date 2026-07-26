@@ -793,7 +793,9 @@ class Ui:
                 return "(%s) %s%s" % (letter, marks, label)
             if nick:
                 return "(%s) %s%s" % (letter, marks, nick)
-            return tr("layer_band") % letter
+            # marks belong here too: a layer with no nickname and no pushed
+            # label still has to be able to show (R)/(L)
+            return marks + (tr("layer_band") % letter)
         return (marks + label) if label else label
 
     def _band_marks(self):

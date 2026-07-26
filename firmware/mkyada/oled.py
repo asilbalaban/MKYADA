@@ -280,6 +280,15 @@ class Oled:
     def paint(self, g):
         if not self.display:
             return
+        # Painting anything that ISN'T the grid means we've left the grid, so
+        # let its persistent group go. Keeping 13 Labels + their glyph tiles
+        # alive behind an unrelated screen is pure fragmentation: with the
+        # Keys-tab test screen up, a 767-byte serial line could not be
+        # allocated even with 10.6KB free — every macro save from that screen
+        # failed. Grid repaints pass the same group, so they still cost nothing.
+        if self._grid is not None and g is not self._grid["g"]:
+            self._grid = None
+            gc.collect()
         if not self._auto_off:
             # first real screen: from here on refreshes are manual, which
             # kills the lazy-refresh lag the demo suffered on first draw
