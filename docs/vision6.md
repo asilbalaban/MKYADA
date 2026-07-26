@@ -32,7 +32,14 @@ A key soldered to a different GPIO is fine — assign it in the app under
 
 Runtime: CircuitPython **10.2.x** (the tier the display stack is validated
 on). The firmware zip / app installer ships every needed library (`lib/`)
-and the OLED fonts (`fonts/`).
+and the screen font (`fonts/mkyada.fnt`, 716 bytes).
+
+Since firmware **0.20.0** the display draws into one resident framebuffer
+using MKYADA's own bitmap font, instead of building `displayio` Labels over
+BDF fonts per screen. Measured on the board, ten full repaints now allocate
+48 bytes in total; the font and text libraries the bundle used to carry went
+from 248 KB to 716 bytes, and Turkish letters are drawn rather than folded to
+ASCII. See [the font and screen reference](font.html).
 
 ## Screens & controls
 
@@ -61,12 +68,14 @@ Representative renders of the 128×64 OLED (layer A named "Stream"):
   the device always agree. 2× plays in half the time, 10× in a tenth.
   If the USB drive is visible (recovery boot) the filesystem is host-owned
   and the editor explains instead of saving.
-- **SETTINGS** — grid font size (Small 4×6 / Medium 5×8 / Large 6 px),
-  auto-return timeout (3–60 s), language, the Layer/Profile band toggles,
-  restart. Font and timeout are stored on the board (NVM); language and the
-  band toggles live in `config.json` (rewritten on-device, like the app
+- **SETTINGS** — auto-return timeout (3–60 s), language, the Layer/Profile
+  band toggles, restart. Timeout is stored on the board (NVM); language and
+  the band toggles live in `config.json` (rewritten on-device, like the app
   does) so the app always shows the same values. All survive power cycles
   and firmware updates.
+  The font-size entry is gone as of 0.20.0: one font ships now, and its
+  proportional spacing fits more into a grid cell than the old fixed 4×6
+  did. Old configs keep their `font` value; it is simply ignored.
 - **Host mode** (a per-app profile is active) — key, encoder and button
   events stream to the app. Since fw 0.10.0 the screen shows the active
   profile's six key names as a grid (the app pushes them over serial), with

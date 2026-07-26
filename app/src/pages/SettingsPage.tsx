@@ -3,7 +3,7 @@ import { getVersion } from "@tauri-apps/api/app";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { AppWindow, Gauge, HardDrive, Layers, Monitor, Moon, Pin, Power, Rocket, Sun, Type, Video } from "lucide-react";
+import { AppWindow, Gauge, HardDrive, Layers, Monitor, Moon, Pin, Power, Rocket, Sun, Video } from "lucide-react";
 import { ipc } from "../lib/ipc";
 import { keysCache } from "../lib/keys-cache";
 import { useDevice } from "../lib/device";
@@ -295,7 +295,9 @@ function KeypadCard() {
   const wheelAccel = useWheelAccel();
   const [bandBusy, setBandBusy] = useState<"show_layer" | "show_profile" | null>(null);
   const [fieldBusy, setFieldBusy] = useState<string | null>(null);
-  // firmware < 0.14.0 doesn't mirror font/timeout into config.json
+  // firmware < 0.14.0 doesn't mirror prefs into config.json. `font` is a
+  // dead setting since firmware 0.20.0 (one font ships now) but it is still
+  // reported, and it stays the cheapest probe for a prefs-capable keypad.
   const prefsSupported = hello?.font !== undefined;
 
   /** Merge one field into the keypad's config.json and reload the firmware. */
@@ -490,34 +492,6 @@ function KeypadCard() {
                   <AppWindow size={14} aria-hidden />
                   {hello?.show_profile ? "On" : "Off"}
                 </Button>
-              )}
-            </div>
-
-            <div className="flex items-center justify-between gap-4">
-              <div className="flex flex-col gap-0.5 text-sm">
-                <span className="text-fg font-medium">Screen font size</span>
-                <span className="text-xs text-fg-faint">
-                  How big the macro names on the keypad's screen are. Larger fits fewer
-                  characters per key. Also changeable on the device (Settings → Font).
-                </span>
-              </div>
-              {!prefsSupported ? (
-                <Badge tone="amber">needs firmware ≥ 0.14.0</Badge>
-              ) : (
-                <div className="flex gap-1.5 shrink-0">
-                  {["Small", "Medium", "Large"].map((label, i) => (
-                    <Button
-                      key={label}
-                      variant={hello?.font === i ? "primary" : "default"}
-                      loading={fieldBusy === "font"}
-                      disabled={!drive || fieldBusy !== null}
-                      onClick={() => void setKeypadField("font", i)}
-                    >
-                      {i === 0 && <Type size={12} aria-hidden />}
-                      {label}
-                    </Button>
-                  ))}
-                </div>
               )}
             </div>
 

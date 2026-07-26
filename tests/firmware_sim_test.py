@@ -80,59 +80,13 @@ sys.modules["neopixel"] = neopixel
 # desktop test can exercise.
 
 
-class FakeGroup(list):
-    def append(self, item):  # noqa: A003 - mirror displayio.Group
-        super().append(item)
+# displayio and bitmaptools are software implementations with real pixel
+# semantics (tests/fakedisplayio.py), shared with tests/oled_render_test.py
+# which renders the screens and diffs them against golden pictures.
+sys.path.insert(0, os.path.join(REPO, "tests"))
+import fakedisplayio  # noqa: E402
 
-
-class FakePalette:
-    def __init__(self, n):
-        self.colors = [0] * n
-
-    def __setitem__(self, i, v):
-        self.colors[i] = v
-
-
-class FakeBitmap:
-    def __init__(self, w, h, n):
-        self.width, self.height = w, h
-
-    def __setitem__(self, xy, v):
-        pass
-
-
-displayio = types.ModuleType("displayio")
-displayio.Group = FakeGroup
-displayio.Palette = FakePalette
-displayio.Bitmap = FakeBitmap
-displayio.TileGrid = lambda *a, **k: ("tilegrid",)
-displayio.release_displays = lambda: None
-sys.modules["displayio"] = displayio
-
-terminalio = types.ModuleType("terminalio")
-terminalio.FONT = object()
-sys.modules["terminalio"] = terminalio
-
-vectorio = types.ModuleType("vectorio")
-vectorio.Rectangle = lambda **k: ("rect", k)
-vectorio.Circle = lambda **k: ("circ", k)
-vectorio.Polygon = lambda **k: ("poly", k)
-sys.modules["vectorio"] = vectorio
-
-
-class FakeLabel:
-    def __init__(self, font, text="", scale=1, color=0xFFFFFF):
-        self.text = text
-        self.anchor_point = None
-        self.anchored_position = None
-
-
-adt = types.ModuleType("adafruit_display_text")
-adt_label = types.ModuleType("adafruit_display_text.label")
-adt_label.Label = FakeLabel
-adt.label = adt_label
-sys.modules["adafruit_display_text"] = adt
-sys.modules["adafruit_display_text.label"] = adt_label
+fakedisplayio.install()
 
 rotaryio = types.ModuleType("rotaryio")
 
@@ -1010,14 +964,28 @@ with open(vpath(2, 0), "w") as f:  # single-line legacy whole-file macro
 
 ui.load_layer(0)
 vlabels = ui.labels(0)
-check("label split from stream header", vlabels[0] == ("volume", "up"), str(vlabels[0]))
+# "volume up" is 35px wide and a cell holds 40, so it now stays on ONE line.
+# The old fixed 10-character cut split it for no reason — that is the
+# proportional font paying for itself.
+check("label split from stream header", vlabels[0] == ("volume up", ""), str(vlabels[0]))
 check("label fallback K3", vlabels[2][0] == "K3", str(vlabels))
 check("speed tenths from stream", ui.speed_tenths(0, 0) == 15)
 check("speed tenths from legacy", ui.speed_tenths(0, 1) == 20)
 
-ui.oled.grid_cpx = 4  # Small font: 10 chars per cell
+# Splitting is by pixels now. The display is headless here (no I2C bus on a
+# desktop) so no font was loaded; attach the real one so these exercise the
+# metrics the device actually uses.
+from mkyada.font import Font as _Font  # noqa: E402
+ui.oled.font = _Font(os.path.join(FFW, "fonts", "mkyada.fnt"))
+ui._labels.clear()
+ui.load_layer(0)
+vlabels = ui.labels(0)
 check("split short stays", ui._split_name("copy") == ("copy", ""))
-check("split at word gap", ui._split_name("switch weapon") == ("switch", "weapon"))
+check("split at word gap", ui._split_name("switch weapon") == ("switch", "weapon"),
+      str(ui._split_name("switch weapon")))
+check("narrow letters pack tighter than wide ones",
+      ui._split_name("lllllllllllll")[1] == ""
+      and ui._split_name("WWWWWWWWWWWWW")[1] != "")
 check("split hard cut", ui._split_name("abcdefghijklmnop") == ("abcdefghij", "klmnop"))
 
 res = ui.persist_speed(0, 0, 30)
@@ -1072,7 +1040,6 @@ check("slot meta tap is play", ui.slots(0)["enc-cw"]["tap"] == ("play",),
       str(ui.slots(0)["enc-cw"]))
 
 # boot goes straight to the active layer's grid, not the layer picker
-ui.oled.load_grid_font = lambda *a, **k: None
 ui.start()
 check("boot lands on grid not home", ui.state == uimod.S_SELECT)
 
@@ -1574,9 +1541,18 @@ check("lang invalid -> en", vapp.config["lang"] == "en")
 _b.open = _real_open
 i18nmod.set_lang("tr")
 check("i18n tr strings", i18nmod.tr("settings") == "AYARLAR"
-      and i18nmod.tr("restart") == "Yeniden Baslat")
-check("i18n tr ascii-safe", all(ord(ch) < 128
-      for tbl in i18nmod.STRINGS.values() for v in tbl.values() for ch in v))
+      and i18nmod.tr("restart") == "Yeniden Başlat")
+# The Turkish table used to be ASCII-folded because the bundled BDF fonts had
+# no Turkish glyphs. It is real Turkish now, so the invariant flips: every
+# character of every string must be one the shipped font actually DRAWS —
+# reaching font.py's fold table would mean a letter silently degrades.
+_f = _Font(os.path.join(FFW, "fonts", "mkyada.fnt"))
+_missing = sorted({ch for tbl in i18nmod.STRINGS.values() for v in tbl.values()
+                   for ch in v
+                   if not (_f.first <= ord(ch) <= _f.last or ord(ch) in _f.extra)}
+                  | {ch for d in i18nmod.LANG_DESC for ch in d
+                     if not (_f.first <= ord(ch) <= _f.last or ord(ch) in _f.extra)})
+check("every UI string is drawable by the shipped font", not _missing, str(_missing))
 i18nmod.set_lang("en")
 check("i18n back to en", i18nmod.tr("settings") == "SETTINGS")
 check("i18n unknown key echoes", i18nmod.tr("nope-key") == "nope-key")

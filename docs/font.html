@@ -693,9 +693,11 @@
     HBAR_H: 5,
   };
 
-  // Real device strings (firmware/mkyada/i18n.py), with the diacritics the
-  // font can finally render — the table is ASCII today only because the old
-  // BDF fonts had no Turkish glyphs.
+  // Real device strings, kept in step with firmware/mkyada/i18n.py — which
+  // carries these exact diacritics since firmware 0.20.0, when the device
+  // stopped folding Turkish to ASCII for want of glyphs in the old BDF fonts.
+  // tests/oled_render_test.py fails if this page's layout drifts from the
+  // firmware's, so what you see here is what the glass shows.
   const STR = {
     tr: {
       loading: "yükleniyor", back: "< geri", save: "kaydet", select: "seç",

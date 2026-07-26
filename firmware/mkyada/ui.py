@@ -44,7 +44,7 @@ except Exception:
 from mkyada import i18n
 from mkyada.i18n import tr
 from mkyada.models import MODELS, UI_SLOTS
-from mkyada.oled import FONTS, FONT_DESC, DEFAULT_FONT_IDX, fmt_speed
+from mkyada.oled import fmt_speed
 
 LAYER_NAMES = "abcdefgh"
 
@@ -65,8 +65,8 @@ ESC_HOLD_S = 1.2
 # `menu` before giving up and showing the "app required" toast
 CTX_WAIT_S = 1.5
 
-(S_HOME, S_SELECT, S_SPEED, S_SAVED, S_SET_MENU, S_FONT, S_TIMEOUT,
- S_PLAYING, S_HOST, S_TOAST, S_LANG, S_TEST, S_ABOUT, S_CTX) = range(14)
+(S_HOME, S_SELECT, S_SPEED, S_SAVED, S_SET_MENU, S_TIMEOUT,
+ S_PLAYING, S_HOST, S_TOAST, S_LANG, S_TEST, S_ABOUT, S_CTX) = range(13)
 
 # media usages the wheel treats as a "turn to adjust" knob rather than a
 # single transport key (see _enter_ctx). Volume rotates up/down, CONFIRM mutes.
@@ -95,8 +95,8 @@ MENU_LABEL = {"layer_next": "Next layer", "layer_prev": "Prev layer",
 # "do it once"). Matches the key-logic hold default.
 MENU_HOLD_S = 0.4
 
-(SET_FONT, SET_TMO, SET_LANG, SET_BAND_LAYER, SET_BAND_PROFILE,
- SET_ABOUT, SET_REBOOT) = range(7)
+(SET_TMO, SET_LANG, SET_BAND_LAYER, SET_BAND_PROFILE,
+ SET_ABOUT, SET_REBOOT) = range(6)
 
 SAVED_DWELL_S = 1.1
 TOAST_DWELL_S = 1.6
@@ -129,8 +129,8 @@ class Ui:
         # way we publish the resolved values into app.config so hello reports
         # them without waiting for the first on-device change.
         cf = app.config.get("font")
-        if isinstance(cf, int) and 0 <= cf < len(FONTS):
-            self.font_idx = cf
+        if isinstance(cf, int):
+            self.font_idx = cf  # kept for wire/NVM compatibility; unused
         ct = app.config.get("timeout")
         if isinstance(ct, int) and TMO_MIN <= ct <= TMO_MAX:
             self.idle_secs = ct
@@ -144,7 +144,6 @@ class Ui:
         self.sel_mode = False  # temporary default-nav mode on a custom grid
         self.speed_t = SPEED_DEF_T
         self.set_menu_sel = 0
-        self.font_sel = 0
         self.tmo_val = self.idle_secs
         self.saved_at = 0.0
         self.toast_at = 0.0
@@ -152,7 +151,6 @@ class Ui:
         self.activity_at = time.monotonic()
         self.playing_cell = None
         self.ctx = None  # active context-menu (S_CTX) descriptor
-        self._degraded_at = 0  # last degraded-grid repair repaint
         self._blink_at = 0  # last (R)/(L) band-marker blink flip
         self._blink_on = True
         self.sysvol = None  # live system output volume % pushed by the app
@@ -170,14 +168,12 @@ class Ui:
     def _nvm_load(self):
         if NVM is not None and len(NVM) >= NVM_LEN and NVM[0] == MAGIC:
             fi, tmo, lyr = NVM[1], NVM[2], NVM[3]
-            if not 0 <= fi < len(FONTS):
-                fi = DEFAULT_FONT_IDX
             if not TMO_MIN <= tmo <= TMO_MAX:
                 tmo = DEFAULT_TIMEOUT
             if not 0 <= lyr < len(LAYER_NAMES):
                 lyr = 0
             return fi, tmo, lyr
-        return DEFAULT_FONT_IDX, DEFAULT_TIMEOUT, 0
+        return 0, DEFAULT_TIMEOUT, 0
 
     def _nvm_save(self):
         if NVM is None:
@@ -278,7 +274,7 @@ class Ui:
 
     def _set_items(self):
         cfg = self.app.config
-        return (tr("font"), tr("auto_return"), tr("language"),
+        return (tr("auto_return"), tr("language"),
                 "%s: %s" % (tr("show_layer"),
                             tr("on") if cfg["show_layer"] else tr("off")),
                 "%s: %s" % (tr("show_profile"),
@@ -287,15 +283,7 @@ class Ui:
                 tr("restart"))
 
     def _split_name(self, name):
-        cw = 128 // 3
-        maxc = (cw - 2) // self.oled.grid_cpx
-        name = name.strip()
-        if len(name) <= maxc:
-            return (name, "")
-        cut = name.rfind(" ", 0, maxc + 1)
-        if cut <= 0:
-            return (name[:maxc], name[maxc:maxc * 2])
-        return (name[:cut], name[cut + 1:])
+        return self.oled.split_name(name)
 
     def _exists(self, path):
         try:
@@ -313,9 +301,7 @@ class Ui:
             self._kinds[(l, k - 1)] = (kind, sub)
             pair = self._split_name(name or ("K%d" % k))
             labels.append(pair)
-            chars |= set(pair[0]) | set(pair[1])
         self._labels[l] = labels
-        self.oled.ensure_glyphs("".join(chars))
         slots = {}
         for s in UI_SLOTS:
             p = self.app.slot_path(s, l)
@@ -499,14 +485,6 @@ class Ui:
         # (and every layer's glyphs, in one font pass) keeps the long-lived
         # objects low and the rest of the heap in one piece.
         n = self.app.config["layer_count"]
-        chars = ""
-        try:
-            for i in range(n):
-                chars += self._glyphs_for(i)
-        except MemoryError:
-            gc.collect()  # boot must survive; missing glyphs load lazily
-        self.oled.load_grid_font(self.font_idx, chars or self._glyphs_for(l))
-        self._labels.clear()  # re-split with the real font metrics
         try:
             for i in range(n):
                 self.labels(i)
@@ -522,10 +500,6 @@ class Ui:
         self.state = S_SELECT
         self.activity_at = time.monotonic()
         self._draw_grid()
-
-    def _glyphs_for(self, l):
-        pairs = self.labels(l)
-        return "".join(a + b for a, b in pairs)
 
     def on_label(self):
         """The app pushed (or cleared) its profile label, key names or live
@@ -573,8 +547,6 @@ class Ui:
             name = keys[i] if i < len(keys) and keys[i] else "K%d" % (i + 1)
             pair = self._split_name(name)
             labels.append(pair)
-            chars |= set(pair[0]) | set(pair[1])
-        self.oled.ensure_glyphs("".join(chars))
         self.oled.show_grid(labels, None, False, band=self._band())
 
     def on_layer(self):
@@ -596,10 +568,8 @@ class Ui:
             self.idle_secs = ct
             changed = True
         cf = self.app.config.get("font")
-        if isinstance(cf, int) and 0 <= cf < len(FONTS) and cf != self.font_idx:
-            self.font_idx = cf
-            self.oled.load_grid_font(self.font_idx,
-                                     self._glyphs_for(self.app.layer))
+        if isinstance(cf, int) and cf != self.font_idx:
+            self.font_idx = cf  # mirrored back to the app, not acted on
             changed = True
         if changed:
             self._nvm_save()
@@ -823,8 +793,6 @@ class Ui:
         if v == self.sysvol:
             return
         self.sysvol = v
-        if v is not None:
-            self.oled.ensure_glyphs("%0123456789")
         if self.state == S_SELECT:
             self._draw_grid()
 
@@ -1374,8 +1342,6 @@ class Ui:
                 self._enter_grid()
         elif self.state == S_SET_MENU:
             self._st_set_menu(now, d, press)
-        elif self.state == S_FONT:
-            self._st_font(now, d, press)
         elif self.state == S_TIMEOUT:
             self._st_timeout(now, d, press)
         elif self.state == S_LANG:
@@ -1526,13 +1492,6 @@ class Ui:
                 and now - self.activity_at > self.idle_secs):
             self.sel_mode = False  # back to the customized resting grid
             self._draw_grid()
-        # Self-healing labels: a paint under memory pressure may have skipped
-        # a cell ("6. kutu önce gözüküyor sonra kayboluyor"). Once things calm
-        # down (~1s later), quietly repaint so no label stays missing.
-        if (self.oled.grid_degraded and not d and press is None
-                and now - self._degraded_at > 1.0):
-            self._degraded_at = now
-            self._draw_grid()
         # Blink the (R)/(L) OBS markers in the band. Cheap since the grid
         # group is persistent: this repaint only swaps the band label text.
         cfg = self.app.config
@@ -1599,12 +1558,7 @@ class Ui:
                                       0, len(self._set_items()) - 1)
             self.oled.show_menu(tr("settings"), self._set_items(), self.set_menu_sel)
         if press in (K_PSH, K_CONFIRM):
-            if self.set_menu_sel == SET_FONT:
-                self.font_sel = self.font_idx
-                self.state = S_FONT
-                self.oled.show_menu(tr("font_title"), FONT_DESC,
-                                    self.font_sel, marked=self.font_idx)
-            elif self.set_menu_sel == SET_TMO:
+            if self.set_menu_sel == SET_TMO:
                 self.tmo_val = self.idle_secs
                 self.last_move = 0.0
                 self.state = S_TIMEOUT
@@ -1650,32 +1604,6 @@ class Ui:
             self.state = S_SET_MENU
             self.oled.show_menu(tr("settings"), self._set_items(),
                                 self.set_menu_sel)
-
-    def _st_font(self, now, d, press):
-        self._custom_input(now, d, press, self.ctx_slots("menu"),
-                           self._font_default)
-        if not d and press is None and now - self.activity_at > self.idle_secs:
-            self._enter_grid()
-
-    def _font_default(self, now, d, press):
-        if d:
-            self.font_sel = clamp(self.font_sel + (1 if d > 0 else -1),
-                                  0, len(FONTS) - 1)
-            self.oled.show_menu(tr("font_title"), FONT_DESC, self.font_sel,
-                                marked=self.font_idx)
-        if press in (K_PSH, K_CONFIRM):
-            self.font_idx = self.font_sel
-            self.oled.load_grid_font(self.font_idx,
-                                     self._glyphs_for(self.app.layer))
-            self._labels.clear()  # re-split for the new char width
-            self._nvm_save()
-            # mirror into config.json so a connected app sees the choice
-            # (best-effort: NVM already holds it; ignore a read-only drive)
-            self.persist_cfg({"font": self.font_idx})
-            self._enter_grid()
-        elif press == K_BACK:
-            self.state = S_SET_MENU
-            self.oled.show_menu(tr("settings"), self._set_items(), self.set_menu_sel)
 
     def persist_cfg(self, updates):
         """Merge updates into config.json (and the live config) so the app

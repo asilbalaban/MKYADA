@@ -613,12 +613,6 @@ class App:
             # silent for UPDATE_IDLE_ABORT_S and the keypad unlocks itself).
             self.stop_pin_watch()
             self.close_upload(discard=True)
-            # The BDF fonts hold /fonts/*.bdf open all runtime; the update is
-            # about to overwrite them and FAT can't replace an open file, so
-            # the transfer used to die at the open font (spleen). Drop the
-            # handles first — the update screen falls back to the built-in font.
-            if OLED:
-                OLED.release_fonts()
             self.updating = True
             try:
                 self.update_total = max(0, int(msg.get("bytes") or 0))

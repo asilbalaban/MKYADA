@@ -17,6 +17,10 @@ jobs:
         run: python3 -m py_compile firmware/boot.py firmware/code.py firmware/mkyada/*.py
       - name: Firmware simulation tests
         run: python3 tests/firmware_sim_test.py
+      # Renders all 19 OLED screens into a real 128x64 buffer and diffs them
+      # against tests/golden/*.txt. Regenerate deliberately with --bless.
+      - name: OLED render + golden-image tests
+        run: python3 tests/oled_render_test.py
 
   app:
     runs-on: ubuntu-latest

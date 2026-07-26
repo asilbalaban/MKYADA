@@ -1,76 +1,44 @@
 # Vision 6 display layer: every screen the SH1106 can show, and nothing else.
 # Pure presentation — state lives in mkyada/ui.py, which calls these with
-# plain data. Ported from hardware/oled-bringup/device/demo_h.py.
+# plain data.
+#
+# Everything is drawn into ONE resident framebuffer (mkyada/font.py) that is
+# allocated at boot and never rebuilt. There are no Groups, no Labels and no
+# BDF fonts: the previous design built a fresh displayio object tree per
+# screen, and because CircuitPython's GC never compacts, that churn was the
+# fragmentation source behind failed macro saves, the wedged menu wheel and
+# the blinking grid labels. Measured on the board: ten full repaints now
+# allocate 48 bytes total.
 #
 # A broken or absent display must never brick the keypad: init retries a few
-# times, then the instance goes "headless" and every show_* is a no-op.
+# times, then the instance goes "headless" and every show_* is a no-op. A
+# missing/corrupt font file takes the same path — keys keep working.
 
-import gc
 import time
 
 import displayio
-import terminalio
-import vectorio
-from adafruit_display_text import label
 
+from mkyada.font import Fb, Font
 from mkyada.i18n import tr
 
-try:
-    from adafruit_bitmap_font import bitmap_font
-except ImportError:
-    bitmap_font = None
-
-# Grid font sizes, picked in Settings > Font. char width decides how many
-# characters fit per grid cell: (cell_w - 2) // cpx -> 10 / 8 / 6.
-FONTS = (("Small", "/fonts/4x6.bdf"),
-         ("Medium", "/fonts/spleen-5x8.bdf"),
-         ("Large", None))  # None -> built-in terminalio
-FONT_DESC = ("Small  4x6", "Medium 5x8", "Large  6px")
-DEFAULT_FONT_IDX = 0
-
-SPLEEN = "/fonts/spleen-5x8.bdf"
-UI_GLYPHS = "Mgpy0123456789.xds<> abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ%"
-
-# Grid fonts that actually render Turkish glyphs (real, non-blank bitmaps). Only
-# the 4x6 font qualifies today; text on any other font is folded to ASCII.
-FULL_TURKISH_FONTS = ("/fonts/4x6.bdf",)
-
+FONT_PATH = "/fonts/mkyada.fnt"
 INIT_TRIES = 3
 
-WHITE = displayio.Palette(1)
-WHITE[0] = 0xFFFFFF
-BLACK = displayio.Palette(1)
-BLACK[0] = 0x000000
-
-# Turkish letters and their ASCII fallback. Only the 4x6 font ships real
-# Turkish glyphs; spleen's Turkish glyphs are blank bitmaps (ç ö ü) or absent
-# (ğ ı İ ş), and the built-in Large font is ASCII. So Turkish is kept as-is on
-# the 4x6 font and folded to ASCII on every other font (see FULL_TURKISH_FONTS).
-_TR_FOLD = {
-    "ç": "c", "Ç": "C",  # ç Ç
-    "ğ": "g", "Ğ": "G",  # ğ Ğ
-    "ı": "i", "İ": "I",  # ı İ
-    "ö": "o", "Ö": "O",  # ö Ö
-    "ş": "s", "Ş": "S",  # ş Ş
-    "ü": "u", "Ü": "U",  # ü Ü
-}
-
-
-def fold_ascii(s, keep_turkish=False):
-    """Transliterate Turkish letters to ASCII. keep_turkish=True leaves them
-    as-is — used only for the one font that ships real Turkish glyphs. Every
-    other font either has blank glyphs for them (spleen) or is ASCII (the
-    built-in Large font), where an un-folded Turkish letter renders as a
-    missing/dropped character, so it must be folded."""
-    if not s or keep_turkish:
-        return s
-    out = None  # copy lazily, only if something actually needs folding
-    for i, ch in enumerate(s):
-        if ch in _TR_FOLD:
-            if out is None:
-                out = list(s)
-            out[i] = _TR_FOLD[ch]
-    return "".join(out) if out is not None else s
+# Layout, re-derived for the 5x8 font. The old numbers were sized around a 6px
+# built-in font plus Label padding; the glyph box is 8px tall with the caps in
+# rows 0..6, so the bars lost 2px each and the menu rows 2px — which is exactly
+# what buys the fourth visible menu row.
+BAR_H = 11        # inverted title strip
+BAR_Y = 5         # cap-centre of the title text
+BOT_SEP = 53      # hairline above the bottom bar
+BOT_Y = 58        # cap-centre of the bottom bar text
+HBAR_Y = 41      # value slider (same y the design viewer shows)
+HBAR_H = 5
+ROW_H = 10        # menu row pitch
+# Cap-centre of the first menu row. Four rows of 10px start at y=11 (just under
+# the bar) and the last one ends at 50, two rows clear of the hairline — the
+# whole reason MENU_VIS could go from three rows to four.
+MENU_TOP = 15
 
 
 def fmt_speed(t):
@@ -82,20 +50,18 @@ def fmt_hero(t):
     return ("%d" % v) if v >= 10 else ("%.1f" % v)
 
 
-def _rect(x, y, w, h, pal=WHITE):
-    return vectorio.Rectangle(pixel_shader=pal, width=max(1, w),
-                              height=max(1, h), x=x, y=y)
-
-
-def _circ(x, y, r, pal=WHITE):
-    return vectorio.Circle(pixel_shader=pal, radius=r, x=x, y=y)
-
-
 class Oled:
+    BAND_H = 10   # inverted status strip over the grid (show_layer/show_profile)
+    MENU_VIS = 4  # rows that fit between the top and bottom bars
+
     def __init__(self, cfg):
         self.display = None
-        self._bar = None  # boot progress bar bitmap
-        self._auto_off = False
+        self.fb = None
+        self.font = None
+        self._bar = None   # (x, y, w, h) of the boot/update progress bar
+        self._last = None  # key of the screen currently on the glass
+        self._cells = None # per-cell (line1, line2, inverted) cache
+        self._band_txt = None
         for _ in range(INIT_TRIES):
             try:
                 import board
@@ -111,6 +77,10 @@ class Oled:
                     bus, width=cfg["width"], height=cfg["height"],
                     colstart=cfg.get("colstart", 2))
                 d.root_group = displayio.Group()  # console never shows
+                # Refreshes are manual from the very first frame. The old code
+                # switched auto_refresh off on the first real screen, which
+                # left the boot splash refreshing on displayio's own schedule.
+                d.auto_refresh = False
                 self.display = d
                 break
             except Exception as e:
@@ -119,605 +89,377 @@ class Oled:
         self.W = self.display.width if self.display else 128
         self.H = self.display.height if self.display else 64
         self.CX = self.W // 2
-        self._font_cache = {}
-        self._grid = None  # persistent grid group, built on first show_grid
-        # last grid paint dropped a cell label (or failed whole) under memory
-        # pressure — the UI repaints it once the heap has recovered
-        self.grid_degraded = False
-        self.grid_font = terminalio.FONT
-        self.grid_cpx = 6
-        self.grid_tr_ok = False  # grid font renders real Turkish glyphs?
-        self.font_idx = 2
-        self.hero_font = terminalio.FONT
-        self.hero_scale = 3
-        self.ui_font = terminalio.FONT
         if self.display:
-            self._load_ui_fonts()
+            try:
+                self.font = Font(FONT_PATH)
+                self.fb = Fb(self.W, self.H, self.font)
+                self.display.root_group = self.fb.group
+            except Exception as e:
+                # No font means no text, and a screen that can only draw
+                # rectangles is worse than none: fall back to headless so the
+                # keypad still plays macros and the app can reflash the font.
+                print("font load failed:", e)
+                self.display = None
+                self.fb = None
 
     @property
     def ok(self):
         return self.display is not None
 
-    # --- fonts ---
-    def _bdf(self, path, glyphs):
-        f = self._font_cache.get(path)
+    def split_name(self, name, cols=3):
+        """Break a macro name into the (line1, line2) a grid cell shows.
+
+        Splitting is by PIXELS, not characters. The old code cut every name at
+        a fixed count — 10 for the 4x6 font — which was wrong in both
+        directions: 'IIIIIIIIII' left half the cell empty and 'WWWWWWWWWW'
+        ran over its divider."""
+        name = name.strip()
+        f = self.font
         if f is None:
-            f = bitmap_font.load_font(path)
-            f.load_glyphs(set(glyphs) | set("Mgpy"))
-            label.Label(f, text="Mg")  # warm the ascent/descent math
-            self._font_cache[path] = f
-        else:
-            f.load_glyphs(set(glyphs))
-        gc.collect()  # font rasterization litters the heap
-        return f
+            # Headless (no display, so no font was loaded). ui.py still splits
+            # names for its label cache, so answer with the old fixed cut
+            # rather than raising into the key-handling path.
+            return (name[:10], name[10:20]) if len(name) > 10 else (name, "")
+        cell = self.W // cols - 2
+        if f.measure(name) <= cell:
+            return (name, "")
+        # Prefer breaking on a space, so "Stop recording" stacks as two words
+        # rather than mid-word.
+        head = f.fit(name, cell)
+        cut = head.rfind(" ")
+        if cut > 0:
+            return (name[:cut], f.fit(name[cut + 1:], cell))
+        return (head, f.fit(name[len(head):], cell))
 
-    def _load_ui_fonts(self):
-        if not bitmap_font:
-            return
-        try:
-            f = self._bdf(SPLEEN, UI_GLYPHS)
-            self.hero_font, self.hero_scale = f, 2
-            self.ui_font = f
-        except Exception as e:
-            print("ui font missing:", e)
-
-    def release_fonts(self):
-        """Close every loaded BDF font's file handle and fall back to the
-        built-in font. adafruit_bitmap_font keeps a BDF's file OPEN for the
-        whole runtime (glyphs rasterize lazily from disk), so /fonts/*.bdf are
-        live handles. A firmware update overwrites those exact files, and FAT
-        can't os.remove/rename a file that's still open — the transfer died at
-        the open font (spleen, the ui font). Dropping the handles here lets the
-        fonts be replaced; the update screen just renders in terminalio, and
-        the board reboots into the new fonts when the update ends."""
-        for f in self._font_cache.values():
-            try:
-                f.file.close()
-            except Exception:
-                pass
-        self._font_cache = {}
-        self._grid = None  # its Labels reference the dropped fonts
-        self.grid_font, self.grid_cpx, self.grid_tr_ok = terminalio.FONT, 6, False
-        self.hero_font, self.hero_scale = terminalio.FONT, 3
-        self.ui_font = terminalio.FONT
-
-    def load_grid_font(self, idx, glyphs=""):
-        """Apply grid font #idx; glyphs = every character the labels use
-        (BDF fonts rasterize lazily, so preload exactly what's needed)."""
-        self.font_idx = idx
-        _name, path = FONTS[idx]
-        if path is None or not bitmap_font:
-            self.grid_font, self.grid_cpx = terminalio.FONT, 6
-            self.grid_tr_ok = False
-            return
-        try:
-            f = self._bdf(path, glyphs)
-            self.grid_font = f
-            self.grid_cpx = f.get_bounding_box()[0]
-            self.grid_tr_ok = path in FULL_TURKISH_FONTS
-        except Exception as e:
-            print("grid font missing:", path, e)
-            self.grid_font, self.grid_cpx = terminalio.FONT, 6
-            self.grid_tr_ok = False
-
-    def ensure_glyphs(self, text):
-        """Preload label characters after labels change on the fly."""
-        f = self.grid_font
-        text = fold_ascii(text, self.grid_tr_ok)
-        if f is not terminalio.FONT and text:
-            try:
-                f.load_glyphs(set(text))
-            except Exception:
-                pass
-
-    # --- draw helpers ---
-    def _txt(self, s, x, y, scale=1, color=0xFFFFFF, anchor=(0.5, 0.5), font=None):
-        # _txt always draws with the UI/built-in fonts, which don't render
-        # Turkish — so it always folds.
-        l = label.Label(font or terminalio.FONT, text=fold_ascii(s), scale=scale, color=color)
-        l.anchor_point = anchor
-        l.anchored_position = (x, y)
-        return l
-
-    def _gtxt(self, s, x, y, color=0xFFFFFF):
-        # the grid font may render Turkish (4x6); fold only when it can't
-        l = label.Label(self.grid_font, text=fold_ascii(s, self.grid_tr_ok), color=color)
-        l.anchor_point = (0.5, 0.5)
-        l.anchored_position = (x, y)
-        return l
-
-    def _bold(self, g, s, x, y, scale=1, font=None):
-        cx = x + scale // 2
-        for dx in (-1, 0, 1):
-            g.append(self._txt(s, cx + dx, y, scale=scale, font=font))
-
-    def _top_bar(self, g, title, hint=None):
+    # --- chrome ---
+    def _top_bar(self, title, hint=None):
         """Inverted title strip. `hint` rides at its right edge — that's where
         the third gesture ("hold: assign") lives, because three labels in the
-        13px bottom bar ran together into one unreadable smear (issue #36).
-        Up here the title is left-aligned instead of centred, so the two never
+        bottom bar ran together into one unreadable smear (issue #36). Up here
+        the title is left-aligned instead of centred, so the two never
         collide."""
-        g.append(_rect(0, 0, self.W, 13))
+        fb = self.fb
+        fb.rect(0, 0, self.W, BAR_H)
         if hint:
-            g.append(self._txt(title, 2, 6, color=0x000000, anchor=(0.0, 0.5)))
-            g.append(self._txt(hint, self.W - 2, 6, color=0x000000,
-                               anchor=(1.0, 0.5), font=self.ui_font))
+            fb.text(title, 2, BAR_Y, anchor=0.0, invert=True)
+            fb.text(hint, self.W - 2, BAR_Y, anchor=1.0, invert=True)
         else:
-            g.append(self._txt(title, self.CX, 6, color=0x000000))
+            fb.text(title, self.CX, BAR_Y, invert=True)
 
-    def _bottom_bar(self, g, action=None, back=True):
+    def _bottom_bar(self, action=None, back=True):
         """Two slots only: BACK on the left, the confirming action on the
         right. Anything else belongs in the top bar's hint (issue #36)."""
-        y = self.H - 13
-        g.append(_rect(0, y, self.W, 1))
+        self.fb.hline(0, BOT_SEP, self.W)
         if back:
-            g.append(self._txt(tr("back"), 2, self.H - 6, anchor=(0.0, 0.5),
-                               font=self.ui_font))
+            self.fb.text(tr("back"), 2, BOT_Y, anchor=0.0)
         if action:
-            g.append(self._txt(action, self.W - 2, self.H - 6, anchor=(1.0, 0.5),
-                               font=self.ui_font))
+            self.fb.text(action, self.W - 2, BOT_Y, anchor=1.0)
 
-    def _hbar(self, g, frac):
-        bx, by, bw, bh = 8, 39, self.W - 16, 4
-        g.append(_rect(bx, by + bh // 2, bw, 1))  # thin track
-        g.append(_rect(bx, by, int(frac * bw), bh))
+    def _hbar(self, frac):
+        bx, bw = 8, self.W - 16
+        self.fb.hline(bx, HBAR_Y + HBAR_H // 2, bw)          # thin track
+        self.fb.rect(bx, HBAR_Y, int(frac * bw), HBAR_H)
 
-    def _check(self, g, cx, cy, s):
-        bmp = displayio.Bitmap(s, s, 2)
-        pal = displayio.Palette(2)
-        pal[0] = 0x000000
-        pal[1] = 0xFFFFFF
+    def _dot(self, cx, cy, big):
+        """Position dot on the layer picker. The 5x5 'big' form is three rects
+        rather than a circle primitive — vectorio.Circle cost an object per
+        paint and there are up to nine of them."""
+        if big:
+            self.fb.rect(cx - 1, cy - 2, 3, 5)
+            self.fb.rect(cx - 2, cy - 1, 5, 3)
+        else:
+            self.fb.rect(cx, cy, 1, 1)
 
-        def line(x0, y0, x1, y1, th):
-            steps = max(abs(x1 - x0), abs(y1 - y0), 1)
-            for i in range(steps + 1):
-                x = x0 + (x1 - x0) * i // steps
-                y = y0 + (y1 - y0) * i // steps
-                for ox in range(th):
-                    for oy in range(th):
-                        px, py = x + ox, y + oy
-                        if 0 <= px < s and 0 <= py < s:
-                            bmp[px, py] = 1
-
-        line(int(s * 0.12), int(s * 0.52), int(s * 0.40), int(s * 0.78), 2)
-        line(int(s * 0.40), int(s * 0.78), int(s * 0.86), int(s * 0.22), 2)
-        g.append(displayio.TileGrid(bmp, pixel_shader=pal,
-                                    x=cx - s // 2, y=cy - s // 2))
-
-    def paint(self, g):
+    def paint(self, key=None):
+        """Push the framebuffer. `key` names the screen so the next call knows
+        whether it may repaint incrementally."""
         if not self.display:
             return
-        # Painting anything that ISN'T the grid means we've left the grid, so
-        # let its persistent group go. Keeping 13 Labels + their glyph tiles
-        # alive behind an unrelated screen is pure fragmentation: with the
-        # Keys-tab test screen up, a 767-byte serial line could not be
-        # allocated even with 10.6KB free — every macro save from that screen
-        # failed. Grid repaints pass the same group, so they still cost nothing.
-        if self._grid is not None and g is not self._grid["g"]:
-            self._grid = None
-            gc.collect()
-        if not self._auto_off:
-            # first real screen: from here on refreshes are manual, which
-            # kills the lazy-refresh lag the demo suffered on first draw
-            self.display.auto_refresh = False
-            self._auto_off = True
-        self.display.root_group = g
+        self._last = key
         try:
             self.display.refresh()
         except Exception:
             pass
-        gc.collect()  # drop the previous screen's group right away —
-        # displayio churn is the main fragmentation source on the RP2040
+
+    def _begin(self, key):
+        """Start a fresh screen. Returns False when the caller should skip
+        drawing entirely (headless)."""
+        if not self.display:
+            return False
+        if key != "grid":
+            self._cells = None
+            self._band_txt = None
+        self.fb.clear()
+        return True
 
     # --- screens ---
     def show_boot(self):
         """Branded loading screen; up before the heavy imports run."""
-        if not self.display:
+        if not self._begin("boot"):
             return
-        g = displayio.Group()
-        g.append(self._txt("MKYADA", self.CX, 24, scale=2))
-        g.append(self._txt(tr("loading"), self.CX, 56, font=self.ui_font))
+        self.fb.big("MKYADA", self.CX, 24, scale=2)
+        self.fb.text(tr("loading"), self.CX, 56)
         bw = self.W - 24
-        bmp = displayio.Bitmap(bw, 5, 2)
-        pal = displayio.Palette(2)
-        pal[0] = 0x000000
-        pal[1] = 0xFFFFFF
-        g.append(displayio.TileGrid(bmp, pixel_shader=pal,
-                                    x=(self.W - bw) // 2, y=42))
-        self._bar = bmp
-        self.display.root_group = g
-        try:
-            self.display.refresh()
-        except Exception:
-            pass
+        self._bar = ((self.W - bw) // 2, 42, bw, 5)
+        self.fb.rect(self._bar[0], self._bar[1], bw, 5, 0)
+        self.paint("boot")
 
     def boot_progress(self, frac):
         if not self.display or self._bar is None:
             return
-        w = int(min(1.0, max(0.0, frac)) * self._bar.width)
-        for x in range(w):
-            for y in range(5):
-                self._bar[x, y] = 1
-        try:
-            self.display.refresh()
-        except Exception:
-            pass
+        x, y, w, h = self._bar
+        self.fb.rect(x, y, int(min(1.0, max(0.0, frac)) * w), h)
+        self.paint(self._last)
 
     def show_update(self, frac, restarting=False):
         """Locked firmware-update screen: brand, progress bar, percentage.
         Deliberately styled like the boot screen — same visual language for
         'the keypad is busy with itself, hands off'."""
-        if not self.display:
+        if not self._begin("update"):
             return
-        g = displayio.Group()
-        g.append(self._txt("MKYADA", self.CX, 14, scale=2))
+        self.fb.big("MKYADA", self.CX, 13, scale=2)
         # "updating - do not unplug" on one line ran off both edges (issue
-        # #35): the warning gets its own second line, and the whole stack
-        # moves up to keep the bar and percentage on screen.
+        # #35), so the warning gets its own second line.
         if restarting:
-            g.append(self._txt(tr("restarting"), self.CX, 34, font=self.ui_font))
+            self.fb.text(tr("restarting"), self.CX, 33)
         else:
-            g.append(self._txt(tr("updating"), self.CX, 30, font=self.ui_font))
-            g.append(self._txt(tr("updating2"), self.CX, 41, font=self.ui_font))
+            self.fb.text(tr("updating"), self.CX, 29)
+            self.fb.text(tr("updating2"), self.CX, 40)
         bw = self.W - 24
-        bmp = displayio.Bitmap(bw, 5, 2)
-        pal = displayio.Palette(2)
-        pal[0] = 0x000000
-        pal[1] = 0xFFFFFF
-        w = int(min(1.0, max(0.0, frac)) * bw)
-        for x in range(w):
-            for y in range(5):
-                bmp[x, y] = 1
-        g.append(displayio.TileGrid(bmp, pixel_shader=pal,
-                                    x=(self.W - bw) // 2, y=50))
-        g.append(self._txt("%d%%" % int(frac * 100), self.CX, 60,
-                           font=self.ui_font))
-        self.paint(g)
+        x0 = (self.W - bw) // 2
+        self.fb.rect(x0, 50, int(min(1.0, max(0.0, frac)) * bw), 5)
+        self.fb.text("%d%%" % int(frac * 100), self.CX, 59)
+        self.paint("update")
 
     def show_home(self, pos, layer_count, layer_names):
         """Layer letters + SETTINGS. pos == layer_count means SETTINGS."""
-        if not self.display:
+        if not self._begin("home"):
             return
-        g = displayio.Group()
         n = layer_count + 1
         if pos < layer_count:
-            # spleen caps at scale 6 are ~10% smaller than the old terminalio
-            # scale-5 letter, and y=26 leaves about the same air above the
-            # letter as between it and the position dots below
-            if self.ui_font is not terminalio.FONT:
-                self._bold(g, layer_names[pos].upper(), self.CX, 26, scale=6,
-                           font=self.ui_font)
-            else:
-                self._bold(g, layer_names[pos].upper(), self.CX, 25, scale=5)
+            self.fb.big(layer_names[pos].upper(), self.CX, 26, scale=5)
         else:
-            g.append(self._txt(tr("settings"), self.CX, 24, scale=2))
+            self.fb.big(tr("settings"), self.CX, 26, scale=2)
         gap = 14 if n <= 8 else 12
         x0 = self.CX - (n - 1) * gap // 2
         for i in range(n):
-            g.append(_circ(x0 + i * gap, 54, 3 if i == pos else 1))
-        self.paint(g)
-
-    BAND_H = 10  # inverted status strip over the grid (show_layer/show_profile)
+            self._dot(x0 + i * gap, 54, i == pos)
+        self.paint("home")
 
     def show_grid(self, labels, active, invert=True, band=None):
         """3x2 macro grid; labels = [(line1, line2)] * 6. The active cell
         renders inverted while invert is True (selection / playing).
-        band = optional status text (active layer / profile label) drawn as
-        an inverted strip across the top; the six cells and their macro
-        names squeeze into the remaining height.
+        band = optional status text (active layer / profile label) drawn as an
+        inverted strip across the top.
 
-        The grid is PERSISTENT: the group (band strip, dividers, 6 highlight
-        rects, 13 Labels) is built once and every later paint only mutates
-        Label.text / .color and shifts the highlight rect. Rebuilding it per
-        paint transiently ate nearly all free heap, and under pressure a cell
-        Label (or the whole paint) died — the "blinking labels" bug. Now a
-        repaint allocates only for the cells whose text actually changed."""
+        Only the cells whose content actually changed are redrawn, and only
+        their rectangles are cleared — so moving the selection one cell to the
+        right touches two cells and displayio pushes just those rows (3ms on
+        the board, against 79ms for a full screen)."""
         if not self.display:
             return
-        self.grid_degraded = False
         banded = bool(band)
-        st = self._grid
-        if (st is None or st["banded"] != banded
-                or st["font"] is not self.grid_font):
-            st = None
-            self._grid = None  # the old group is garbage — free it first
-            for _ in range(2):
-                gc.collect()
-                try:
-                    st = self._grid_build(banded)
-                    break
-                except MemoryError:
-                    continue
-            if st is None:
-                self.grid_degraded = True  # retry once the heap recovers
-                return
-            self._grid = st
+        top = self.BAND_H if banded else 0
+        cw = self.W // 3
+        ch = (self.H - top) // 2
+        fresh = self._last != "grid" or self._cells is None or \
+            self._cells[6] != banded
+        if fresh:
+            self.fb.clear()
+            self._cells = [None] * 6 + [banded]
+            self._band_txt = None
+            self.fb.vline(cw, top, self.H - top)
+            self.fb.vline(2 * cw, top, self.H - top)
+            self.fb.hline(0, top + ch, self.W)
         if banded:
-            # band uses the UI font (no Turkish); 21 chars is what fits in
-            # 128px — a longer text would center itself off both edges.
-            b = fold_ascii(band)[:21]
-            if st["band"].text != b:
-                if self.ui_font is not terminalio.FONT:
-                    try:  # profile names carry chars outside UI_GLYPHS
-                        self.ui_font.load_glyphs(set(b))
-                    except Exception:
-                        pass
-                try:
-                    st["band"].text = b
-                except MemoryError:
-                    gc.collect()
-                    self.grid_degraded = True
-        cw, ch, top = st["cw"], st["ch"], st["top"]
-        y1 = st["y1"]
-        maxc = (cw - 2) // self.grid_cpx
+            self._paint_band(band)
         for k in range(6):
-            cell = st["cells"][k]
-            bg, l1, l2, x, y = cell[0], cell[1], cell[2], cell[3], cell[4]
             t1, t2 = labels[k] if k < len(labels) else ("", "")
-            t1 = fold_ascii((t1 or "")[:maxc], self.grid_tr_ok)
-            t2 = fold_ascii((t2 or "")[:maxc], self.grid_tr_ok)
             on = k == active and invert
-            want = (t1, t2, on)
-            if cell[5] == want:
+            want = (t1 or "", t2 or "", on)
+            if self._cells[k] == want:
                 continue
-            # Per-cell resilience: even a text mutation allocates its glyph
-            # tiles, and on a shredded heap that can still fail. Skip just
-            # that cell, keep its cache dirty so the degraded repaint fixes
-            # it once the heap recovers.
-            try:
-                bg.x = x if on else -cw - 2  # off-screen == hidden
-                col = 0x000000 if on else 0xFFFFFF
-                # one-line cells center vertically; two-line cells stack
-                l1.anchored_position = (x + cw // 2,
-                                        y + (y1 if t2 else ch // 2))
-                if l1.text != t1:
-                    l1.text = t1
-                if l2.text != t2:
-                    l2.text = t2
-                l1.color = col
-                l2.color = col
-                cell[5] = want
-            except MemoryError:
-                gc.collect()
-                cell[5] = None
-                self.grid_degraded = True
-        self.paint(st["g"])
+            self._cells[k] = want
+            col = k % 3
+            row = k // 3
+            # The cell's INTERIOR — the dividers sit at x=cw, x=2*cw and
+            # y=top+ch, and a cell that cleared its own bounding box erased
+            # them. Chrome is drawn once; cells must stay inside it.
+            x0 = col * cw + (1 if col else 0)
+            x1 = self.W if col == 2 else (col + 1) * cw
+            y0 = top + (row * ch) + (1 if row else 0)
+            y1 = self.H if row else top + ch
+            self.fb.rect(x0, y0, x1 - x0, y1 - y0, 1 if on else 0)
+            cx = (x0 + x1) // 2
+            cy = (y0 + y1) // 2
+            if want[1]:
+                self.fb.text(want[0], cx, cy - 4, invert=on)
+                self.fb.text(want[1], cx, cy + 4, invert=on)
+            else:
+                self.fb.text(want[0], cx, cy, invert=on)
+        self.paint("grid")
+
+    def _paint_band(self, band):
+        b = (band or "")[:24]
+        if b == self._band_txt:
+            return
+        self._band_txt = b
+        self.fb.rect(0, 0, self.W, self.BAND_H)
+        self.fb.text(b, self.CX, self.BAND_H // 2, invert=True)
 
     def update_band(self, band):
-        """Repaint ONLY the band strip's text on the live grid group, leaving
-        the six cells untouched. The blink markers change twice a second and
-        the OBS scene changes on every switch; driving those through a full
-        show_grid() allocated a whole label set each time — in the same size
-        class as an incoming serial chunk. Returns False if the caller must
-        fall back to a full paint (no persistent group yet / band-less grid)."""
-        st = self._grid
-        if not self.display or not st or not st["banded"] or st["band"] is None:
+        """Repaint ONLY the band strip on the live grid, leaving the six cells
+        untouched. The blink markers change twice a second and the OBS scene
+        changes on every switch; driving those through a full show_grid()
+        used to allocate a whole label set each time — in the same size class
+        as an incoming serial chunk. Returns False if the caller must fall
+        back to a full paint."""
+        if not self.display or self._last != "grid" or self._cells is None:
             return False
-        b = fold_ascii(band or "")[:21]
-        if st["band"].text == b:
-            return True
-        try:
-            if self.ui_font is not terminalio.FONT:
-                try:  # scene names carry chars outside UI_GLYPHS
-                    self.ui_font.load_glyphs(set(b))
-                except Exception:
-                    pass
-            st["band"].text = b
-            self.display.refresh()
-        except MemoryError:
-            gc.collect()
-            self.grid_degraded = True
+        if not self._cells[6]:
             return False
-        except Exception:
-            return False
+        self._paint_band(band)
+        self.paint("grid")
         return True
 
-    def _grid_build(self, banded):
-        cols, rows = 3, 2
-        top = self.BAND_H if banded else 0
-        cw = self.W // cols          # 42
-        ch = (self.H - top) // rows  # 32 full-height, 27 under the band
-        g = displayio.Group()
-        st = {"g": g, "banded": banded, "font": self.grid_font,
-              "cw": cw, "ch": ch, "top": top,
-              "y1": 9 if banded else 11, "band": None, "cells": []}
-        if banded:
-            g.append(_rect(0, 0, self.W, top))
-            st["band"] = self._txt("", self.CX, top // 2 - 1, color=0x000000,
-                                   font=self.ui_font)
-            g.append(st["band"])
-        g.append(_rect(cw, top, 1, self.H - top))
-        g.append(_rect(2 * cw, top, 1, self.H - top))
-        g.append(_rect(0, top + ch, self.W, 1))
-        y2 = 18 if banded else 22
-        for k in range(6):
-            x = (k % cols) * cw
-            y = top + (k // cols) * ch
-            bg = _rect(-cw - 2, y, cw, ch)  # starts hidden (off-screen)
-            g.append(bg)
-            l1 = self._gtxt("", x + cw // 2, y + ch // 2)
-            l2 = self._gtxt("", x + cw // 2, y + y2)
-            g.append(l1)
-            g.append(l2)
-            # [5] caches (line1, line2, inverted) so unchanged cells cost 0
-            st["cells"].append([bg, l1, l2, x, y, None])
-        return st
-
     def show_speed(self, layer_name, key_no, t):
-        if not self.display:
+        if not self._begin("speed"):
             return
-        g = displayio.Group()
-        self._top_bar(g, "%s > K%d  %s" % (layer_name.upper(), key_no, tr("speed")))
-        g.append(self._txt(fmt_hero(t), self.CX, 28, scale=self.hero_scale,
-                           font=self.hero_font))
-        self._hbar(g, (t - 1) / 99.0)
-        self._bottom_bar(g, action=tr("save"))
-        self.paint(g)
+        self._top_bar("%s > K%d  %s" % (layer_name.upper(), key_no, tr("speed")))
+        self.fb.big(fmt_hero(t), self.CX, 27, scale=3)
+        self._hbar((t - 1) / 99.0)
+        self._bottom_bar(action=tr("save"))
+        self.paint("speed")
 
     def show_card(self, title, big, line=None, hint=None):
         """Generic action card for the context-aware wheel menu: a title bar,
         a bold hero line (the key's action), an optional status line, and a
         bottom bar whose right-hand label is `hint` (what CONFIRM does)."""
-        if not self.display:
+        if not self._begin("card"):
             return
-        g = displayio.Group()
-        self._top_bar(g, title)
-        g.append(self._txt(big, self.CX, 28, scale=2, font=self.ui_font))
+        self._top_bar(title)
+        # ui.py caps the hero at 12 characters, but 12 WIDE ones are 168px at
+        # scale 2 and a centred overflow gets cut off at BOTH ends. Fit to the
+        # glass instead, so what survives is the start of the name.
+        self.fb.big(self.font.fit(big, self.W // 2), self.CX, 27, scale=2)
         if line:
-            g.append(self._txt(line, self.CX, 44, font=self.ui_font))
-        self._bottom_bar(g, action=hint)
-        self.paint(g)
+            self.fb.text(line, self.CX, 44)
+        self._bottom_bar(action=hint)
+        self.paint("card")
 
     def show_adjust(self, title, hero, frac, action=None):
         """Generic value slider (host-backed volume, brightness): title bar,
-        big value, progress bar, bottom action. Generalizes show_speed /
-        show_timeout for the context-aware wheel menu."""
-        if not self.display:
+        big value, progress bar, bottom action."""
+        if not self._begin("adjust"):
             return
-        g = displayio.Group()
-        self._top_bar(g, title)
-        g.append(self._txt(hero, self.CX, 28, scale=self.hero_scale,
-                           font=self.hero_font))
-        self._hbar(g, max(0.0, min(1.0, frac)))
-        self._bottom_bar(g, action=action)
-        self.paint(g)
+        self._top_bar(title)
+        self.fb.big(hero, self.CX, 27, scale=3)
+        self._hbar(max(0.0, min(1.0, frac)))
+        self._bottom_bar(action=action)
+        self.paint("adjust")
 
     def show_saved(self, layer_name, key_no, t):
-        if not self.display:
+        if not self._begin("saved"):
             return
-        g = displayio.Group()
-        self._top_bar(g, "%s > K%d" % (layer_name.upper(), key_no))
-        self._check(g, self.CX, 32, 22)
-        g.append(self._txt(fmt_speed(t), self.CX, 54, scale=2))
-        self.paint(g)
+        self._top_bar("%s > K%d" % (layer_name.upper(), key_no))
+        # The tick used to be two hand-plotted lines in a throwaway Bitmap.
+        # It is a font glyph now (U+2713), so it costs one blit.
+        self.fb.big("✓", self.CX, 30, scale=3)
+        self.fb.big(fmt_speed(t), self.CX, 54, scale=2)
+        self.paint("saved")
 
     def show_toast(self, title, line1, line2=""):
         """Short informational screen (read-only drive, missing macro...)."""
-        if not self.display:
+        if not self._begin("toast"):
             return
-        g = displayio.Group()
-        self._top_bar(g, title)
-        g.append(self._txt(line1, self.CX, 30, font=self.ui_font))
+        self._top_bar(title)
+        self.fb.text(line1, self.CX, 30)
         if line2:
-            g.append(self._txt(line2, self.CX, 42, font=self.ui_font))
-        self.paint(g)
+            self.fb.text(line2, self.CX, 42)
+        self.paint("toast")
 
     def show_about(self, rows):
         """Device info screen: a title bar over left-aligned label: value
-        rows (model, firmware, device id). `rows` is a sequence of
-        (label, value) pairs."""
-        if not self.display:
+        rows (model, firmware, device id)."""
+        if not self._begin("about"):
             return
-        g = displayio.Group()
-        self._top_bar(g, tr("about_title"))
-        y = 22
+        self._top_bar(tr("about_title"))
+        y = 19
         for label_s, value_s in rows:
-            g.append(self._txt("%s:" % label_s, 4, y, anchor=(0.0, 0.5),
-                               font=self.ui_font))
-            g.append(self._txt(value_s, self.W - 4, y, anchor=(1.0, 0.5),
-                               font=self.ui_font))
-            y += 12
-        self._bottom_bar(g, action=None)
-        self.paint(g)
-
-    MENU_VIS = 3  # rows that fit between the top and bottom bars
+            self.fb.text("%s:" % label_s, 4, y, anchor=0.0)
+            self.fb.text(value_s, self.W - 4, y, anchor=1.0)
+            y += 11
+        self._bottom_bar(action=None)
+        self.paint("about")
 
     def show_menu(self, title, items, sel, marked=None, action=None, hold=None):
-        """Generic list menu (Settings, Font). marked = index tagged with >.
-        Longer lists scroll: the selection stays visible and small arrows on
-        the right show there are items above/below. `hold`, when set, names
-        the hold-to-reassign gesture in the top bar's right corner."""
-        if not self.display:
-            return
-        # Every detent rebuilds this group — five Labels plus rects — and a
-        # failed build leaves the PREVIOUS screen on the glass, so the wheel
-        # looks stuck at the row it opened on while the selection moves
-        # invisibly underneath (issue #39). Compact first, and if the build
-        # still can't fit, fall back to the one row that matters.
-        gc.collect()
-        try:
-            g = self._menu_group(title, items, sel, marked, action, hold)
-        except MemoryError:
-            gc.collect()
-            try:
-                g = self._menu_group(title, items, sel, marked, action, hold)
-            except MemoryError:
-                gc.collect()
-                g = displayio.Group()
-                self._top_bar(g, title)
-                g.append(self._txt(str(items[sel])[:20], self.CX, 32))
-                self._bottom_bar(g, action=action or tr("select"))
-        self.paint(g)
+        """Generic list menu (Settings, wheel menu). marked = index tagged
+        with >. Longer lists scroll: the selection stays visible and small
+        arrows on the right show there are items above/below.
 
-    def _menu_group(self, title, items, sel, marked, action, hold):
-        g = displayio.Group()
-        self._top_bar(g, title, hint=hold)
+        This is the screen issue #39 was about — every detent rebuilt five
+        Labels, and a build that hit MemoryError left the PREVIOUS screen on
+        the glass, so the wheel looked stuck at the row it opened on while the
+        selection moved invisibly underneath. There is nothing left to
+        allocate here, so there is nothing left to fail."""
+        if not self._begin("menu"):
+            return
+        self._top_bar(title, hint=hold)
         n = len(items)
         top = sel - self.MENU_VIS + 1 if sel >= self.MENU_VIS else 0
         # keep the arrow strip clear of the selection rectangle
         rw = self.W - 8 if n > self.MENU_VIS else self.W
         for row in range(min(self.MENU_VIS, n)):
             i = top + row
-            y = 20 + row * 12
-            if i == sel:
-                g.append(_rect(0, y - 6, rw, 12))
-                c = 0x000000
-            else:
-                c = 0xFFFFFF
+            y = MENU_TOP + row * ROW_H
+            on = i == sel
+            if on:
+                self.fb.rect(0, y - 4, rw, ROW_H)
             text = items[i] if marked is None else (
                 "%s %s" % (">" if i == marked else " ", items[i]))
-            g.append(self._txt(text, self.CX, y, color=c))
+            self.fb.text(self.font.fit(str(text), rw - 4), self.CX, y, invert=on)
         if top > 0:
-            g.append(vectorio.Polygon(pixel_shader=WHITE,
-                                      points=[(3, 0), (6, 4), (0, 4)],
-                                      x=self.W - 7, y=15))
+            self.fb.tri(self.W - 7, BAR_H + 2, 7, 4, down=False)
         if top + self.MENU_VIS < n:
-            g.append(vectorio.Polygon(pixel_shader=WHITE,
-                                      points=[(0, 0), (6, 0), (3, 4)],
-                                      x=self.W - 7, y=45))
-        self._bottom_bar(g, action=action or tr("select"))
-        return g
+            self.fb.tri(self.W - 7, BOT_SEP - 6, 7, 4, down=True)
+        self._bottom_bar(action=action or tr("select"))
+        self.paint("menu")
 
     def show_timeout(self, sec, lo, hi):
-        if not self.display:
+        if not self._begin("timeout"):
             return
-        g = displayio.Group()
-        self._top_bar(g, tr("auto_return_title"))
-        g.append(self._txt("%ds" % sec, self.CX, 28, scale=self.hero_scale,
-                           font=self.hero_font))
-        self._hbar(g, (sec - lo) / float(hi - lo))
-        self._bottom_bar(g, action=tr("save"))
-        self.paint(g)
+        self._top_bar(tr("auto_return_title"))
+        self.fb.big("%ds" % sec, self.CX, 27, scale=3)
+        self._hbar((sec - lo) / float(hi - lo))
+        self._bottom_bar(action=tr("save"))
+        self.paint("timeout")
 
     def show_host(self):
-        if not self.display:
+        if not self._begin("host"):
             return
-        g = displayio.Group()
-        self._top_bar(g, "MKYADA")
-        g.append(self._txt(tr("host"), self.CX, 34, font=self.ui_font))
-        self.paint(g)
+        self._top_bar("MKYADA")
+        self.fb.text(tr("host"), self.CX, 34)
+        self.paint("host")
 
     def show_headless(self):
-        """The menu module could not load (import/compile/MemoryError — e.g.
-        ui.py shipped as source and the display-fragmented heap couldn't
-        compile it). Keys and serial still work; show why instead of leaving
-        the boot 'loading' splash frozen, which reads as a brick."""
-        if not self.display:
+        """The menu module could not load (import/compile/MemoryError). Keys
+        and serial still work; show why instead of leaving the boot 'loading'
+        splash frozen, which reads as a brick."""
+        if not self._begin("headless"):
             return
-        g = displayio.Group()
-        self._top_bar(g, "MKYADA")
-        g.append(self._txt(tr("menu_fail"), self.CX, 30, font=self.ui_font))
-        g.append(self._txt(tr("menu_fail_hint"), self.CX, 44, font=self.ui_font))
-        self.paint(g)
+        self._top_bar("MKYADA")
+        self.fb.text(tr("menu_fail"), self.CX, 30)
+        self.fb.text(tr("menu_fail_hint"), self.CX, 44)
+        self.paint("headless")
 
     def show_error(self, msg):
-        if not self.display:
+        if not self._begin("error"):
             return
-        g = displayio.Group()
-        self._top_bar(g, "MKYADA")
-        g.append(self._txt(tr("err_title"), self.CX, 26, font=self.ui_font))
+        self._top_bar("MKYADA")
+        self.fb.text(tr("err_title"), self.CX, 26)
         msg = str(msg)
-        g.append(self._txt(msg[:25], self.CX, 40, font=self.ui_font))
-        if len(msg) > 25:
-            g.append(self._txt(msg[25:50], self.CX, 50, font=self.ui_font))
-        self.paint(g)
+        self.fb.text(self.font.fit(msg, self.W - 4), self.CX, 40)
+        rest = msg[len(self.font.fit(msg, self.W - 4)):]
+        if rest:
+            self.fb.text(self.font.fit(rest, self.W - 4), self.CX, 50)
+        self.paint("error")
