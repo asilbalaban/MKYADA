@@ -35,7 +35,7 @@
 | **Fine-tune a recording** | app → *Recorder*: edit every event, multi-select rows, draw the path 1:1 on your screen, pin the app above your game |
 | **Different actions per application** | app → *Profiles* (e.g. Save As in Photoshop, inventory macro in your game) |
 | **Configure without installing anything** | drop `macros/key1.json` onto the keypad's USB drive — [format](docs/macro-format.md) |
-| **Update the app** | *Settings → Check for updates* (it also checks on launch) |
+| **Update the app** | *Settings → About → Check for updates* (it also checks on launch) |
 | **Share or grab ready-made macros** | [community-macros/](community-macros/) — PRs welcome |
 
 ## Why MKYADA?
@@ -76,10 +76,12 @@ Unlike most DIY macro pads that just remap keys, MKYADA plays back **full record
 | ![Keys page — click a key, pick what it does](docs/images/screens/vision6-keys.png) | ![Devices page — connected keypad with nickname and firmware info](docs/images/screens/core6-devices.png) |
 | **Record & edit macros** | **Per-app profiles** |
 | ![Recorder — every event is an editable row, playback rules per key](docs/images/screens/core6-recorder.png) | ![Profiles — the active window picks the assignments](docs/images/screens/core6-profiles.png) |
-| **Setup at a glance** | **Settings (Vision 6 screen options)** |
-| ![Setup — keypad summary and live key test](docs/images/screens/vision6-setup.png) | ![Settings — theme, screen bands, OBS, permissions, updates](docs/images/screens/vision6-settings.png) |
+| **Setup at a glance** | **Settings — grouped into tabs** |
+| ![Setup — keypad summary and live key test](docs/images/screens/vision6-setup.png) | ![Settings — Keypad, Integrations, Application and About in tabs](docs/images/screens/vision6-settings.png) |
 
-The Vision 6's own OLED screens (Home · Grid · Speed · Settings · About):
+The Vision 6's own OLED screens. These are not mockups: `scripts/render-oled.py`
+runs the firmware's drawing code over the font the device flashes, so every lit
+pixel here is a pixel the SH1106 lights.
 
 <p align="center">
   <img src="docs/images/oled/home.png" alt="Vision 6 Home" width="170">
@@ -87,6 +89,12 @@ The Vision 6's own OLED screens (Home · Grid · Speed · Settings · About):
   <img src="docs/images/oled/speed.png" alt="Vision 6 Speed editor" width="170">
   <img src="docs/images/oled/settings.png" alt="Vision 6 Settings" width="170">
   <img src="docs/images/oled/about.png" alt="Vision 6 About" width="170">
+</p>
+<p align="center">
+  <img src="docs/images/oled/wheel-scene.png" alt="Vision 6 OBS scene picker" width="170">
+  <img src="docs/images/oled/wheel-status.png" alt="Vision 6 record status card" width="170">
+  <img src="docs/images/oled/wheel-volume.png" alt="Vision 6 volume slider" width="170">
+  <img src="docs/images/oled/menu-tr.png" alt="Vision 6 menu in Turkish" width="170">
 </p>
 
 ## Hardware

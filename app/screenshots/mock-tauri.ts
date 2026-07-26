@@ -7,8 +7,15 @@
 // app/index.html, so this file and the string "mock-tauri" never reach dist.
 // The CI guard in .github/workflows/ci.yml fails the build if they ever do.
 
+import { emit } from "@tauri-apps/api/event";
 import { mockIPC, mockWindows } from "@tauri-apps/api/mocks";
 import { buildFixture, type ModelName } from "./fixtures";
+
+/** Push a device message to the app the way the Rust side would. Deferred a
+ * tick so it never runs inside the IPC handler that provoked it. */
+function emitDeviceMsg(msg: Record<string, unknown>) {
+  setTimeout(() => void emit("device:msg", msg), 0);
+}
 
 const params = new URLSearchParams(location.search);
 const model: ModelName = params.get("model") === "vision6" ? "vision6" : "core6";
@@ -53,8 +60,16 @@ mockIPC(
         return "MOCK";
       case "connect_device":
       case "disconnect_device":
-      case "device_send":
         return null;
+      case "device_send": {
+        // The app pings before it reads any files and waits for a "pong"
+        // (device.tsx waitForReady). Without an answer it spends 12 seconds
+        // deciding the link is wedged, which is why every shot used to carry a
+        // "Loading keys from the keypad…" banner.
+        const msg = (args.msg ?? {}) as Args;
+        if (msg.t === "ping") emitDeviceMsg({ t: "pong" });
+        return null;
+      }
 
       // ---- drive (CIRCUITPY) file access -------------------------------
       case "list_drives":
@@ -79,11 +94,18 @@ mockIPC(
       case "check_update":
         return { available: false, current: fx.appVersion, latest: fx.appVersion, url: "" };
       case "permissions_status":
-        return { input_monitoring: "granted", accessibility: "granted" };
+        // A fully-granted Mac. Without `platform` the card fell back to its
+        // Linux copy, so the published Application tab told readers no
+        // permissions were needed — on the one OS where they are.
+        return { platform: "macos", input_monitoring: "granted", accessibility: "granted" };
       case "firmware_bundled_version":
         return fx.hello.fw;
       case "list_bootloader_drives":
         return [];
+      case "sound_outputs":
+        // A plausible Mac: the built-in output plus the virtual device people
+        // route soundboards through.
+        return ["MacBook Pro Speakers", "Studio Display", "BlackHole 2ch"];
       case "obs_state":
         return {
           connected: false,

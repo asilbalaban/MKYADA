@@ -22,6 +22,7 @@ import type {
   Assignment,
   DeviceConfig,
   Hello,
+  MacroFile,
   ModuleSlot,
   Profile,
 } from "../src/lib/types";
@@ -39,11 +40,43 @@ export interface Fixture {
   appVersion: string;
 }
 
-const APP_VERSION = "0.21.11";
+const APP_VERSION = "0.27.0";
 
 // -------------------------------------------------------------- assignments ---
 // key number (per layer) -> what it does. Chosen to show the range of action
 // kinds a reader would want to see on the promo/docs screenshots.
+
+/** A real recorded macro, so the Recorder screenshots show the editor doing its
+ * job instead of its "record or import a macro to begin" placeholder. Written
+ * as captured events (a mouse move, a click, a typed word, a shortcut) with the
+ * row titles the recorder gives them — the same shape recording produces. */
+const RECORDED: MacroFile = {
+  format: "mkyada-macro",
+  version: 3,
+  kind: "recorded",
+  name: "Post the clip",
+  screen: { width: 1920, height: 1080 },
+  settings: { speed: 1 },
+  events: [
+    { delay: 0, type: "move", x: 962, y: 214 },
+    { delay: 180, type: "button", action: "down", button: "left", x: 962, y: 214 },
+    { delay: 64, type: "button", action: "up", button: "left", x: 962, y: 214 },
+    { delay: 320, type: "key", action: "down", key: "c" },
+    { delay: 48, type: "key", action: "up", key: "c" },
+    { delay: 96, type: "key", action: "down", key: "l" },
+    { delay: 52, type: "key", action: "up", key: "l" },
+    { delay: 88, type: "key", action: "down", key: "i" },
+    { delay: 44, type: "key", action: "up", key: "i" },
+    { delay: 92, type: "key", action: "down", key: "p" },
+    { delay: 50, type: "key", action: "up", key: "p" },
+    { delay: 260, type: "move", x: 1418, y: 662 },
+    { delay: 140, type: "scroll", dy: -3, x: 1418, y: 662 },
+    { delay: 300, type: "key", action: "down", key: "cmd" },
+    { delay: 40, type: "key", action: "down", key: "enter" },
+    { delay: 60, type: "key", action: "up", key: "enter" },
+    { delay: 36, type: "key", action: "up", key: "cmd" },
+  ],
+};
 
 const CORE6_KEYS: Record<number, Record<string, Assignment>> = {
   // layer A — everyday desktop
@@ -52,7 +85,7 @@ const CORE6_KEYS: Record<number, Record<string, Assignment>> = {
     2: { kind: "text", text: "All the best,\nAsil", label: "Signature" },
     3: { kind: "launch", target: "https://github.com/asilbalaban/MKYADA", label: "Open repo" },
     4: { kind: "media", usage: "PLAY_PAUSE", label: "Play / Pause" },
-    5: { kind: "mic", mode: "toggle", label: "Mute mic" },
+    5: { kind: "recorded", name: RECORDED.name!, macro: RECORDED, label: "Post the clip" },
   },
   // layer B — smart-home & shell
   1: {
@@ -60,7 +93,7 @@ const CORE6_KEYS: Record<number, Record<string, Assignment>> = {
     2: { kind: "command", command: "npm run build", label: "Build" },
     3: { kind: "scroll", dir: "down", amount: 3, label: "Scroll down" },
     4: { kind: "sound", file: "ding.wav", holdAction: "stop", label: "Ding" },
-    5: { kind: "keystroke", key: "f5", label: "Refresh" },
+    5: { kind: "mic", mode: "toggle", label: "Mute mic" },
   },
 };
 
@@ -72,7 +105,7 @@ const VISION6_KEYS: Record<number, Record<string, Assignment>> = {
     3: { kind: "mic", mode: "push_to_talk", label: "Push-to-talk" },
     4: { kind: "launch", target: "discord://", label: "Discord" },
     5: { kind: "media", usage: "MUTE", label: "Mute" },
-    6: { kind: "webhook", url: "https://api.example.com/live", method: "POST", label: "Now live!" },
+    6: { kind: "recorded", name: RECORDED.name!, macro: RECORDED, label: "Post the clip" },
   },
   // layer B — "Edit"
   1: {
@@ -190,7 +223,6 @@ function core6(): Fixture {
     lang: null,
     show_layer: false,
     show_profile: true,
-    font: null,
     timeout: null,
     layer_names: null,
     screen: { width: 1920, height: 1080 },
@@ -201,8 +233,8 @@ function core6(): Fixture {
   };
   const hello: Hello = {
     t: "hello",
-    fw: "0.17.9",
-    proto: 8,
+    fw: "0.21.0",
+    proto: 10,
     format: "mkyada-config",
     uid: "E6605481DB334C2A",
     key_count: 6,
@@ -243,7 +275,6 @@ function vision6(): Fixture {
     lang: "en",
     show_layer: true,
     show_profile: true,
-    font: 1,
     timeout: 10,
     layer_names: ["Stream", "Edit", "Dev"],
     screen: { width: 1920, height: 1080 },
@@ -255,8 +286,8 @@ function vision6(): Fixture {
   };
   const hello: Hello = {
     t: "hello",
-    fw: "0.17.9",
-    proto: 8,
+    fw: "0.21.0",
+    proto: 10,
     format: "mkyada-config",
     uid: "E6605481DB119A7F",
     key_count: 6,
@@ -268,7 +299,6 @@ function vision6(): Fixture {
     nav: ["GP2", "GP3", "GP4"],
     show_layer: true,
     show_profile: true,
-    font: 1,
     timeout: 10,
     enc_swap: false,
     layer_names: ["Stream", "Edit", "Dev"],

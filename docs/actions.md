@@ -84,7 +84,7 @@ poor default for a volume key).
 
 Host actions (OBS, mic, webhook…) show an **"app required"** reminder when the
 MKYADA app isn't connected. The app also shows a live mini-OLED preview of this
-menu in the key editor and a full reference under **Settings → Wheel menu**, and
+menu in the key editor and a full reference under **Settings → Keypad → Wheel menu**, and
 pushes the live system volume so a volume key shows its **%** right on the grid.
 
 ## Key logic

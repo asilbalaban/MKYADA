@@ -55,7 +55,15 @@ jobs:
         run: |
           node scripts/build-font.mjs
           node scripts/build-font.mjs --html --public
-          git diff --exit-code -- firmware/fonts/ docs/font.html
+          git diff --exit-code -- firmware/fonts/ docs/font.html app/src/lib/oled-font.ts
+
+      # The published OLED pictures are firmware renders, not artwork: an
+      # oled.py change must reach docs/images/oled or the site starts showing a
+      # keypad that no longer exists.
+      - name: Published OLED renders match the firmware
+        run: |
+          python3 scripts/render-oled.py
+          git diff --exit-code -- app/screenshots/oled-frames.js
 
       # The same script every release build runs — catch a broken firmware
       # bundle here, not on the tag. --require-mpy also proves the pinned

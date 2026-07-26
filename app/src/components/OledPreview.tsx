@@ -1,7 +1,8 @@
-// A faithful little Vision 6 OLED, drawn to a 128×64 canvas and upscaled with
-// image-rendering: pixelated inside a device bezel — the same look as the
-// screenshot mockups. Shows what pressing the wheel on a key looks like on the
-// real screen (see lib/oled-draw + kind-registry.wheelPreview).
+// A little Vision 6 OLED: 128×64 drawn with the device's OWN font and layout
+// (lib/oled-draw runs the firmware's drawing code over firmware/fonts/
+// mkyada.fnt), then upscaled with image-rendering: pixelated inside a bezel.
+// It isn't an impression of the screen — it's the picture the screen shows when
+// you press the wheel on this key (see kind-registry.wheelPreview).
 
 import { useEffect, useRef } from "react";
 import { OLED_H, OLED_W, drawWheelScreen, type WheelPreview } from "../lib/oled-draw";

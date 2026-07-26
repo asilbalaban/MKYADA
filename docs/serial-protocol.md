@@ -60,7 +60,7 @@ v7 (firmware 0.11.0) is the update-safety release:
 v6 (firmware 0.10.0) adds:
 - `{"t":"scroll"}` — direct wheel ticks with optional modifiers. The app
   drives profile wheel slots through this instead of per-detent `play`
-  round-trips, and applies its own acceleration (Settings → Wheel
+  round-trips, and applies its own acceleration (Settings → Keypad → Wheel
   acceleration), so a spin feels like a real mouse wheel.
 - `label.keys` — the profile's six key names; the Vision 6 host-mode screen
   shows them as a grid instead of the bare "Connected to app" text.

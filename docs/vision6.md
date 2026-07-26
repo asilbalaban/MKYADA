@@ -52,11 +52,18 @@ flash.
 
 ## Screens & controls
 
-Representative renders of the 128×64 OLED (layer A named "Stream"):
+Real renders of the 128×64 OLED (layer A named "Stream") — produced by
+`scripts/render-oled.py`, which drives `firmware/mkyada/oled.py` and the shipped
+`mkyada.fnt` through the software displayio in `tests/`, so these are the
+device's pixels rather than a drawing of them.
 
 | Home | Grid | Speed | Settings | About |
 |---|---|---|---|---|
 | ![Home](images/oled/home.png) | ![Grid](images/oled/grid.png) | ![Speed](images/oled/speed.png) | ![Settings](images/oled/settings.png) | ![About](images/oled/about.png) |
+
+| Scene picker | Record status | Volume | Turkish |
+|---|---|---|---|
+| ![Scene picker](images/oled/wheel-scene.png) | ![Record status](images/oled/wheel-status.png) | ![Volume](images/oled/wheel-volume.png) | ![Turkish menu](images/oled/menu-tr.png) |
 
 - **Boot** — branded "MKYADA loading" screen from the first frame; no
   CircuitPython console text.

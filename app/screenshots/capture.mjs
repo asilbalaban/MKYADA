@@ -31,12 +31,24 @@ const PAGES = [
   { id: "devices", label: "Devices", settle: 500 },
   { id: "setup", label: "Setup", settle: 600 },
   { id: "keys", label: "Keys", settle: 1400, selectKey: true },
-  { id: "recorder", label: "Recorder", settle: 500 },
+  // The Recorder opens on an empty "record or import a macro to begin" state,
+  // which is a poor advertisement for the page people are most curious about.
+  // Hand it the fixture's recorded macro the way a user would — from the Keys
+  // page's "Edit in Recorder" — so the shot shows the editor with events in it.
+  { id: "recorder", label: "Recorder", settle: 700, viaHandoff: true },
   { id: "profiles", label: "Profiles", settle: 500 },
-  { id: "settings", label: "Settings", settle: 500 },
+  // Settings is tabbed; every tab gets its own shot so the docs can walk the
+  // whole page. The first one keeps the plain `-settings` name that README,
+  // docs/ and the landing page already link to.
+  { id: "settings", label: "Settings", settle: 500, tabs: true },
 ];
+/** The fixture key whose assignment is a recorded macro (fixtures.ts). */
+const RECORDED_KEY = /Post the clip/;
+// Rendered by scripts/render-oled.py into screenshots/oled-frames.js — the
+// firmware's own drawing code, so these are photographs of the device rather
+// than an artist's impression of it.
 const OLED_SHOTS = ["home", "grid", "speed", "settings", "about",
-  "wheel-scene", "wheel-status", "wheel-volume"];
+  "wheel-scene", "wheel-status", "wheel-volume", "menu-tr"];
 
 async function waitForServer(url, tries = 100) {
   for (let i = 0; i < tries; i++) {
@@ -93,9 +105,19 @@ async function main() {
 
       for (const p of PAGES) {
         try {
-          await page
-            .locator('nav[aria-label="Main"] button', { hasText: p.label })
-            .click();
+          if (p.viaHandoff) {
+            // Keys → the recorded key → "Edit in Recorder", which is exactly
+            // the route a user takes and leaves the editor populated.
+            await page.locator('nav[aria-label="Main"] button', { hasText: "Keys" }).click();
+            await page.waitForTimeout(600);
+            await page.getByRole("button", { name: RECORDED_KEY }).first().click();
+            await page.waitForTimeout(300);
+            await page.getByRole("button", { name: /Edit in Recorder/i }).click();
+          } else {
+            await page
+              .locator('nav[aria-label="Main"] button', { hasText: p.label })
+              .click();
+          }
           await page.waitForTimeout(p.settle);
           if (p.selectKey) {
             // open the assignment editor on key 1 for the richest single shot
@@ -105,6 +127,20 @@ async function main() {
               .click()
               .catch(() => {});
             await page.waitForTimeout(400);
+          }
+          if (p.tabs) {
+            const tabs = page.locator('[role="tab"]');
+            const n = await tabs.count();
+            for (let i = 0; i < n; i++) {
+              const tab = tabs.nth(i);
+              const id = (await tab.getAttribute("id"))?.replace("settings-tab-", "") ?? String(i);
+              await tab.click();
+              await page.waitForTimeout(350);
+              const name = i === 0 ? `${model}-${p.id}` : `${model}-${p.id}-${id}`;
+              await page.screenshot({ path: resolve(SCREENS_DIR, `${name}.png`) });
+              console.log(`  ✓ ${name}.png`);
+            }
+            continue;
           }
           const out = resolve(SCREENS_DIR, `${model}-${p.id}.png`);
           await page.screenshot({ path: out });
@@ -129,11 +165,14 @@ async function main() {
       await page.close();
     }
 
-    // OLED mockups (Vision 6 on-device screens)
-    console.log(`\n· OLED mockups…`);
+    // Vision 6 on-device screens, straight from the firmware renderer
+    console.log(`\n· OLED screens…`);
     const oled = await context.newPage();
     await oled.goto(`${BASE}/screenshots/oled.html`, { waitUntil: "networkidle" });
-    await oled.waitForTimeout(300);
+    // the bitmaps are decoded with createImageBitmap, which resolves a tick
+    // after load — wait for the last one to actually be on its canvas
+    await oled.locator(`#oled-${OLED_SHOTS[OLED_SHOTS.length - 1]} canvas`).waitFor();
+    await oled.waitForTimeout(600);
     for (const id of OLED_SHOTS) {
       try {
         const el = oled.locator(`#oled-${id}`);

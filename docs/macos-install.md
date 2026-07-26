@@ -26,7 +26,7 @@ of these instead:
 ## Permissions
 
 The app guides you through this on first launch (a banner appears until
-everything is set; full status lives in **Settings → macOS permissions** with
+everything is set; full status lives in **Settings → Application → macOS permissions** with
 one-click buttons into System Settings):
 
 | Permission | Needed for | Where |

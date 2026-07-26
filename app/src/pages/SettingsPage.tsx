@@ -1,9 +1,25 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { getVersion } from "@tauri-apps/api/app";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { AppWindow, Gauge, HardDrive, Layers, Monitor, Moon, Pin, Power, Rocket, Sun, Video } from "lucide-react";
+import {
+  AppWindow,
+  Gauge,
+  HardDrive,
+  Info,
+  Keyboard,
+  Layers,
+  Monitor,
+  Moon,
+  Pin,
+  Plug,
+  Power,
+  Rocket,
+  Sun,
+  Video,
+  type LucideIcon,
+} from "lucide-react";
 import { ipc } from "../lib/ipc";
 import { keysCache } from "../lib/keys-cache";
 import { useDevice } from "../lib/device";
@@ -47,8 +63,11 @@ function SoundOutputCard() {
   // refresh the device list every time the card mounts — virtual devices
   // (BlackHole, VB-Cable) come and go with their driver/app
   useEffect(() => {
+    // Anything but an array is treated as "no devices". A backend that answers
+    // null (no audio host, an older build) used to take the whole Settings page
+    // down on the next render — `outputs.includes(...)` below.
     void invoke<string[]>("sound_outputs")
-      .then(setOutputs)
+      .then((v) => setOutputs(Array.isArray(v) ? v : []))
       .catch(() => setOutputs([]));
   }, []);
 
@@ -595,15 +614,31 @@ function WheelMenuCard() {
   );
 }
 
-export function SettingsPage() {
+function AboutCard() {
   const [version, setVersion] = useState("");
-  const [update, setUpdate] = useState<UpdateInfo | null>(null);
-  const [checking, setChecking] = useState(false);
-  const [error, setError] = useState("");
-
   useEffect(() => {
     void getVersion().then(setVersion);
   }, []);
+  return (
+    <Card title="About">
+      <div className="flex flex-col gap-2 text-sm text-fg">
+        <p>
+          <span className="font-semibold">MKYADA</span> — Macro Keypad You Always Dream About
+        </p>
+        <p className="text-fg-faint">App version {version || "…"}</p>
+        <Button variant="ghost" className="self-start px-0 text-accent"
+          onClick={() => void openUrl("https://github.com/asilbalaban/MKYADA")}>
+          github.com/asilbalaban/MKYADA
+        </Button>
+      </div>
+    </Card>
+  );
+}
+
+function UpdatesCard() {
+  const [update, setUpdate] = useState<UpdateInfo | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [error, setError] = useState("");
 
   async function check() {
     setChecking(true);
@@ -618,60 +653,130 @@ export function SettingsPage() {
   }
 
   return (
-    <div className="flex flex-col gap-4 max-w-3xl mx-auto w-full">
-      {/* Info & maintenance first */}
-      <Card title="About">
-        <div className="flex flex-col gap-2 text-sm text-fg">
-          <p>
-            <span className="font-semibold">MKYADA</span> — Macro Keypad You Always Dream About
-          </p>
-          <p className="text-fg-faint">App version {version || "…"}</p>
-          <Button variant="ghost" className="self-start px-0 text-accent"
-            onClick={() => void openUrl("https://github.com/asilbalaban/MKYADA")}>
-            github.com/asilbalaban/MKYADA
+    <Card title="Updates">
+      <div className="flex flex-col gap-3 text-sm">
+        <div className="flex items-center gap-3">
+          <Button onClick={() => void check()} loading={checking}>
+            {checking ? "Checking…" : "Check for updates"}
           </Button>
+          {update &&
+            (update.available ? (
+              <Badge tone="amber">v{update.latest} available</Badge>
+            ) : (
+              <Badge tone="green">up to date (v{update.current})</Badge>
+            ))}
         </div>
-      </Card>
-
-      <Card title="Updates">
-        <div className="flex flex-col gap-3 text-sm">
-          <div className="flex items-center gap-3">
-            <Button onClick={() => void check()} loading={checking}>
-              {checking ? "Checking…" : "Check for updates"}
+        {update?.available && (
+          <div className="flex items-center gap-2">
+            <span className="text-fg-muted">
+              v{update.latest} is out — you're on v{update.current}.
+            </span>
+            <Button variant="primary" onClick={() => void openUrl(update.url)}>
+              Open release page
             </Button>
-            {update &&
-              (update.available ? (
-                <Badge tone="amber">v{update.latest} available</Badge>
-              ) : (
-                <Badge tone="green">up to date (v{update.current})</Badge>
-              ))}
           </div>
-          {update?.available && (
-            <div className="flex items-center gap-2">
-              <span className="text-fg-muted">
-                v{update.latest} is out — you're on v{update.current}.
-              </span>
-              <Button variant="primary" onClick={() => void openUrl(update.url)}>
-                Open release page
-              </Button>
-            </div>
-          )}
-          {error && <p className="text-danger text-xs">{error}</p>}
-        </div>
-      </Card>
+        )}
+        {error && <p className="text-danger text-xs">{error}</p>}
+      </div>
+    </Card>
+  );
+}
 
-      {/* Keypad & system access */}
-      <KeypadCard />
-      <WheelMenuCard />
-      <PermissionsCard />
+/** The page used to be one column of nine unrelated cards — the keypad's own
+ * config sat between an OBS password and a theme picker, and finding anything
+ * meant scrolling past everything. Grouped by *what a setting belongs to*: the
+ * keypad, another program, this app, the product itself. */
+const TABS: { id: string; label: string; icon: LucideIcon; body: () => ReactNode }[] = [
+  {
+    id: "keypad",
+    label: "Keypad",
+    icon: Keyboard,
+    body: () => (
+      <>
+        <KeypadCard />
+        <WheelMenuCard />
+      </>
+    ),
+  },
+  {
+    id: "integrations",
+    label: "Integrations",
+    icon: Plug,
+    body: () => (
+      <>
+        <ObsCard />
+        <SoundOutputCard />
+      </>
+    ),
+  },
+  {
+    id: "app",
+    label: "Application",
+    icon: AppWindow,
+    body: () => (
+      <>
+        <PermissionsCard />
+        <AppearanceCard />
+        <WindowCard />
+      </>
+    ),
+  },
+  {
+    id: "about",
+    label: "About",
+    icon: Info,
+    body: () => (
+      <>
+        <AboutCard />
+        <UpdatesCard />
+      </>
+    ),
+  },
+];
 
-      {/* Integrations */}
-      <ObsCard />
-      <SoundOutputCard />
+export function SettingsPage() {
+  const [tab, setTab] = useState(TABS[0].id);
+  const active = TABS.find((t) => t.id === tab) ?? TABS[0];
 
-      {/* App look & behavior */}
-      <AppearanceCard />
-      <WindowCard />
+  return (
+    <div className="flex flex-col gap-4 max-w-3xl mx-auto w-full">
+      <div
+        role="tablist"
+        aria-label="Settings sections"
+        className="flex gap-1 p-1 bg-panel border border-line rounded-xl"
+      >
+        {TABS.map((t) => {
+          const on = t.id === active.id;
+          return (
+            <button
+              key={t.id}
+              role="tab"
+              aria-selected={on}
+              aria-controls={`settings-${t.id}`}
+              id={`settings-tab-${t.id}`}
+              onClick={() => setTab(t.id)}
+              className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm
+                transition-colors ${
+                  on
+                    ? "bg-panel2 text-accent font-medium"
+                    : "text-fg-muted hover:text-fg"
+                }`}
+            >
+              <t.icon size={15} aria-hidden />
+              {t.label}
+            </button>
+          );
+        })}
+      </div>
+
+      <div
+        role="tabpanel"
+        id={`settings-${active.id}`}
+        aria-labelledby={`settings-tab-${active.id}`}
+        className="flex flex-col gap-4"
+      >
+        {active.body()}
+      </div>
     </div>
   );
 }
