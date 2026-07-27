@@ -1187,6 +1187,29 @@ fn firmware_write_verified(
     Ok(())
 }
 
+/// Write a text file exactly where the user pointed a save dialog. The keypad
+/// backup is the only thing this app writes outside the device itself, so it
+/// gets a narrow command instead of a filesystem capability: the frontend
+/// never names a path the user didn't choose.
+#[tauri::command]
+async fn file_write_text(path: String, content: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        std::fs::write(&path, content).map_err(|e| format!("{path}: {e}"))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Read back a file the user picked in an open dialog (restoring a backup).
+#[tauri::command]
+async fn file_read_text(path: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        std::fs::read_to_string(&path).map_err(|e| format!("{path}: {e}"))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// UF2 bootloader drives currently mounted (a blank or BOOTSEL-held RP2040)
 /// — the targets for provisioning a factory-fresh board.
 #[tauri::command]
@@ -1594,6 +1617,8 @@ pub fn run() {
             firmware_update,
             firmware_diagnose,
             firmware_repair,
+            file_write_text,
+            file_read_text,
             list_bootloader_drives,
             provision_flash_uf2,
             overlay_show,

@@ -47,6 +47,7 @@ import {
 } from "../lib/settings";
 import { Badge, Button, Card, Field, Input, Select, Spinner } from "../components/ui";
 import { PermissionsCard } from "../components/Permissions";
+import { BackupPanel } from "../components/BackupPanel";
 import { useToast } from "../components/toast";
 import { useConfirm } from "../components/dialog";
 
@@ -706,6 +707,7 @@ const TABS: { id: string; label: string; icon: LucideIcon; body: () => ReactNode
       <>
         <KeypadCard />
         <WheelMenuCard />
+        <BackupPanel />
       </>
     ),
   },

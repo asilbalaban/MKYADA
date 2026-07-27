@@ -32,6 +32,11 @@ export const ipc = {
    * recovery wizard — a rescue-mode board can't tell us itself. */
   firmwareRepair: (drive: string, model?: string) =>
     invoke<string[]>("firmware_repair", { drive, model }),
+  /** Write a text file where the user pointed a save dialog (keypad backup). */
+  fileWriteText: (path: string, content: string) =>
+    invoke<void>("file_write_text", { path, content }),
+  /** Read a file the user picked in an open dialog (restoring a backup). */
+  fileReadText: (path: string) => invoke<string>("file_read_text", { path }),
 };
 
 export interface BootloaderDrive {
