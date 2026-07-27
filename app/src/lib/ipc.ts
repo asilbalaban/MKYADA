@@ -24,11 +24,35 @@ export const ipc = {
   /** Copy the bundled CircuitPython UF2 onto a bootloader drive. The drive
    * vanishing right after (board reboots into CircuitPython) is expected. */
   provisionFlashUf2: (mount: string) => invoke<void>("provision_flash_uf2", { mount }),
+  /** How the board's firmware tree differs from the bundled one. Read-only
+   * and cheap (directory listings, not file reads) — safe to run repeatedly. */
+  firmwareDiagnose: (drive: string) => invoke<FirmwareDiagnosis>("firmware_diagnose", { drive }),
+  /** Rewrite the firmware tree, delete what doesn't belong to it, and stamp
+   * the model into config.json. `model` is what the user picked in the
+   * recovery wizard — a rescue-mode board can't tell us itself. */
+  firmwareRepair: (drive: string, model?: string) =>
+    invoke<string[]>("firmware_repair", { drive, model }),
 };
 
 export interface BootloaderDrive {
   path: string;
   boardId: string;
+}
+
+/** Result of `firmwareDiagnose` — paths are device-relative ("mkyada/ui.mpy"). */
+export interface FirmwareDiagnosis {
+  bundle_version: string;
+  device_version: string | null;
+  /** config.json's model, or null when nothing has ever set it. */
+  model: string | null;
+  /** bundle files the board doesn't have at all */
+  missing: string[];
+  /** present, but not the size the bundle's copy has */
+  stale: string[];
+  /** files in the firmware's directories that the bundle doesn't ship */
+  extra: string[];
+  matching: number;
+  total: number;
 }
 
 export function onDeviceMsg(cb: (msg: Record<string, unknown>) => void): Promise<UnlistenFn> {

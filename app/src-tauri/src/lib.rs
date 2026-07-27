@@ -18,7 +18,8 @@ use device::drive::{self, DriveInfo};
 use device::serial::{self, DeviceInfo, DeviceManager};
 use device::serialfs;
 use player::Preview;
-use serde_json::Value;
+use serde_json::{json, Value};
+use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -748,7 +749,125 @@ async fn firmware_update(app: AppHandle, drive: String) -> Result<Vec<String>, S
     .map_err(|e| e.to_string())?
 }
 
+/// Directories the firmware owns outright: everything inside belongs to the
+/// bundle, so a sync may delete whatever the bundle doesn't ship. The user's
+/// own files (config.json, macros/, boot_out.txt) live outside them and are
+/// never touched.
+const FIRMWARE_DIRS: &[&str] = &["mkyada", "lib", "fonts"];
+
+/// Root files the bundle manages. Anything else in / is left alone.
+const FIRMWARE_ROOT_FILES: &[&str] = &["boot.py", "code.py", "settings.toml", "VERSION"];
+
 fn firmware_update_run(app: &AppHandle, drive: &str) -> Result<Vec<String>, String> {
+    firmware_sync_run(app, drive, None)
+}
+
+/// How the board's firmware tree differs from the bundle — the first screen
+/// of the recovery wizard, and the proof afterwards that the repair actually
+/// changed something. Cheap on purpose: sizes come from directory listings,
+/// only VERSION and config.json are read, so it runs in well under a second
+/// even over the serial link.
+#[derive(serde::Serialize)]
+struct FirmwareDiagnosis {
+    bundle_version: String,
+    device_version: Option<String>,
+    /// config.json's model, when the board has one — absent means nobody has
+    /// ever told this board what hardware it is (the wizard asks).
+    model: Option<String>,
+    /// bundle files the board doesn't have at all
+    missing: Vec<String>,
+    /// present, but not the size the bundle's copy has
+    stale: Vec<String>,
+    /// files inside the firmware's directories that the bundle doesn't ship
+    extra: Vec<String>,
+    /// bundle files that already match
+    matching: usize,
+    total: usize,
+}
+
+#[tauri::command]
+async fn firmware_diagnose(app: AppHandle, drive: String) -> Result<FirmwareDiagnosis, String> {
+    tauri::async_runtime::spawn_blocking(move || firmware_diagnose_run(&app, &drive))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+fn firmware_diagnose_run(app: &AppHandle, drive: &str) -> Result<FirmwareDiagnosis, String> {
+    let files = bundle_files(app)?;
+    let tree = device_tree(app, drive)?;
+
+    let mut d = FirmwareDiagnosis {
+        bundle_version: text_of(&files, "VERSION"),
+        device_version: read_from_device(app, drive, "VERSION")
+            .ok()
+            .map(|b| String::from_utf8_lossy(&b).trim().to_string()),
+        model: read_from_device(app, drive, "config.json")
+            .ok()
+            .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+            .and_then(|v| v.get("model").and_then(Value::as_str).map(str::to_string)),
+        missing: Vec::new(),
+        stale: Vec::new(),
+        extra: Vec::new(),
+        matching: 0,
+        total: files.len(),
+    };
+    for (path, content) in &files {
+        match tree.get(path) {
+            None => d.missing.push(path.clone()),
+            // Size is enough to separate versions of a module and costs no
+            // reads. Two builds of the same file that differ only in bytes
+            // are rewritten by the repair anyway — it never skips a file.
+            Some(&size) if size != content.len() as u64 => d.stale.push(path.clone()),
+            Some(_) => d.matching += 1,
+        }
+    }
+    let bundled: std::collections::HashSet<&str> = files.iter().map(|(p, _)| p.as_str()).collect();
+    d.extra = tree
+        .keys()
+        .filter(|p| !bundled.contains(p.as_str()))
+        .cloned()
+        .collect();
+    Ok(d)
+}
+
+fn text_of(files: &[(String, Vec<u8>)], path: &str) -> String {
+    files
+        .iter()
+        .find(|(p, _)| p == path)
+        .map(|(_, c)| String::from_utf8_lossy(c).trim().to_string())
+        .unwrap_or_default()
+}
+
+fn read_from_device(app: &AppHandle, drive: &str, rel: &str) -> Result<Vec<u8>, String> {
+    if serialfs::is_serial(drive) {
+        serialfs::read_file(&app.state::<DeviceManager>(), rel)
+    } else {
+        drive::read_file_bytes(drive, rel)
+    }
+}
+
+/// Full repair: rewrite the firmware tree, delete what doesn't belong, and
+/// stamp the model the user picked. Same machinery as an update — the
+/// difference is that a rescue-mode board can't tell us what it is, so the
+/// wizard supplies the model instead of reading it off the device.
+#[tauri::command]
+async fn firmware_repair(
+    app: AppHandle,
+    drive: String,
+    model: Option<String>,
+) -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        emit_status(&app, "transfer");
+        let r = firmware_sync_run(&app, &drive, model.as_deref());
+        emit_result_status(&app, &r);
+        r
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// The bundled firmware tree as (device path, contents), in install order.
+fn bundle_files(app: &AppHandle) -> Result<Vec<(String, Vec<u8>)>, String> {
     let src = app
         .path()
         .resolve("firmware", tauri::path::BaseDirectory::Resource)
@@ -800,7 +919,24 @@ fn firmware_update_run(app: &AppHandle, drive: &str) -> Result<Vec<String>, Stri
     // device on every key press).
     let version = std::fs::read(src.join("VERSION")).map_err(|e| e.to_string())?;
     files.push(("VERSION".to_string(), version));
+    Ok(files)
+}
 
+/// Install the bundle and make the device's firmware directories MATCH it:
+/// write every file, then delete whatever the bundle no longer ships.
+///
+/// The delete half is what keeps a half-finished update from becoming a
+/// permanent one. An update that only ever wrote left the board holding a mix
+/// of versions — a new `app.mpy` importing a name its stale `models.py` never
+/// defined — and re-running the same update reproduced the same mix, because
+/// nothing ever removed the stale file. `model` (recovery only) is stamped
+/// into config.json once the tree has landed.
+fn firmware_sync_run(
+    app: &AppHandle,
+    drive: &str,
+    model: Option<&str>,
+) -> Result<Vec<String>, String> {
+    let files = bundle_files(app)?;
     let total_bytes: usize = files.iter().map(|(_, c)| c.len()).sum();
     let total_files = files.len();
     // Lock the keypad (best-effort: pre-v7 firmware answers err/nothing and
@@ -814,7 +950,14 @@ fn firmware_update_run(app: &AppHandle, drive: &str) -> Result<Vec<String>, Stri
     }
     let result = firmware_write_all(app, drive, &files, total_bytes, total_files);
     if result.is_ok() {
-        firmware_prune_obsolete(app, drive);
+        firmware_prune_extra(app, drive, &files);
+        if let Some(m) = model {
+            // Best-effort: a board whose tree is now correct must not be
+            // reported as failed because only the model stamp missed.
+            if let Err(e) = firmware_write_model(app, drive, m) {
+                dbg_log!("model stamp failed: {e}");
+            }
+        }
     }
     if result.is_err() {
         // release the lock so the keypad goes back to being a keypad
@@ -824,46 +967,105 @@ fn firmware_update_run(app: &AppHandle, drive: &str) -> Result<Vec<String>, Stri
     result
 }
 
-/// Files earlier firmware shipped that the current bundle has no use for.
+/// Delete everything inside the firmware's own directories that the bundle
+/// doesn't ship: the stale `.py` twin of a module now compiled to `.mpy`, a
+/// module a later version renamed or dropped, libraries a rewrite retired
+/// (the 0.20.0 framebuffer work left ~248KB of adafruit_display_text and
+/// adafruit_bitmap_font on every board that upgraded rather than being
+/// flashed fresh), fonts an older UI used.
 ///
-/// An update only ever writes, so nothing on the board is ever reclaimed. The
-/// framebuffer rewrite (firmware 0.20.0) dropped adafruit_display_text,
-/// adafruit_bitmap_font and both BDFs — about 248KB of a 1MB flash — and
-/// without this they sit there forever on every keypad that upgrades rather
-/// than being flashed fresh. Deletes are best-effort: a board that never had
-/// the file answers "not found", which is the outcome we want anyway.
-const OBSOLETE_FILES: &[&str] = &[
-    "fonts/4x6.bdf",
-    "fonts/spleen-5x8.bdf",
-    "lib/adafruit_display_text/__init__.mpy",
-    "lib/adafruit_display_text/__init__.py",
-    "lib/adafruit_display_text/bitmap_label.mpy",
-    "lib/adafruit_display_text/bitmap_label.py",
-    "lib/adafruit_display_text/label.mpy",
-    "lib/adafruit_display_text/label.py",
-    "lib/adafruit_display_text/outlined_label.mpy",
-    "lib/adafruit_display_text/scrolling_label.mpy",
-    "lib/adafruit_display_text/text_box.mpy",
-    "lib/adafruit_bitmap_font/__init__.mpy",
-    "lib/adafruit_bitmap_font/__init__.py",
-    "lib/adafruit_bitmap_font/bdf.mpy",
-    "lib/adafruit_bitmap_font/bdf.py",
-    "lib/adafruit_bitmap_font/bitmap_font.mpy",
-    "lib/adafruit_bitmap_font/bitmap_font.py",
-    "lib/adafruit_bitmap_font/glyph_cache.mpy",
-    "lib/adafruit_bitmap_font/glyph_cache.py",
-    "lib/adafruit_bitmap_font/pcf.mpy",
-    "lib/adafruit_bitmap_font/ttf.mpy",
-];
-
-fn firmware_prune_obsolete(app: &AppHandle, drive: &str) {
-    for rel in OBSOLETE_FILES {
+/// Best-effort per file: a delete that fails costs flash, not correctness, so
+/// it must never fail an otherwise-good install.
+fn firmware_prune_extra(app: &AppHandle, drive: &str, files: &[(String, Vec<u8>)]) {
+    let bundled: std::collections::HashSet<&str> =
+        files.iter().map(|(p, _)| p.as_str()).collect();
+    let tree = match device_tree(app, drive) {
+        Ok(t) => t,
+        Err(e) => return dbg_log!("prune: cannot list the device tree: {e}"),
+    };
+    for path in tree.keys() {
+        if bundled.contains(path.as_str()) {
+            continue;
+        }
+        dbg_log!("prune {path}");
         let _ = if serialfs::is_serial(drive) {
-            serialfs::delete_file(&app.state::<DeviceManager>(), rel)
+            serialfs::delete_file(&app.state::<DeviceManager>(), path)
         } else {
-            drive::delete_file(drive, rel)
+            drive::delete_file(drive, path)
         };
     }
+}
+
+/// Every firmware-owned file on the device, as `path -> size`. Only the
+/// directories the bundle owns plus the root files it manages: the user's
+/// config.json, macros/ and the board's own boot_out.txt stay out of it, so
+/// nothing here can ever be pruned by mistake.
+fn device_tree(app: &AppHandle, drive: &str) -> Result<BTreeMap<String, u64>, String> {
+    let mut out = BTreeMap::new();
+    for e in device_entries(app, drive, "")? {
+        if !e.dir && FIRMWARE_ROOT_FILES.contains(&e.name.as_str()) {
+            out.insert(e.name, e.size);
+        }
+    }
+    for dir in FIRMWARE_DIRS {
+        device_collect(app, drive, dir, &mut out)?;
+    }
+    Ok(out)
+}
+
+fn device_collect(
+    app: &AppHandle,
+    drive: &str,
+    dir: &str,
+    out: &mut BTreeMap<String, u64>,
+) -> Result<(), String> {
+    for e in device_entries(app, drive, dir)? {
+        let path = format!("{dir}/{}", e.name);
+        if e.dir {
+            device_collect(app, drive, &path, out)?;
+        } else {
+            out.insert(path, e.size);
+        }
+    }
+    Ok(())
+}
+
+fn device_entries(app: &AppHandle, drive: &str, rel: &str) -> Result<Vec<device::Entry>, String> {
+    if serialfs::is_serial(drive) {
+        serialfs::list_entries(&app.state::<DeviceManager>(), rel)
+    } else {
+        drive::list_entries(drive, rel)
+    }
+}
+
+/// Stamp the hardware model into config.json. In rescue mode the firmware
+/// never ran, so nothing on the board knows which model this is — boot.py
+/// reads this field to pick the USB product name and the recovery pin, and
+/// the running firmware to pick the display, encoder and key wiring. The rest
+/// of the user's config is preserved; an unreadable one is rebuilt minimally
+/// (the firmware fills every absent field from its own defaults).
+fn firmware_write_model(app: &AppHandle, drive: &str, model: &str) -> Result<(), String> {
+    let existing = if serialfs::is_serial(drive) {
+        serialfs::read_file(&app.state::<DeviceManager>(), "config.json").ok()
+    } else {
+        drive::read_file_bytes(drive, "config.json").ok()
+    };
+    let mut cfg = existing
+        .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+        .and_then(|v| v.as_object().cloned())
+        .unwrap_or_default();
+    cfg.entry("format").or_insert_with(|| json!("mkyada-config"));
+    cfg.entry("version").or_insert_with(|| json!(1));
+    cfg.insert("model".into(), json!(model));
+    // A Vision 6 has exactly six macro keys; a config carrying a Core 6's
+    // higher count would be clamped by the firmware anyway, and a wrong count
+    // here is what draws the wrong number of keys in the app.
+    if model == "vision6" {
+        cfg.insert("key_count".into(), json!(6));
+        cfg.insert("layer_key".into(), Value::Null);
+    }
+    let body = serde_json::to_vec_pretty(&Value::Object(cfg)).map_err(|e| e.to_string())?;
+    write_to_device_bytes(app, drive, "config.json", &body)
 }
 
 fn firmware_write_all(
@@ -1361,6 +1563,8 @@ pub fn run() {
             app_restart,
             firmware_bundled_version,
             firmware_update,
+            firmware_diagnose,
+            firmware_repair,
             list_bootloader_drives,
             provision_flash_uf2,
             overlay_show,

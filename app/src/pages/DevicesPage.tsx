@@ -19,6 +19,7 @@ import {
 import { Badge, Button, Card, EmptyState, Field, Input } from "../components/ui";
 import { ProductImage } from "../components/ProductImage";
 import { ProvisionWizard } from "../components/ProvisionWizard";
+import { RecoveryWizard } from "../components/RecoveryWizard";
 import { useToast } from "../components/toast";
 import { useConfirm } from "../components/dialog";
 
@@ -44,7 +45,14 @@ export function DevicesPage({ onConnected }: { onConnected: () => void }) {
   const [bundledFw, setBundledFw] = useState("");
   const [fwProgress, setFwProgress] = useState<FirmwareProgress | null>(null);
   const [provisioning, setProvisioning] = useState(false);
+  const [recovery, setRecovery] = useState(false);
   const rescue = hello?.mode === "rescue";
+
+  // A keypad that answered from its rescue console is already broken — open
+  // the wizard on sight rather than making the owner find the button.
+  useEffect(() => {
+    if (rescue) setRecovery(true);
+  }, [rescue]);
 
   useEffect(() => {
     const un = onFirmwareProgress(setFwProgress);
@@ -87,11 +95,9 @@ export function DevicesPage({ onConnected }: { onConnected: () => void }) {
     toast.success("Nickname saved");
   }
 
-  async function updateFirmware(reinstall = false, repair = false) {
+  async function updateFirmware(reinstall = false) {
     if (!hello || !drive) return;
-    const ok =
-      repair ||
-      (await confirm({
+    const ok = await confirm({
         title: reinstall ? "Reinstall firmware" : "Update firmware",
         message: reinstall
           ? `Rewrite every firmware file on the keypad with the bundled v${bundledFw}, ` +
@@ -102,8 +108,8 @@ export function DevicesPage({ onConnected }: { onConnected: () => void }) {
           : `Update the device firmware from v${hello.fw} to v${bundledFw}?\n\n` +
             "Your key assignments, macros and config stay untouched. " +
             "The keypad restarts and reconnects automatically.",
-        confirmLabel: reinstall ? "Reinstall" : "Update",
-      }));
+      confirmLabel: reinstall ? "Reinstall" : "Update",
+    });
     if (!ok) return;
     setUpdating(true);
     setFwProgress(null);
@@ -122,7 +128,7 @@ export function DevicesPage({ onConnected }: { onConnected: () => void }) {
       // Drop the now-dead connection so auto-connect reattaches cleanly.
       await disconnect().catch(() => {});
       toast.success(
-        `Firmware ${repair ? "repaired" : reinstall ? "reinstalled" : "updated"} (${files.length} files written)`,
+        `Firmware ${reinstall ? "reinstalled" : "updated"} (${files.length} files written)`,
         "The keypad is restarting — it will reconnect in a few seconds.",
       );
     } catch (e) {
@@ -252,16 +258,13 @@ export function DevicesPage({ onConnected }: { onConnected: () => void }) {
                       {hello.err}
                     </p>
                   )}
-                  <div>
-                    <Button
-                      variant="primary"
-                      onClick={() => void updateFirmware(true, true)}
-                      disabled={!drive}
-                      loading={updating}
-                    >
-                      {updating ? "Repairing…" : `Repair firmware (v${bundledFw})`}
-                    </Button>
-                  </div>
+                  {!recovery && (
+                    <div>
+                      <Button variant="primary" onClick={() => setRecovery(true)}>
+                        Start recovery
+                      </Button>
+                    </div>
+                  )}
                 </div>
               </div>
             )}
@@ -325,6 +328,14 @@ export function DevicesPage({ onConnected }: { onConnected: () => void }) {
                     >
                       {updating ? "Reinstalling…" : "Reinstall firmware"}
                     </Button>
+                    {!recovery && (
+                      <Button
+                        onClick={() => setRecovery(true)}
+                        title="Check the firmware files on the keypad and repair what doesn't match"
+                      >
+                        <LifeBuoy size={14} aria-hidden /> Recovery
+                      </Button>
+                    )}
                   </div>
                 )
               ))}
@@ -337,6 +348,12 @@ export function DevicesPage({ onConnected }: { onConnected: () => void }) {
           />
         )}
       </Card>
+
+      {recovery && (
+        <Card title="Recovery">
+          <RecoveryWizard onClose={() => setRecovery(false)} />
+        </Card>
+      )}
 
       <Card
         title="Plugged in — ready to connect"

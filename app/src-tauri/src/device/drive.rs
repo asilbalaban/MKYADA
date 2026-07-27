@@ -242,6 +242,27 @@ pub fn delete_file(drive: &str, rel: &str) -> Result<(), String> {
     fs::remove_file(safe_join(drive, rel)?).map_err(|e| e.to_string())
 }
 
+/// Directory entries with sizes, for the repair diagnosis. Unlike `list_dir`
+/// this keeps subdirectories (lib/ nests) and reports sizes so a stale module
+/// can be told from a current one. Missing dir = empty.
+pub fn list_entries(drive: &str, rel: &str) -> Result<Vec<super::Entry>, String> {
+    let path = safe_join(drive, rel)?;
+    let Ok(entries) = fs::read_dir(path) else {
+        return Ok(Vec::new());
+    };
+    Ok(entries
+        .flatten()
+        .filter_map(|e| {
+            let name = e.file_name().into_string().ok()?;
+            if name.starts_with('.') {
+                return None;
+            }
+            let md = e.metadata().ok()?;
+            Some(super::Entry { name, size: md.len(), dir: md.is_dir() })
+        })
+        .collect())
+}
+
 /// File names in a directory on the drive (e.g. "macros"). Missing dir = empty.
 pub fn list_dir(drive: &str, rel: &str) -> Result<Vec<String>, String> {
     let path = safe_join(drive, rel)?;

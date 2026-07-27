@@ -442,35 +442,50 @@ pub fn delete_file(mgr: &DeviceManager, path: &str) -> Result<(), String> {
 /// File names in a directory, matching drive::list_dir semantics
 /// (files only, dotfiles skipped, missing directory = empty list).
 pub fn list_dir(mgr: &DeviceManager, path: &str) -> Result<Vec<String>, String> {
+    Ok(list_entries(mgr, path)?
+        .into_iter()
+        .filter(|e| !e.dir)
+        .map(|e| e.name)
+        .collect())
+}
+
+/// Directory entries with sizes and subdirectories intact — what the repair
+/// diagnosis needs to tell a stale module from a current one.
+pub fn list_entries(mgr: &DeviceManager, path: &str) -> Result<Vec<super::Entry>, String> {
     let path = rel(path)?;
     // Big directories can OOM the reply on the device — retry like reads do
     // (never stopping playback), though pagination makes it rare.
     with_recovery(mgr, false, |mgr| list_once(mgr, path))
 }
 
-fn list_once(mgr: &DeviceManager, path: &str) -> Result<Vec<String>, String> {
+fn list_once(mgr: &DeviceManager, path: &str) -> Result<Vec<super::Entry>, String> {
     let op = Op::begin(mgr)?;
     op.send(&json!({"t": "fs_list", "path": path}))?;
     // Firmware ≥ 0.18.1 paginates big directories: each page carries
     // "more": true until the final one. A single un-flagged reply (older
     // firmware, small dirs) is simply the first-and-last page.
-    let mut names: Vec<String> = Vec::new();
+    let mut out: Vec<super::Entry> = Vec::new();
     loop {
         let v = op.recv()?;
         match v.get("t").and_then(Value::as_str) {
             Some("fs_list") => {
                 if let Some(entries) = v.get("entries").and_then(Value::as_array) {
-                    names.extend(
-                        entries
-                            .iter()
-                            .filter(|e| !e.get("dir").and_then(Value::as_bool).unwrap_or(false))
-                            .filter_map(|e| e.get("name").and_then(Value::as_str))
-                            .filter(|n| !n.starts_with('.'))
-                            .map(str::to_string),
-                    );
+                    for e in entries {
+                        let Some(name) = e.get("name").and_then(Value::as_str) else {
+                            continue;
+                        };
+                        if name.starts_with('.') {
+                            continue;
+                        }
+                        out.push(super::Entry {
+                            name: name.to_string(),
+                            size: e.get("size").and_then(Value::as_u64).unwrap_or(0),
+                            dir: e.get("dir").and_then(Value::as_bool).unwrap_or(false),
+                        });
+                    }
                 }
                 if !v.get("more").and_then(Value::as_bool).unwrap_or(false) {
-                    return Ok(names);
+                    return Ok(out);
                 }
             }
             Some("err") if v.get("code").and_then(Value::as_str) == Some("not_found") => {
