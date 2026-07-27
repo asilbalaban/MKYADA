@@ -866,6 +866,28 @@ async fn firmware_repair(
     .map_err(|e| e.to_string())?
 }
 
+/// Is this bundle file worth installing, or is it something an earlier build
+/// left in the resource directory?
+///
+/// The app's resource dir is not rebuilt from scratch: the bundler copies the
+/// current firmware tree in without removing what a previous build put there.
+/// So a module retired three releases ago, or the `.py` source of a module
+/// that is now shipped compiled, can outlive the tree it came from — and then
+/// gets faithfully installed onto a keypad. That is the same mixed-version
+/// state the recovery wizard exists to clean up, sourced from our own side of
+/// the wire: CircuitPython imports `models.mpy` over `models.py`, so the
+/// stale source rides along invisibly until a partial write makes it the one
+/// that loads. Ship the compiled module alone, and never ship `__pycache__`.
+fn keep_bundle_file(rel: &str, present: &std::collections::HashSet<&str>) -> bool {
+    if rel.split('/').any(|c| c == "__pycache__") {
+        return false;
+    }
+    match rel.strip_suffix(".py") {
+        Some(stem) => !present.contains(format!("{stem}.mpy").as_str()),
+        None => true,
+    }
+}
+
 /// The bundled firmware tree as (device path, contents), in install order.
 fn bundle_files(app: &AppHandle) -> Result<Vec<(String, Vec<u8>)>, String> {
     let src = app
@@ -890,25 +912,32 @@ fn bundle_files(app: &AppHandle) -> Result<Vec<(String, Vec<u8>)>, String> {
     }
     // Firmware modules: release bundles ship precompiled .mpy (no on-device
     // compile — the RP2040 heap can't always compile the big modules from
-    // source), dev builds ship .py. Take whichever the bundle has.
+    // source), dev builds ship .py. Take whichever the bundle has. Vendored
+    // libraries and fonts come along too: they must match the code that
+    // imports them. Collected as one path list so the filter below can see
+    // the whole picture before anything is read.
+    let mut rels: Vec<String> = Vec::new();
     let modules = std::fs::read_dir(src.join("mkyada")).map_err(|e| e.to_string())?;
     for entry in modules.flatten() {
         let file = entry.file_name().to_string_lossy().into_owned();
-        if !(file.ends_with(".py") || file.ends_with(".mpy")) {
-            continue;
+        if file.ends_with(".py") || file.ends_with(".mpy") {
+            rels.push(format!("mkyada/{file}"));
         }
-        let content = std::fs::read(entry.path()).map_err(|e| format!("{file}: {e}"))?;
-        files.push((format!("mkyada/{file}"), content));
     }
-    // Vendored CircuitPython libraries and fonts ship with the firmware
-    // and must match the code that imports them — install every file,
-    // preserving the directory layout. BDF fonts aren't guaranteed to be
-    // valid UTF-8, so everything rides the bytes path.
     for dir in ["lib", "fonts"] {
-        for rel in walk_files(&src.join(dir), dir)? {
-            let content = std::fs::read(src.join(&rel)).map_err(|e| format!("{rel}: {e}"))?;
-            files.push((rel, content));
-        }
+        rels.extend(walk_files(&src.join(dir), dir)?);
+    }
+    let present: std::collections::HashSet<&str> = rels.iter().map(String::as_str).collect();
+    let keep: Vec<String> = rels
+        .iter()
+        .filter(|r| keep_bundle_file(r, &present))
+        .cloned()
+        .collect();
+    // BDF fonts aren't guaranteed to be valid UTF-8, so everything rides the
+    // bytes path.
+    for rel in keep {
+        let content = std::fs::read(src.join(&rel)).map_err(|e| format!("{rel}: {e}"))?;
+        files.push((rel, content));
     }
     // VERSION goes LAST: if the transfer dies midway the device keeps
     // reporting its old version, so the "update available" banner comes

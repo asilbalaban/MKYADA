@@ -138,6 +138,23 @@ async function main() {
     log(`compiled ${n} modules to .mpy (CircuitPython ${CP_VERSION})`);
   }
 
+  // Drop the copies the Tauri bundler made of an EARLIER dist. It copies
+  // resources in without removing what a previous build left, so those
+  // directories only ever grow: a debug build was found holding 64 files —
+  // both halves of every module (.py beside .mpy), __pycache__, and the
+  // adafruit_bitmap_font/adafruit_display_text libraries retired in 0.20.0 —
+  // against 19 in the dist it was built from. The app installs what it finds
+  // there, so that stale tree went onto a keypad verbatim and put it back in
+  // the mixed-version state the recovery wizard exists to undo. Deleting them
+  // is safe: the bundler re-creates them from DIST on the next build.
+  for (const profile of ["debug", "release"]) {
+    const stale = path.join(ROOT, "app", "src-tauri", "target", profile, "firmware");
+    if (fs.existsSync(stale)) {
+      fs.rmSync(stale, { recursive: true, force: true });
+      log(`cleared stale resource copy: target/${profile}/firmware`);
+    }
+  }
+
   const version = fs.readFileSync(path.join(DIST, "VERSION"), "utf8").trim();
   log(`firmware-dist ready: v${version}${mpyCross ? "" : " (source-only)"}`);
 }
