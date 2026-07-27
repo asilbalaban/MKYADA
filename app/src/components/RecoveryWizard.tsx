@@ -159,11 +159,18 @@ export function RecoveryWizard({ onClose }: { onClose: () => void }) {
                     </p>
                     <ul className="text-fg-muted text-xs list-disc pl-4">
                       {diag.stale.length > 0 && (
-                        <li>{diag.stale.length} files are left over from an older version</li>
+                        <li>
+                          {diag.stale.length} files are from an older version — they get replaced
+                        </li>
                       )}
-                      {diag.missing.length > 0 && <li>{diag.missing.length} files are missing</li>}
+                      {diag.missing.length > 0 && (
+                        <li>{diag.missing.length} files are missing — they get installed</li>
+                      )}
                       {diag.extra.length > 0 && (
-                        <li>{diag.extra.length} files don&apos;t belong to this version</li>
+                        <li>
+                          {diag.extra.length} leftover files aren&apos;t part of this firmware —
+                          they get deleted
+                        </li>
                       )}
                       <li>{diag.matching} files are already correct</li>
                     </ul>
@@ -308,10 +315,13 @@ export function RecoveryWizard({ onClose }: { onClose: () => void }) {
 }
 
 function FileList({ diag }: { diag: FirmwareDiagnosis }) {
+  // Labelled by what the repair DOES to each file, not by what's wrong with
+  // it: read as a diagnosis ("doesn't belong"), the leftover list looks like
+  // a list of things about to be installed — the opposite of the truth.
   const rows: [string, string[]][] = [
-    ["Older version", diag.stale],
-    ["Missing", diag.missing],
-    ["Doesn't belong", diag.extra],
+    ["Will be replaced — older version", diag.stale],
+    ["Will be installed — missing", diag.missing],
+    ["Will be deleted — not part of this firmware", diag.extra],
   ];
   return (
     <div className="flex flex-col gap-2 bg-panel2 border border-line rounded-lg p-3 max-h-56 overflow-auto">
