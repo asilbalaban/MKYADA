@@ -45,7 +45,7 @@ import {
   useThemePref,
   useWheelAccel,
 } from "../lib/settings";
-import { Badge, Button, Card, Field, Input, Select, Spinner } from "../components/ui";
+import { Badge, Button, Card, Field, Input, Select, Spinner, Tabs } from "../components/ui";
 import { PermissionsCard } from "../components/Permissions";
 import { BackupPanel } from "../components/BackupPanel";
 import { useToast } from "../components/toast";
@@ -753,43 +753,15 @@ export function SettingsPage() {
 
   return (
     <div className="flex flex-col gap-4 max-w-3xl mx-auto w-full">
-      <div
-        role="tablist"
-        aria-label="Settings sections"
-        className="flex gap-1 p-1 bg-panel border border-line rounded-xl"
-      >
-        {TABS.map((t) => {
-          const on = t.id === active.id;
-          return (
-            <button
-              key={t.id}
-              role="tab"
-              aria-selected={on}
-              aria-controls={`settings-${t.id}`}
-              id={`settings-tab-${t.id}`}
-              onClick={() => setTab(t.id)}
-              className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm
-                transition-colors ${
-                  on
-                    ? "bg-panel2 text-accent font-medium"
-                    : "text-fg-muted hover:text-fg"
-                }`}
-            >
-              <t.icon size={15} aria-hidden />
-              {t.label}
-            </button>
-          );
-        })}
-      </div>
-
-      <div
-        role="tabpanel"
-        id={`settings-${active.id}`}
-        aria-labelledby={`settings-tab-${active.id}`}
-        className="flex flex-col gap-4"
+      <Tabs
+        idPrefix="settings"
+        label="Settings sections"
+        tabs={TABS}
+        value={active.id}
+        onChange={setTab}
       >
         {active.body()}
-      </div>
+      </Tabs>
     </div>
   );
 }

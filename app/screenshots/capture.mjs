@@ -29,7 +29,9 @@ const MODELS = ["core6", "vision6"];
 // nav label -> extra settle for pages that stream data in
 const PAGES = [
   { id: "devices", label: "Devices", settle: 500 },
-  { id: "setup", label: "Setup", settle: 600 },
+  // Setup left the sidebar (issue #42); it opens from a button on Devices, and
+  // like Settings it's tabbed — every tab gets its own shot.
+  { id: "setup", label: "Setup", settle: 600, viaDevices: true, tabs: true },
   { id: "keys", label: "Keys", settle: 1400, selectKey: true },
   // The Recorder opens on an empty "record or import a macro to begin" state,
   // which is a poor advertisement for the page people are most curious about.
@@ -113,6 +115,12 @@ async function main() {
             await page.getByRole("button", { name: RECORDED_KEY }).first().click();
             await page.waitForTimeout(300);
             await page.getByRole("button", { name: /Edit in Recorder/i }).click();
+          } else if (p.viaDevices) {
+            await page
+              .locator('nav[aria-label="Main"] button', { hasText: "Devices" })
+              .click();
+            await page.waitForTimeout(400);
+            await page.getByRole("button", { name: /^Setup$/ }).first().click();
           } else {
             await page
               .locator('nav[aria-label="Main"] button', { hasText: p.label })
@@ -133,7 +141,8 @@ async function main() {
             const n = await tabs.count();
             for (let i = 0; i < n; i++) {
               const tab = tabs.nth(i);
-              const id = (await tab.getAttribute("id"))?.replace("settings-tab-", "") ?? String(i);
+              // ids are `<page>-tab-<section>` (the Tabs component's idPrefix)
+              const id = (await tab.getAttribute("id"))?.replace(`${p.id}-tab-`, "") ?? String(i);
               await tab.click();
               await page.waitForTimeout(350);
               const name = i === 0 ? `${model}-${p.id}` : `${model}-${p.id}-${id}`;

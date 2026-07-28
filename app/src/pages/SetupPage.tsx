@@ -1,19 +1,54 @@
 // Onboarding wizard: key count -> layer choice -> write config.json + reload.
 // Ends with a live key test that doubles as a solder-joint check.
 
-import { Fragment, useEffect, useState } from "react";
-import { Disc3, Pencil, Usb } from "lucide-react";
+import { Fragment, useEffect, useState, type ReactNode } from "react";
+import { Cable, ChevronLeft, ClipboardList, Disc3, Hand, ListOrdered, Pencil, Usb } from "lucide-react";
 import { useDevice } from "../lib/device";
 import { useTestMode } from "../lib/focus";
 import { TestModeBanner } from "../components/TestModeBanner";
 import { useNav } from "../lib/nav";
 import { ipc } from "../lib/ipc";
-import { Button, Card, EmptyState, Field, Input, Select, Spinner, Stepper } from "../components/ui";
+import {
+  Button,
+  Card,
+  EmptyState,
+  Field,
+  Input,
+  Select,
+  Spinner,
+  Stepper,
+  Tabs,
+  type Tab,
+} from "../components/ui";
 import { defaultConfig, macroSlots } from "../lib/macro-model";
 import type { DeviceConfig } from "../lib/types";
 import { MODEL_META, assignablePins, defaultPins, deviceModel } from "../lib/types";
 import { Keypad } from "../components/Keypad";
 import { useToast } from "../components/toast";
+
+/** A configured keypad's Setup, split the same way Settings is: what it *is*,
+ *  then the three things you'd come here to do to it. The four cards used to
+ *  be one scroll, so the wiring panel — the reason people open Setup twice —
+ *  sat below a summary they'd already read. */
+const TABS: Tab[] = [
+  { id: "overview", label: "Overview", icon: ClipboardList },
+  { id: "test", label: "Test", icon: Hand },
+  { id: "wiring", label: "Wiring", icon: Cable },
+  { id: "order", label: "Key order", icon: ListOrdered },
+];
+
+/** Setup is opened from a button on Devices instead of the sidebar (issue #42),
+ *  so no nav item is highlighted while it's open — it carries its own way back. */
+function BackToDevices() {
+  const nav = useNav();
+  return (
+    <div className="-mb-1">
+      <Button variant="ghost" onClick={() => nav("devices")}>
+        <ChevronLeft size={14} aria-hidden /> Devices
+      </Button>
+    </div>
+  );
+}
 
 export function SetupPage({ onDone }: { onDone: () => void }) {
   const { hello, drive, writeAndReload, send, onMsg } = useDevice();
@@ -26,11 +61,9 @@ export function SetupPage({ onDone }: { onDone: () => void }) {
   const [step, setStep] = useState(0);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  // Already-configured keypads get a summary first; the wizard is opt-in.
-  const [view, setView] = useState<"loading" | "summary" | "wizard">("loading");
-  // Pin detection suspends key events on the firmware — pause the live key
-  // test while it runs so the two features never fight over the keypad.
-  const [pinDetecting, setPinDetecting] = useState(false);
+  // Already-configured keypads get the tabbed view; the wizard is opt-in.
+  const [view, setView] = useState<"loading" | "tabs" | "wizard">("loading");
+  const [tab, setTab] = useState<string>(TABS[0].id);
 
   // Try to preload the device's existing config so re-running setup edits it.
   useEffect(() => {
@@ -65,7 +98,7 @@ export function SetupPage({ onDone }: { onDone: () => void }) {
     [onMsg],
   );
 
-  // If the drive already holds a config, show the summary instead of the wizard.
+  // If the drive already holds a config, show the tabs instead of the wizard.
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -77,7 +110,7 @@ export function SetupPage({ onDone }: { onDone: () => void }) {
         const stored = JSON.parse(await ipc.driveRead(drive.path, "config.json"));
         if (cancelled) return;
         setCfg((c) => ({ ...c, ...stored }));
-        setView("summary");
+        setView("tabs");
       } catch {
         if (!cancelled) setView("wizard");
       }
@@ -124,7 +157,10 @@ export function SetupPage({ onDone }: { onDone: () => void }) {
       await writeAndReload([
         { path: "config.json", content: JSON.stringify(next, null, 2) },
       ]);
-      setStep(2);
+      // The config landed — the wizard's job is done. Hand over to the tabs on
+      // Test, which is what the wizard's old third step was.
+      setView("tabs");
+      setTab("test");
     } catch (e) {
       setError(String(e));
     } finally {
@@ -136,94 +172,92 @@ export function SetupPage({ onDone }: { onDone: () => void }) {
     return <p className="text-fg-muted text-sm">Reading the keypad's setup…</p>;
   }
 
-  if (view === "summary") {
+  if (view === "tabs") {
     const identity = cfg.key_map == null || cfg.key_map.every((v, i) => v === i + 1);
-    return (
-      <div className="flex flex-col gap-4 max-w-3xl mx-auto w-full">
-        <Card
-          title="This keypad is set up"
-          actions={
-            <Button
-              variant="primary"
-              onClick={() => {
-                setStep(0);
-                setView("wizard");
-              }}
-            >
-              <Pencil size={14} aria-hidden /> Change setup
-            </Button>
-          }
-        >
-          <div className="grid grid-cols-2 gap-x-6 gap-y-1.5 text-sm text-fg-muted max-w-md">
-            <span>Model</span>
-            <span className="text-fg">{MODEL_META[model].label}</span>
-            <span>Keys</span>
-            <span className="text-fg">{cfg.key_count}</span>
-            <span>Layers</span>
-            <span className="text-fg">
-              {model === "vision6"
-                ? `${cfg.layer_count} — picked with the wheel on the device`
-                : cfg.layer_key
-                  ? `Key ${cfg.layer_key} cycles ${cfg.layer_count} layers`
-                  : "None — every key is a macro"}
-            </span>
-            <span>While a macro plays</span>
-            <span className="text-fg">
-              {cfg.busy_other === "switch"
-                ? "Other keys interrupt and take over"
-                : "Other keys are ignored"}
-            </span>
-            <span>Macro slots</span>
-            <span className="text-fg">{macroSlots(cfg)}</span>
-            {model === "vision6" && (
-              <>
-                <span>Language</span>
-                <span className="text-fg">{cfg.lang === "tr" ? "Türkçe" : "English"}</span>
-              </>
-            )}
-            <span>Screen (mouse macros)</span>
-            <span className="text-fg">
-              {cfg.screen.width} × {cfg.screen.height}
-            </span>
-            <span>Key order</span>
-            <span className="text-fg">
-              {identity ? "Default (GP0…GP5)" : `Remapped (${cfg.key_map!.join(" ")})`}
-            </span>
-          </div>
-          <p className="text-xs text-fg-faint mt-3">
-            Key assignments live on the Keys page — this only covers how the keypad itself is
-            built.
+    const overview = (
+      <Card
+        title="This keypad is set up"
+        actions={
+          <Button
+            variant="primary"
+            onClick={() => {
+              setStep(0);
+              setView("wizard");
+            }}
+          >
+            <Pencil size={14} aria-hidden /> Change setup
+          </Button>
+        }
+      >
+        <div className="grid grid-cols-2 gap-x-6 gap-y-1.5 text-sm text-fg-muted max-w-md">
+          <span>Model</span>
+          <span className="text-fg">{MODEL_META[model].label}</span>
+          <span>Keys</span>
+          <span className="text-fg">{cfg.key_count}</span>
+          <span>Layers</span>
+          <span className="text-fg">
+            {model === "vision6"
+              ? `${cfg.layer_count} — picked with the wheel on the device`
+              : cfg.layer_key
+                ? `Key ${cfg.layer_key} cycles ${cfg.layer_count} layers`
+                : "None — every key is a macro"}
+          </span>
+          <span>While a macro plays</span>
+          <span className="text-fg">
+            {cfg.busy_other === "switch"
+              ? "Other keys interrupt and take over"
+              : "Other keys are ignored"}
+          </span>
+          <span>Macro slots</span>
+          <span className="text-fg">{macroSlots(cfg)}</span>
+          {model === "vision6" && (
+            <>
+              <span>Language</span>
+              <span className="text-fg">{cfg.lang === "tr" ? "Türkçe" : "English"}</span>
+            </>
+          )}
+          <span>Screen (mouse macros)</span>
+          <span className="text-fg">
+            {cfg.screen.width} × {cfg.screen.height}
+          </span>
+          <span>Key order</span>
+          <span className="text-fg">
+            {identity ? "Default (GP0…GP5)" : `Remapped (${cfg.key_map!.join(" ")})`}
+          </span>
+        </div>
+        <p className="text-xs text-fg-faint mt-3">
+          Key assignments live on the Keys page — this only covers how the keypad itself is built.
+        </p>
+      </Card>
+    );
+
+    const test = (
+      <Card title="Live key test — press your physical keys">
+        <div className="flex flex-col gap-4">
+          <TestCardNotice send={send} />
+          <p className="text-sm text-fg-muted">
+            Pressing a key should light it up below. If a key doesn't react, check its solder joint
+            — or fix its wiring on the Wiring tab.
           </p>
-        </Card>
-
-        <Card title="Live key test — press your physical keys">
-          <div className="flex flex-col gap-4">
-            <TestCardNotice send={send} />
-            {pinDetecting ? (
-              <p className="text-sm text-fg-muted">
-                Key test paused while pin detection is running below.
-              </p>
-            ) : (
-              <>
-                <p className="text-sm text-fg-muted">
-                  Pressing a key should light it up below. If a key doesn't react, check its solder
-                  joint.
-                </p>
-                <TestPad cfg={cfg} send={send} />
-              </>
-            )}
-            {model === "vision6" && <VisionControls />}
-            <div className="flex justify-end">
-              <Button variant="primary" onClick={() => nav("keys")}>
-                Assign keys
-              </Button>
-            </div>
+          <TestPad cfg={cfg} send={send} />
+          {model === "vision6" && <VisionControls />}
+          <div className="flex justify-end">
+            <Button variant="primary" onClick={onDone}>
+              Assign keys
+            </Button>
           </div>
-        </Card>
+        </div>
+      </Card>
+    );
 
+    // Both hardware tabs are worked by pressing physical keys, so each holds
+    // the keypad in test mode for as long as it's the open tab — otherwise a
+    // press during a detect or a remap would fire its macro (issue #33).
+    const wiring = (
+      <>
+        <TestCardNotice send={send} />
         <WiringPanel
           cfg={cfg}
-          onDetectingChange={setPinDetecting}
           onApply={async (pins) => {
             const next = withModelFields({ ...cfg, pins });
             setCfg(next);
@@ -232,7 +266,12 @@ export function SetupPage({ onDone }: { onDone: () => void }) {
             ]);
           }}
         />
+      </>
+    );
 
+    const order = (
+      <>
+        <TestCardNotice send={send} />
         <RemapPanel
           cfg={cfg}
           onApply={async (key_map) => {
@@ -243,17 +282,27 @@ export function SetupPage({ onDone }: { onDone: () => void }) {
             ]);
           }}
         />
+      </>
+    );
+
+    const bodies: Record<string, ReactNode> = { overview, test, wiring, order };
+
+    return (
+      <div className="flex flex-col gap-4 max-w-3xl mx-auto w-full">
+        <BackToDevices />
+        <Tabs idPrefix="setup" label="Setup sections" tabs={TABS} value={tab} onChange={setTab}>
+          {bodies[tab] ?? overview}
+        </Tabs>
       </div>
     );
   }
 
   return (
     <div className="flex flex-col gap-4 max-w-3xl mx-auto w-full">
-      <Stepper
-        steps={["Keys & layers", "Review", "Test"]}
-        current={step}
-        onStepClick={(i) => setStep(i)}
-      />
+      <BackToDevices />
+      {/* Two steps, not three: writing the config drops the user into the
+          tabs on Test, which is where the old third step lived. */}
+      <Stepper steps={["Keys & layers", "Review"]} current={step} onStepClick={(i) => setStep(i)} />
 
       {step === 0 && (
         <Card title="How is your keypad built?">
@@ -410,61 +459,6 @@ export function SetupPage({ onDone }: { onDone: () => void }) {
         </Card>
       )}
 
-      {step === 2 && (
-        <>
-          <Card title="Live key test — press your physical keys">
-            <div className="flex flex-col gap-4">
-              <TestCardNotice send={send} />
-              {pinDetecting ? (
-                <p className="text-sm text-fg-muted">
-                  Key test paused while pin detection is running below.
-                </p>
-              ) : (
-                <>
-                  <p className="text-sm text-fg-muted">
-                    Pressing a key should light it up below. If a key doesn't react, check its
-                    solder joint (GP{"{n-1}"} and GND).
-                  </p>
-                  <TestPad cfg={cfg} send={send} />
-                </>
-              )}
-              {model === "vision6" && <VisionControls />}
-              <div className="flex justify-end">
-                <Button
-                  variant="primary"
-                  onClick={() => {
-                    void send({ t: "host_leave" });
-                    onDone();
-                  }}
-                >
-                  Finish — assign keys
-                </Button>
-              </div>
-            </div>
-          </Card>
-          <WiringPanel
-            cfg={cfg}
-            onDetectingChange={setPinDetecting}
-            onApply={async (pins) => {
-              const next = withModelFields({ ...cfg, pins });
-              setCfg(next);
-              await writeAndReload([
-                { path: "config.json", content: JSON.stringify(next, null, 2) },
-              ]);
-            }}
-          />
-          <RemapPanel
-            cfg={cfg}
-            onApply={async (key_map) => {
-              const next = { ...cfg, key_map };
-              setCfg(next);
-              await writeAndReload([
-                { path: "config.json", content: JSON.stringify(next, null, 2) },
-              ]);
-            }}
-          />
-        </>
-      )}
     </div>
   );
 }
@@ -482,11 +476,9 @@ const NAV_ROLES = ["PSH (wheel press)", "BACK", "CONFIRM"];
 function WiringPanel({
   cfg,
   onApply,
-  onDetectingChange,
 }: {
   cfg: DeviceConfig;
   onApply: (pins: string[] | null) => Promise<void>;
-  onDetectingChange: (active: boolean) => void;
 }) {
   const { hello, drive, send, disconnect, onMsg } = useDevice();
   const toast = useToast();
@@ -524,7 +516,6 @@ function WiringPanel({
   // instead, and auto-stops after 120 s — we also stop it on any exit path.
   useEffect(() => {
     if (detectKey === null) return;
-    onDetectingChange(true);
     void send({ t: "pin_detect", on: true });
     const un = onMsg((m) => {
       if (m.t !== "pin" || m.down !== true) return;
@@ -536,9 +527,8 @@ function WiringPanel({
     return () => {
       un();
       void send({ t: "pin_detect", on: false });
-      onDetectingChange(false);
     };
-  }, [detectKey, onMsg, send, onDetectingChange]);
+  }, [detectKey, onMsg, send]);
 
   // Nav-button Detect: no pin_detect needed — the nav pins are reserved so the
   // wiring wizard can't watch them, but the firmware streams the pressed
@@ -986,8 +976,8 @@ function TestPad({ cfg }: { cfg: DeviceConfig; send: (m: Record<string, unknown>
  * wiring can be checked without side effects. On Vision 6 the screen shows the
  * pressed key + its pin; Core 6 has no screen, so the banner explains it in the
  * app. Losing focus leaves test mode at once (so a backgrounded app still runs
- * macros); unmounting the card does too. The mount lives at the TOP of the card
- * so the banner sits above the key test.
+ * macros); leaving the tab does too. The mount lives at the TOP of the panel so
+ * the banner sits above whatever asks you to press a key.
  */
 function TestCardNotice({ send }: { send: (m: Record<string, unknown>) => Promise<void> }) {
   useTestMode(send, "wiring");

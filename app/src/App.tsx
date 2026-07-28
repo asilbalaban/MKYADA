@@ -8,7 +8,6 @@ import {
   LucideIcon,
   Settings,
   SlidersHorizontal,
-  Wand2,
 } from "lucide-react";
 import { OverlayView } from "./components/OverlayView";
 import { DeviceProvider, useDevice } from "./lib/device";
@@ -31,9 +30,11 @@ import { RecorderPage } from "./pages/RecorderPage";
 import { ProfilesPage } from "./pages/ProfilesPage";
 import { SettingsPage } from "./pages/SettingsPage";
 
+// Setup is deliberately absent (issue #42): it's a once-per-keypad chore, so it
+// sits behind a button on Devices instead of pushing Keys — the page people
+// actually live in — down the sidebar.
 const NAV: { id: Page; label: string; icon: LucideIcon; needsDevice?: boolean }[] = [
   { id: "devices", label: "Devices", icon: Keyboard },
-  { id: "setup", label: "Setup", icon: Wand2, needsDevice: true },
   { id: "keys", label: "Keys", icon: LayoutGrid, needsDevice: true },
   { id: "recorder", label: "Recorder", icon: Circle },
   { id: "profiles", label: "Profiles", icon: SlidersHorizontal },
@@ -86,15 +87,18 @@ function Shell() {
           <nav className="flex-1 py-2" aria-label="Main">
             {NAV.map((n) => {
               const missing = n.needsDevice && !hello;
+              // Setup has no nav item of its own — it belongs to Devices, so
+              // Devices stays lit while it's open instead of nothing being.
+              const on = n.id === (page === "setup" ? "devices" : page);
               return (
                 <button
                   key={n.id}
                   onClick={() => setPage(n.id)}
-                  aria-current={page === n.id ? "page" : undefined}
+                  aria-current={on ? "page" : undefined}
                   title={missing ? "Connect a keypad first" : undefined}
                   className={`w-full text-left px-4 py-2 text-sm flex items-center gap-2.5 transition-colors
                     ${
-                      page === n.id
+                      on
                         ? "bg-panel2 text-accent border-r-2 border-accent"
                         : missing
                           ? "text-fg-faint hover:text-fg-muted"
@@ -184,6 +188,7 @@ function Shell() {
             }`}
           >
             {page === "devices" && <DevicesPage onConnected={() => setPage("keys")} />}
+            {/* Reached from the Setup button on Devices, not the sidebar. */}
             {page === "setup" && <SetupPage onDone={() => setPage("keys")} />}
             {page === "keys" && <KeysPage />}
             {/* The Recorder stays mounted across page switches (hidden via CSS):

@@ -28,7 +28,7 @@ Bring-up-verified pinout (mirrors `hardware/oled-bringup/SCHEMATIC.md`):
 | RGB LED | GP16 | on-board WS2812 |
 
 A key soldered to a different GPIO is fine — assign it in the app under
-**Setup → Key wiring** (writes `config.json "pins"`).
+**Devices → Setup → Wiring** (writes `config.json "pins"`).
 
 Runtime: CircuitPython **10.2.x** (the tier the display stack is validated
 on). The firmware zip / app installer ships every needed library (`lib/`)

@@ -4,7 +4,7 @@
 
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { CirclePlus, LifeBuoy, RotateCcw, RotateCw, Usb } from "lucide-react";
+import { CirclePlus, LifeBuoy, RotateCcw, RotateCw, Usb, Wand2 } from "lucide-react";
 import { FirmwareProgress, ipc, onFirmwareProgress } from "../lib/ipc";
 import { isSerialDrive, useDevice } from "../lib/device";
 import { useNav } from "../lib/nav";
@@ -213,6 +213,17 @@ export function DevicesPage({ onConnected }: { onConnected: () => void }) {
         actions={
           port && (
             <div className="flex gap-2">
+              {/* Setup lives here rather than in the sidebar (issue #42) — it's
+                  a once-per-keypad chore, and it belongs with the device it
+                  describes. A keypad in rescue mode can't be configured. */}
+              {hello && !rescue && (
+                <Button
+                  onClick={() => nav("setup")}
+                  title="Keys, layers and wiring — how this keypad is built"
+                >
+                  <Wand2 size={14} aria-hidden /> Setup
+                </Button>
+              )}
               <Button
                 onClick={() => void restartKeypad()}
                 title="Restart the keypad — fixes a read-only USB drive without replugging"

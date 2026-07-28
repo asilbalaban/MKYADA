@@ -11,7 +11,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { Check, ChevronDown, LoaderCircle } from "lucide-react";
+import { Check, ChevronDown, LoaderCircle, type LucideIcon } from "lucide-react";
 import { ActionIcon } from "./action-icons";
 
 export function Button({
@@ -293,6 +293,71 @@ export function EmptyState({
       {description && <p className="text-sm text-fg-muted max-w-sm">{description}</p>}
       {action && <div className="mt-2">{action}</div>}
     </div>
+  );
+}
+
+export type Tab = { id: string; label: string; icon: LucideIcon };
+
+/**
+ * A page split into sections: a row of pill tabs over the active section's
+ * panel. Shared by Settings and Setup — both are long pages whose cards fall
+ * into groups, and scrolling past everything to reach one card is the thing
+ * this replaces. `idPrefix` namespaces the ARIA ids (`<prefix>-tab-<id>` for
+ * the tab, `<prefix>-<id>` for its panel).
+ */
+export function Tabs({
+  idPrefix,
+  label,
+  tabs,
+  value,
+  onChange,
+  children,
+}: {
+  idPrefix: string;
+  label: string;
+  tabs: readonly Tab[];
+  value: string;
+  onChange: (id: string) => void;
+  children: ReactNode;
+}) {
+  return (
+    <>
+      <div
+        role="tablist"
+        aria-label={label}
+        className="flex gap-1 p-1 bg-panel border border-line rounded-xl"
+      >
+        {tabs.map((t) => {
+          const on = t.id === value;
+          return (
+            <button
+              key={t.id}
+              role="tab"
+              aria-selected={on}
+              aria-controls={`${idPrefix}-${t.id}`}
+              id={`${idPrefix}-tab-${t.id}`}
+              onClick={() => onChange(t.id)}
+              className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm
+                transition-colors ${
+                  on ? "bg-panel2 text-accent font-medium" : "text-fg-muted hover:text-fg"
+                }`}
+            >
+              <t.icon size={15} aria-hidden />
+              {t.label}
+            </button>
+          );
+        })}
+      </div>
+
+      <div
+        role="tabpanel"
+        id={`${idPrefix}-${value}`}
+        aria-labelledby={`${idPrefix}-tab-${value}`}
+        className="flex flex-col gap-4"
+      >
+        {children}
+      </div>
+    </>
   );
 }
 

@@ -54,11 +54,11 @@ Edit `config.json` (see `config.example.json`):
 |---|---|
 | `model` | `"core6"` (screenless, default) or `"vision6"` (OLED + encoder). A config-less board auto-detects the OLED once at boot |
 | `key_count` | How many keys you soldered (1–6, GP0…GP5) |
-| `pins` | Explicit per-key GPIO names when a key is soldered off the default order, e.g. `["GP29","GP28","GP27","GP26","GP15","GP13"]`. `null` = model default. Easiest set via the app: **Setup → Key wiring** |
+| `pins` | Explicit per-key GPIO names when a key is soldered off the default order, e.g. `["GP29","GP28","GP27","GP26","GP15","GP13"]`. `null` = model default. Easiest set via the app: **Devices → Setup → Wiring** |
 | `layer_key` | Key number that switches layers, or `null`. Always `null` on Vision 6 (layers are picked with the wheel) |
 | `layer_count` | Number of layers — Core 6: 2–8 when `layer_key` is set; Vision 6: 1–8 |
 | `layer_mode` | `"toggle"` (press cycles A→B→…) or `"hold"` (hold = layer B) |
-| `key_map` | Fixes a mismatched solder order: logical key number per GPIO, e.g. `[3, 1, 2]` = GP0 acts as key 3. `null` = GP0 is key 1. Easiest set via the app: **Setup → Key order (remap)** |
+| `key_map` | Fixes a mismatched solder order: logical key number per GPIO, e.g. `[3, 1, 2]` = GP0 acts as key 3. `null` = GP0 is key 1. Easiest set via the app: **Devices → Setup → Key order** |
 | `screen` | Default target resolution for mouse macros |
 
 Then drop macro files into `macros/` (`key1.json`, `key1-b.json`, …) — see
