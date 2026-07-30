@@ -44,7 +44,9 @@ copy the plain `.py` sources, which work but are less robust. When replacing
 copies of the same module confuse the import path.
 
 **Unplug and replug the board** after the first copy — `boot.py` (USB device
-setup) only runs at power-on.
+setup) only runs at power-on, and until it has run there is no serial channel
+for the app to find the keypad on. (The app's new-board wizard does this for
+you: it restarts the board over the CircuitPython REPL as its last step.)
 
 ## 3. Configure
 

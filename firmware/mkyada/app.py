@@ -318,6 +318,10 @@ class App:
         # goes quiet. Cleared on {t:"test_leave"} and on app disconnect.
         self.test_mode = False
         self.test_ui = "wiring"  # which screen the active test tab wants
+        # ...unless the user opened Settings > Key test on the device itself:
+        # nobody on the other end of the cable owns that one, so the "app went
+        # away, un-suppress the keys" cleanup below must not end it.
+        self.test_local = False
         self.inbox = []  # serial messages drained during blocking key logic
         self.updating = False  # locked update mode (update_begin..update_end)
         self.update_total = 0  # bytes announced by update_begin
@@ -672,12 +676,14 @@ class App:
             # Suppress macro playback on every model (issue #33). core6 has no
             # screen, so ui_call is a harmless no-op there.
             self.test_mode = True
+            self.test_local = False
             self.test_ui = msg.get("ui") or "wiring"
             self.ui_call("on_test_enter", self.test_ui)
             self.proto.send({"t": "ok", "re": "test_enter"})
         elif t == "test_leave":
             if self.test_mode:
                 self.test_mode = False
+                self.test_local = False
                 self.ui_call("on_test_leave")
             self.proto.send({"t": "ok", "re": "test_leave"})
         elif t == "profile":
@@ -1533,8 +1539,9 @@ class App:
             if self.profile_id and not self.proto.connected:
                 self.set_profile(None)
             # test mode is app-driven: a closed app must not strand the keypad
-            # with its keys dead
-            if self.test_mode and not self.proto.connected:
+            # with its keys dead. Settings > Key test is the exception — it was
+            # opened on the device and ends on the device (ui._leave_keytest).
+            if self.test_mode and not self.test_local and not self.proto.connected:
                 self.test_mode = False
                 self.ui_call("on_test_leave")
             # a half-received upload must not leak its file handle either

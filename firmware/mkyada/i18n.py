@@ -54,6 +54,10 @@ STRINGS = {
         "keys_test": "KEY TEST",
         "keys_test_paused": "Macros paused",
         "keys_test_switch": "Use another tab",
+        # Settings > Key test — the same check with no app attached
+        "key_test": "Key test",
+        "test_press": "press a key or turn",
+        "hold_exit": "hold PSH: exit",
         # context-aware wheel menu (issue: wheel-menu redesign)
         "wheel": "WHEEL",
         "key_t": "KEY",
@@ -115,6 +119,9 @@ STRINGS = {
         "keys_test": "TUŞ TESTİ",
         "keys_test_paused": "Makrolar durduruldu",
         "keys_test_switch": "Başka sekme kullan",
+        "key_test": "Tuş testi",
+        "test_press": "tuşa bas veya çevir",
+        "hold_exit": "PSH tut: çık",
         # context-aware wheel menu (issue: wheel-menu redesign)
         "wheel": "TEKER",
         "key_t": "TUŞ",

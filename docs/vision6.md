@@ -87,7 +87,7 @@ device's pixels rather than a drawing of them.
   If the USB drive is visible (recovery boot) the filesystem is host-owned
   and the editor explains instead of saving.
 - **SETTINGS** — auto-return timeout (3–60 s), language, the Layer/Profile
-  band toggles, restart. Timeout is stored on the board (NVM); language and
+  band toggles, key test, restart. Timeout is stored on the board (NVM); language and
   the band toggles live in `config.json` (rewritten on-device, like the app
   does) so the app always shows the same values. All survive power cycles
   and firmware updates.

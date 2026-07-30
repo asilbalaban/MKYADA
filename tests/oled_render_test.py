@@ -414,7 +414,8 @@ golden("menu_tr", d)
 # docs/font.html is what people (and we, when the device is out of reach) look
 # at to decide whether a screen is right. If its layout drifts from the
 # firmware's, it stops being evidence and starts being decoration.
-viewer = open(os.path.join(REPO, "scripts", "font-viewer.template.html")).read()
+viewer = open(os.path.join(REPO, "scripts", "font-viewer.template.html"),
+              encoding="utf-8").read()
 block = viewer[viewer.index("const L = {"):]
 block = block[:block.index("};")]
 L = {}

@@ -1,12 +1,13 @@
 // New-board provisioning: flash CircuitPython onto a blank RP2040 board in
 // bootloader mode, install the bundled MKYADA firmware, write a starter
-// config, then hand the user into the normal Setup flow. Resumable: a board
-// that already runs CircuitPython but no MKYADA firmware (its drive mounts,
-// but it never shows up as a keypad) can skip straight to the install step.
+// config, restart the board, then hand the user into the normal Setup flow.
+// Resumable: a board that already runs CircuitPython but no MKYADA firmware
+// (its drive mounts, but it never shows up as a keypad) can skip straight to
+// the install step.
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { CircleCheck } from "lucide-react";
+import { CircleCheck, Usb } from "lucide-react";
 import { BootloaderDrive, ipc } from "../lib/ipc";
 import type { DeviceModel, DriveInfo } from "../lib/types";
 import { MODEL_META } from "../lib/types";
@@ -40,6 +41,13 @@ export function ProvisionWizard({
   const [phase, setPhase] = useState("");
   const [error, setError] = useState("");
   const [done, setDone] = useState(false);
+  /** The board came back from its restart and answered as a keypad. False
+   * means the restart couldn't be confirmed and the user has to replug. */
+  const [rebooted, setRebooted] = useState(false);
+  // provision() runs across many awaits; read the live connection through a
+  // ref rather than the value captured when it started.
+  const helloRef = useRef(hello);
+  helloRef.current = hello;
 
   // Step 0: poll for a board in bootloader mode (auto-advances) and for
   // CIRCUITPY drives that don't belong to a running keypad (resume path).
@@ -79,9 +87,42 @@ export function ProvisionWizard({
     throw new Error("No CIRCUITPY drive appeared. Unplug and replug the board, then try again.");
   }
 
+  /** Restart the board and wait for the keypad to answer on the other side.
+   *
+   * Copying the firmware isn't enough on a board this fresh: boot.py is what
+   * gives the keypad the serial channel the app talks over, and CircuitPython
+   * only runs boot.py on a HARD reset. Until then the board sits there running
+   * the USB layout stock CircuitPython booted with, and nothing the app scans
+   * for is there — which is exactly the "plug it in again once and it appears"
+   * that used to end this wizard. Doing the reset here removes that step.
+   *
+   * Returns false if the restart couldn't be confirmed; the caller then falls
+   * back to telling the user to replug, which always works. */
+  async function rebootAndWait(uid: string): Promise<boolean> {
+    const want = uid.toLowerCase();
+    try {
+      await ipc.provisionReboot(uid);
+    } catch {
+      return false;
+    }
+    // Generous: the board re-enumerates, boot.py runs, then the firmware loads
+    // its fonts and macros before it answers. Auto-connect may also grab the
+    // port first — then it's `hello` that proves the board is back, not a scan
+    // (scan_devices deliberately skips the connected port).
+    const deadline = Date.now() + 60_000;
+    while (Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 1500));
+      if (helloRef.current?.uid.toLowerCase() === want) return true;
+      const found = await ipc.scanDevices().catch(() => []);
+      if (found.some((d) => String(d.hello.uid ?? "").toLowerCase() === want)) return true;
+    }
+    return false;
+  }
+
   async function provision(model: DeviceModel, src: Source) {
     setStep(2);
     setError("");
+    setRebooted(false);
     try {
       let drive: DriveInfo;
       if (src.kind === "bootloader") {
@@ -130,6 +171,8 @@ export function ProvisionWizard({
           serializeForDevice(starter, STREAM_PROTO),
         );
       }
+      setPhase("Restarting the keypad…");
+      setRebooted(await rebootAndWait(drive.uid));
       setPhase("");
       setDone(true);
     } catch (e) {
@@ -205,9 +248,18 @@ export function ProvisionWizard({
           {done ? (
             <>
               <p className="text-fg flex items-center gap-2">
-                <CircleCheck size={16} className="text-success" aria-hidden />
-                Done — the board restarts with MKYADA firmware and connects by itself in a few
-                seconds.
+                {rebooted ? (
+                  <>
+                    <CircleCheck size={16} className="text-success" aria-hidden />
+                    Done — the keypad restarted with MKYADA firmware and is connected.
+                  </>
+                ) : (
+                  <>
+                    <Usb size={16} className="text-fg-muted shrink-0" aria-hidden />
+                    Firmware installed. The keypad didn't come back on its own — unplug it and
+                    plug it in again, and it connects within a few seconds.
+                  </>
+                )}
               </p>
               <div className="flex gap-2">
                 <Button variant="primary" onClick={onDone}>

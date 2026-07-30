@@ -1563,6 +1563,51 @@ check("set menu band toggles show state",
       ui._set_items()[uimod.SET_BAND_LAYER] == "Layer band: off"
       and ui._set_items()[uimod.SET_BAND_PROFILE] == "Profile band: off",
       str(ui._set_items()))
+check("set menu has key test", ui._set_items()[uimod.SET_KEYTEST] == "Key test")
+
+# Settings > Key test: the Setup wiring check, run from the device with no app
+# attached. Confirming the entry suppresses playback and takes over the screen;
+# PSH held TEST_EXIT_HOLD_S goes back to Settings, Auto-return goes to the grid.
+_kt = 5000.0
+ui.state = uimod.S_SET_MENU
+ui.set_menu_sel = uimod.SET_KEYTEST
+ui._set_menu_default(_kt, 0, uimod.K_CONFIRM)
+check("key test entry opens the test screen",
+      ui.state == uimod.S_TEST and ui.test_ui == "self", "state=%d" % ui.state)
+check("key test suppresses playback",
+      vapp.test_mode and vapp.test_local)
+vplays.clear()
+vapp.on_edge(0, True)   # a macro key reports itself instead of playing
+check("key test key press plays nothing", vplays == [], str(vplays))
+# the wheel and the module buttons report too, and each one is activity
+ui.enc.position += 1
+ui.tick(_kt + 1)
+check("key test wheel keeps the screen", ui.state == uimod.S_TEST)
+ui.nav.events.queue.append(FakeKeyEvent(uimod.K_BACK, True))
+ui.tick(_kt + 2)
+check("key test BACK reports instead of leaving", ui.state == uimod.S_TEST)
+# PSH: a press alone reports like any other button...
+ui.nav.events.queue.append(FakeKeyEvent(uimod.K_PSH, True))
+ui.tick(_kt + 3)
+check("key test PSH press stays", ui.state == uimod.S_TEST)
+ui.tick(_kt + 3 + uimod.TEST_EXIT_HOLD_S - 0.1)
+check("key test PSH not held long enough", ui.state == uimod.S_TEST)
+# ...and only leaves once it has been held out the full three seconds
+ui.tick(_kt + 3 + uimod.TEST_EXIT_HOLD_S)
+check("key test PSH hold returns to settings",
+      ui.state == uimod.S_SET_MENU, "state=%d" % ui.state)
+check("key test hold-exit restores playback",
+      not vapp.test_mode and not vapp.test_local)
+# Auto-return is the other way out, floored so a 3s timeout can't make the
+# screen unusable
+ui.idle_secs = 3
+ui._set_menu_default(_kt, 0, uimod.K_CONFIRM)
+ui.tick(_kt + uimod.TEST_IDLE_MIN_S)
+check("key test survives a short Auto-return", ui.state == uimod.S_TEST)
+ui.tick(_kt + uimod.TEST_IDLE_MIN_S + 1)
+check("key test idles back to the grid",
+      ui.state == uimod.S_SELECT and not vapp.test_mode, "state=%d" % ui.state)
+ui.idle_secs = uimod.DEFAULT_TIMEOUT
 
 # grid band composition (fw 0.9.0): layer part is device-side, profile part
 # is whatever the app last pushed via {"t":"label"}

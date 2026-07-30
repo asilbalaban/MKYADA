@@ -24,6 +24,12 @@ export const ipc = {
   /** Copy the bundled CircuitPython UF2 onto a bootloader drive. The drive
    * vanishing right after (board reboots into CircuitPython) is expected. */
   provisionFlashUf2: (mount: string) => invoke<void>("provision_flash_uf2", { mount }),
+  /** Restart a just-provisioned board over its CircuitPython REPL. boot.py —
+   * which creates the data channel the app talks over — only runs on a hard
+   * reset, so without this the brand-new keypad stays invisible until the user
+   * unplugs and replugs it. Resolves as soon as the reset is sent; the caller
+   * waits for the keypad to answer on the other side. */
+  provisionReboot: (uid: string) => invoke<void>("provision_reboot", { uid }),
   /** How the board's firmware tree differs from the bundled one. Read-only
    * and cheap (directory listings, not file reads) — safe to run repeatedly. */
   firmwareDiagnose: (drive: string) => invoke<FirmwareDiagnosis>("firmware_diagnose", { drive }),

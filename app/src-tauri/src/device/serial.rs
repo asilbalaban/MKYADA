@@ -79,6 +79,50 @@ fn open(port: &str) -> Result<Box<dyn SerialPort>, String> {
     Ok(sp)
 }
 
+/// One USB serial port as the OS reports it.
+struct UsbPort {
+    name: String,
+    vid: u16,
+    product: String,
+    /// USB iSerialNumber. CircuitPython puts the chip UID here — the same
+    /// value boot_out.txt's `UID:` line carries and `hello` reports — so this
+    /// is what ties a port to a particular board (and to its drive).
+    serial: String,
+}
+
+/// Every USB serial port, with macOS's duplicate twins removed: it lists each
+/// device as both /dev/cu.X (callout) and /dev/tty.X (dial-in), and both reach
+/// the same board, so keeping both showed one keypad twice and broke
+/// auto-connect.
+fn usb_ports() -> Vec<UsbPort> {
+    let Ok(ports) = serialport::available_ports() else {
+        return Vec::new();
+    };
+    let usb: Vec<UsbPort> = ports
+        .into_iter()
+        .filter_map(|p| match p.port_type {
+            SerialPortType::UsbPort(info) => Some(UsbPort {
+                name: p.port_name,
+                vid: info.vid,
+                product: info.product.unwrap_or_default(),
+                serial: info.serial_number.unwrap_or_default(),
+            }),
+            _ => None,
+        })
+        .collect();
+    let cu_names: std::collections::HashSet<String> = usb
+        .iter()
+        .filter_map(|p| p.name.strip_prefix("/dev/cu.").map(str::to_string))
+        .collect();
+    usb.into_iter()
+        .filter(|p| {
+            p.name
+                .strip_prefix("/dev/tty.")
+                .is_none_or(|suffix| !cu_names.contains(suffix))
+        })
+        .collect()
+}
+
 /// Ports worth probing for a keypad.
 ///
 /// Preferred: USB product string mentions MKYADA (macOS/Linux report the real
@@ -87,49 +131,72 @@ fn open(port: &str) -> Result<Box<dyn SerialPort>, String> {
 /// port — known CircuitPython vendor IDs first. probe() keeps only ports that
 /// actually answer `identify` with `hello`, so the fallback stays safe.
 pub fn candidate_ports() -> Vec<String> {
-    let Ok(ports) = serialport::available_ports() else {
-        return Vec::new();
-    };
-    let usb: Vec<(String, u16, String)> = ports
-        .into_iter()
-        .filter_map(|p| match p.port_type {
-            SerialPortType::UsbPort(info) => Some((
-                p.port_name,
-                info.vid,
-                info.product.unwrap_or_default(),
-            )),
-            _ => None,
-        })
-        .collect();
-
-    // macOS lists every serial device twice: /dev/cu.X (callout) and
-    // /dev/tty.X (dial-in). Both reach the same board, so keep only the cu.
-    // twin — otherwise one keypad shows up as two and breaks auto-connect.
-    let cu_names: std::collections::HashSet<String> = usb
-        .iter()
-        .filter_map(|(name, _, _)| name.strip_prefix("/dev/cu.").map(str::to_string))
-        .collect();
-    let usb: Vec<(String, u16, String)> = usb
-        .into_iter()
-        .filter(|(name, _, _)| {
-            name.strip_prefix("/dev/tty.")
-                .is_none_or(|suffix| !cu_names.contains(suffix))
-        })
-        .collect();
-
+    let usb = usb_ports();
     let by_name: Vec<String> = usb
         .iter()
-        .filter(|(_, _, product)| product.contains(PRODUCT_MARKER))
-        .map(|(name, _, _)| name.clone())
+        .filter(|p| p.product.contains(PRODUCT_MARKER))
+        .map(|p| p.name.clone())
         .collect();
     if !by_name.is_empty() {
         return by_name;
     }
 
     let (mut known, rest): (Vec<_>, Vec<_>) =
-        usb.into_iter().partition(|(_, vid, _)| KNOWN_VIDS.contains(vid));
+        usb.into_iter().partition(|p| KNOWN_VIDS.contains(&p.vid));
     known.extend(rest);
-    known.into_iter().map(|(name, _, _)| name).collect()
+    known.into_iter().map(|p| p.name).collect()
+}
+
+/// Hard-reset a board by typing `microcontroller.reset()` into its
+/// CircuitPython REPL. `uid` is the board's CircuitPython UID (DriveInfo.uid,
+/// i.e. boot_out.txt's `UID:` line), which doubles as its USB serial number.
+///
+/// This is the last step of provisioning a blank board. CircuitPython picks up
+/// everything the app copies onto a fresh CIRCUITPY drive by itself —
+/// everything except boot.py, which runs on a HARD reset only and is what
+/// enables the data CDC channel the app talks over. So a just-provisioned
+/// board keeps running the USB layout stock CircuitPython came up with and
+/// stays invisible to the app until it is power-cycled. Driving the reset in
+/// over the REPL console (the one interface stock CircuitPython does expose)
+/// is that power cycle, without the user touching the cable.
+pub fn repl_reset(uid: &str) -> Result<(), String> {
+    let want = uid.trim().to_lowercase();
+    let ports = usb_ports();
+    let mut target = ports
+        .iter()
+        .find(|p| !want.is_empty() && p.serial.to_lowercase() == want)
+        .map(|p| p.name.clone());
+    if target.is_none() {
+        // Windows can report a usbser.sys port with no serial number at all.
+        // Fall back to CircuitPython-VID ports that do NOT answer `identify` —
+        // a board already speaking the protocol has its data channel and needs
+        // none of this. Only when exactly one is left: better to fall back to
+        // "unplug and replug it" than to reset somebody else's board.
+        let mut fresh = ports
+            .iter()
+            .filter(|p| KNOWN_VIDS.contains(&p.vid))
+            .map(|p| p.name.clone())
+            .filter(|n| probe(n).is_none());
+        target = match (fresh.next(), fresh.next()) {
+            (Some(only), None) => Some(only),
+            _ => None,
+        };
+    }
+    let port = target.ok_or("could not find the board's serial console")?;
+    let mut sp = open(&port)?;
+    // Twice: the first Ctrl-C breaks out of whatever code.py is running, the
+    // second lands on a bare >>> even if the first raced an auto-reload.
+    for _ in 0..2 {
+        sp.write_all(b"\x03").map_err(|e| format!("{port}: {e}"))?;
+        sp.flush().ok();
+        std::thread::sleep(Duration::from_millis(250));
+    }
+    // Not error-checked: the board drops off the bus the instant it resets, so
+    // a failed write here is as likely to mean success as failure. The caller
+    // decides by waiting for the keypad to come back.
+    let _ = sp.write_all(b"\r\nimport microcontroller; microcontroller.reset()\r\n");
+    sp.flush().ok();
+    Ok(())
 }
 
 /// Send `identify` and wait briefly for a `hello`. Filters out the CDC

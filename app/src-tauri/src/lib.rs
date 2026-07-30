@@ -1234,6 +1234,16 @@ async fn provision_flash_uf2(app: AppHandle, mount: String) -> Result<(), String
     .map_err(|e| e.to_string())?
 }
 
+/// Restart a freshly provisioned board so the boot.py just copied onto it
+/// actually runs — the last step of provisioning, replacing the "unplug and
+/// replug it once" the user had to do before (see serial::repl_reset).
+#[tauri::command]
+async fn provision_reboot(uid: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || serial::repl_reset(&uid))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
 /// Tauri's set_ignore_cursor_events only styles the top-level window. On
 /// Windows the WebView2 child HWNDs still hit-test, so the "click-through"
 /// overlay swallowed every click on the machine (issues #1/#2). Push the
@@ -1621,6 +1631,7 @@ pub fn run() {
             file_read_text,
             list_bootloader_drives,
             provision_flash_uf2,
+            provision_reboot,
             overlay_show,
             overlay_hide,
             window_set_pin,

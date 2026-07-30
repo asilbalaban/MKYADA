@@ -65,6 +65,13 @@ NAV_SLOTS = {K_PSH: "btn-psh", K_BACK: "btn-back", K_CONFIRM: "btn-confirm"}
 # PSH held this long toggles select mode when its slot has no hold variant —
 # past the 400 ms variant default so an assigned hold still wins cleanly
 ESC_HOLD_S = 1.2
+# Settings > Key test: PSH held this long leaves the screen. Deliberately long
+# — PSH is one of the buttons under test, so a tap has to stay a tap.
+TEST_EXIT_HOLD_S = 3.0
+# ...and the test also returns to the grid on the Auto-return timeout, but
+# never sooner than this: reading a pin name off the screen between presses is
+# the whole point, and Auto-return goes as low as 3 seconds.
+TEST_IDLE_MIN_S = 15
 # how long the device waits for the app to answer a host-kind CONFIRM with a
 # `menu` before giving up and showing the "app required" toast
 CTX_WAIT_S = 1.5
@@ -102,7 +109,7 @@ MENU_LABEL = {"layer_next": "Next layer", "layer_prev": "Prev layer",
 MENU_HOLD_S = 0.4
 
 (SET_TMO, SET_LANG, SET_BAND_LAYER, SET_BAND_PROFILE,
- SET_ABOUT, SET_REBOOT) = range(6)
+ SET_KEYTEST, SET_ABOUT, SET_REBOOT) = range(7)
 
 SAVED_DWELL_S = 1.1
 TOAST_DWELL_S = 1.6
@@ -141,6 +148,8 @@ class Ui:
         self.lang_sel = 0
         self.state = S_HOME
         self.prev_state = S_HOME  # where to return after host mode / toast
+        self.test_ui = "wiring"  # S_TEST flavour: app "wiring"/"keys", or "self"
+        self._psh_down_at = None  # PSH press time, for the key test's hold-exit
         self.home_pos = 0
         self.sel_key = 0
         self.sel_mode = False  # temporary default-nav mode on a custom grid
@@ -280,6 +289,7 @@ class Ui:
                             tr("on") if cfg["show_layer"] else tr("off")),
                 "%s: %s" % (tr("show_profile"),
                             tr("on") if cfg["show_profile"] else tr("off")),
+                tr("key_test"),
                 tr("about"),
                 tr("restart"))
 
@@ -575,6 +585,12 @@ class Ui:
         self._ctx_slots.clear()
         self.sel_key = 0
         self.sel_mode = False
+        if self.state == S_TEST and self.test_ui == "self":
+            # The on-device key test doesn't survive a config reload — and it
+            # must not leave playback suppressed behind it.
+            self.app.test_mode = False
+            self.app.test_local = False
+            self.test_ui = "wiring"
         if self.state not in (S_HOST, S_PLAYING):
             self.state = S_SELECT
             self._draw_grid()
@@ -1263,7 +1279,7 @@ class Ui:
             self._tick_host()
             return
         if self.state == S_TEST:
-            self._tick_test()
+            self._tick_test(now)
             return
         if self.state == S_PLAYING:
             return  # playback owns the loop; on_play_done() restores us
@@ -1356,20 +1372,30 @@ class Ui:
             self.app.proto.send({"t": "btn", "slot": NAV_SLOT[ev.key_number],
                                  "down": bool(ev.pressed)})
 
-    def _tick_test(self):
-        """Setup test mode: the wheel/nav stream to the app's tester like host
-        mode AND show on the screen (wheel direction / pressed nav button + its
+    def _tick_test(self, now):
+        """Test mode: the wheel/nav stream to the app's tester like host mode
+        AND show on the screen (wheel direction / pressed nav button + its
         pin), so every control is verifiable on the device. Key presses come
-        via App.on_edge (on_test_key)."""
+        via App.on_edge (on_test_key).
+
+        Settings > Key test (test_ui "self") runs the same check with no app in
+        the loop, so it also owns its own way out: PSH held TEST_EXIT_HOLD_S,
+        or the Auto-return idle timeout."""
+        local = self.test_ui == "self"
         d = self._enc_delta()
         if d:
             if self.app.proto.connected:
                 self.app.proto.send({"t": "enc", "d": 1 if d > 0 else -1,
                                      "n": abs(d)})
             ea, eb = MODELS[self.app.model]["encoder"]
-            self.oled.show_toast(tr("setup_test"),
-                                 "Wheel " + ("CW" if d > 0 else "CCW"),
-                                 "%s/%s" % (ea, eb))
+            if local:
+                self.activity_at = now
+                self._show_test_hit("CW" if d > 0 else "CCW",
+                                    "%s/%s" % (ea, eb))
+            else:
+                self.oled.show_toast(tr("setup_test"),
+                                     "Wheel " + ("CW" if d > 0 else "CCW"),
+                                     "%s/%s" % (ea, eb))
         while True:
             ev = self.nav.events.get()
             if not ev:
@@ -1378,16 +1404,76 @@ class Ui:
                 self.app.proto.send({"t": "btn",
                                      "slot": NAV_SLOT[ev.key_number],
                                      "down": bool(ev.pressed)})
+            names = self.app.nav_pin_names() or ()
+            pin = names[ev.key_number] if ev.key_number < len(names) else "?"
+            if not local:
+                if ev.pressed:
+                    self.oled.show_toast(tr("setup_test"),
+                                         NAV_SLOT[ev.key_number].upper(), pin)
+                continue
+            self.activity_at = now
+            # PSH is both a button under test and the way out: it reports
+            # itself on press like the others, and leaves once it has been
+            # held past TEST_EXIT_HOLD_S (checked below, so the hold never
+            # blocks the other controls from reporting).
+            if ev.key_number == K_PSH:
+                self._psh_down_at = now if ev.pressed else None
             if ev.pressed:
-                names = self.app.nav_pin_names() or ()
-                pin = names[ev.key_number] if ev.key_number < len(names) else "?"
-                self.oled.show_toast(tr("setup_test"),
-                                     NAV_SLOT[ev.key_number].upper(), pin)
+                self._show_test_hit(NAV_SLOT[ev.key_number].upper(), pin)
+        if not local:
+            return
+        if (self._psh_down_at is not None
+                and now - self._psh_down_at >= TEST_EXIT_HOLD_S):
+            self._leave_keytest(now, True)
+        elif now - self.activity_at > max(self.idle_secs, TEST_IDLE_MIN_S):
+            self._leave_keytest(now, False)
+
+    def _show_test_hit(self, label, pin):
+        """One control just reported itself: what it is in big type, the GPIO
+        it arrived on underneath, and the way out still on the bottom bar."""
+        self.oled.show_card(tr("keys_test"), label, pin, tr("hold_exit"))
+
+    def _enter_keytest(self, now):
+        """Settings > Key test: the Setup tab's wiring check, on the device
+        itself. Every control names itself over the GPIO it actually came in
+        on — the six macro keys, the three module buttons and the wheel — so a
+        cold joint shows up as the one control that stays silent, with no
+        computer attached. Macro playback is suppressed while it runs, which
+        is also what stops a mapped key from firing as it's poked at."""
+        self.state = S_TEST
+        self.test_ui = "self"
+        # Not the app's test mode: no app is holding this one open, so the
+        # disconnect cleanup in App must leave it alone (test_local).
+        self.app.test_mode = True
+        self.app.test_local = True
+        self._drain_inputs()
+        self._psh_down_at = None
+        self.activity_at = now
+        self.oled.show_toast(tr("keys_test"), tr("test_press"),
+                             tr("hold_exit"))
+
+    def _leave_keytest(self, now, to_menu):
+        """End the on-device key test: back to Settings when the user held PSH
+        to get out, back to the grid when Auto-return did it for them."""
+        self.app.test_mode = False
+        self.app.test_local = False
+        self.test_ui = "wiring"
+        self._psh_down_at = None
+        self._drain_inputs()
+        if to_menu:
+            self.state = S_SET_MENU
+            self.activity_at = now
+            self.oled.show_menu(tr("settings"), self._set_items(),
+                                self.set_menu_sel)
+        else:
+            self._enter_grid()
 
     # --- Test mode: Setup wiring test (issue #24) / Keys tab (issue #33) ---
     def on_test_enter(self, ui="wiring"):
         self.state = S_TEST
         self.test_ui = ui
+        self.app.test_local = False  # app-owned from here on
+        self._psh_down_at = None
         self._drain_inputs()
         if ui == "keys":
             # Keys tab is open on the app: warn that macros are paused here.
@@ -1399,7 +1485,14 @@ class Ui:
     def on_test_key(self, key_no, pin):
         if self.state != S_TEST:
             return
-        if getattr(self, "test_ui", "wiring") == "keys":
+        if self.test_ui == "self":
+            # Settings > Key test: the key's logical number over the GPIO it
+            # came in on. What's being checked here is the wiring, not which
+            # macro sits on the key.
+            self.activity_at = time.monotonic()
+            self._show_test_hit("K%d" % key_no, pin)
+            return
+        if self.test_ui == "keys":
             # Keys tab: the static "macros paused" warning is already up, so
             # don't repaint per press. Building the label (which reads the
             # macro file for its name and lazily loads BDF glyphs) plus the
@@ -1419,6 +1512,9 @@ class Ui:
 
     def on_test_leave(self):
         if self.state == S_TEST:
+            self.app.test_local = False
+            self.test_ui = "wiring"
+            self._psh_down_at = None
             self._drain_inputs()
             self.state = S_SELECT
             self._draw_grid()
@@ -1573,6 +1669,8 @@ class Ui:
                     self._toast(title, tr("usb_on"), tr("read_only"))
                 else:
                     self._toast(title, tr("save_fail"), "")
+            elif self.set_menu_sel == SET_KEYTEST:
+                self._enter_keytest(now)
             elif self.set_menu_sel == SET_ABOUT:
                 self.state = S_ABOUT
                 self.oled.show_about(self._about_lines())
