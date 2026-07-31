@@ -78,7 +78,7 @@ CTX_WAIT_S = 1.5
 
 (S_HOME, S_SELECT, S_SPEED, S_SAVED, S_SET_MENU, S_TIMEOUT,
  S_PLAYING, S_HOST, S_TOAST, S_LANG, S_TEST, S_ABOUT, S_CTX,
- S_PIXELS) = range(14)
+ S_PIXELS, S_XFER) = range(15)
 
 # media usages the wheel treats as a "turn to adjust" knob rather than a
 # single transport key (see _enter_ctx). Volume rotates up/down, CONFIRM mutes.
@@ -566,15 +566,21 @@ class Ui:
                                      self._band_state()):
             self._draw_grid()
 
-    def on_profile(self):
-        """A per-app profile was activated or cleared (issue #23): the macro
-        files behind every key/slot changed, so drop the cached labels,
-        speeds and slots and repaint the grid with the new set."""
+    def _drop_macro_cache(self):
+        """Forget everything read out of the macro files. Whatever changed
+        them — a profile switch, a config reload, the app writing new ones —
+        this cache is now describing files that no longer exist."""
         self._labels.clear()
         self._speeds.clear()
         self._kinds.clear()
         self._icons.clear()
         self._slots.clear()
+
+    def on_profile(self):
+        """A per-app profile was activated or cleared (issue #23): the macro
+        files behind every key/slot changed, so drop the cached labels,
+        speeds and slots and repaint the grid with the new set."""
+        self._drop_macro_cache()
         if self.state in (S_SELECT, S_CTX):
             self._enter_grid()
 
@@ -623,11 +629,7 @@ class Ui:
             self.idle_secs = ct
             self._nvm_save()
         self.app.config["timeout"] = self.idle_secs
-        self._labels.clear()
-        self._speeds.clear()
-        self._kinds.clear()
-        self._icons.clear()
-        self._slots.clear()
+        self._drop_macro_cache()
         self._ctx_slots.clear()
         self.sel_key = 0
         self.sel_mode = False
@@ -1384,6 +1386,12 @@ class Ui:
 
     # --- per-state handlers ---
     def tick(self, now):
+        if self.state == S_XFER:
+            # The app owns the filesystem: the wheel and the nav buttons are
+            # dropped on the floor rather than queued, so a save is not
+            # followed by a burst of menus the user pressed at a dead screen.
+            self._drain_inputs()
+            return
         if self.state == S_HOST:
             self._tick_host()
             return
@@ -1493,6 +1501,14 @@ class Ui:
         the loop, so it also owns its own way out: PSH held TEST_EXIT_HOLD_S,
         or the Auto-return idle timeout."""
         local = self.test_ui == "self"
+        # Only the Setup tab's wiring test names the control on the glass. The
+        # Keys tab (test_ui "keys") has its own static "macros are paused"
+        # warning up, and repainting over it for a wheel detent or a BACK press
+        # replaced that warning with a SETUP TEST card — from the user's side
+        # the Keys test simply became a different test. Same rule already
+        # applies to key presses in on_test_key; the wheel and nav buttons were
+        # the two paths that missed it.
+        wiring = self.test_ui == "wiring"
         d = self._enc_delta()
         if d:
             # Settings > Key test is device-owned: the wheel and the nav buttons
@@ -1503,11 +1519,11 @@ class Ui:
             if self.app.proto.connected and not local:
                 self.app.proto.send({"t": "enc", "d": 1 if d > 0 else -1,
                                      "n": abs(d)})
-            ea, eb = MODELS[self.app.model]["encoder"]
             if local:
                 self.activity_at = now
                 self._kt_enc(1 if d > 0 else -1)
-            else:
+            elif wiring:
+                ea, eb = MODELS[self.app.model]["encoder"]
                 self.oled.show_toast(tr("setup_test"),
                                      "Wheel " + ("CW" if d > 0 else "CCW"),
                                      "%s/%s" % (ea, eb))
@@ -1519,10 +1535,11 @@ class Ui:
                 self.app.proto.send({"t": "btn",
                                      "slot": NAV_SLOT[ev.key_number],
                                      "down": bool(ev.pressed)})
-            names = self.app.nav_pin_names() or ()
-            pin = names[ev.key_number] if ev.key_number < len(names) else "?"
             if not local:
-                if ev.pressed:
+                if wiring and ev.pressed:
+                    names = self.app.nav_pin_names() or ()
+                    pin = (names[ev.key_number]
+                           if ev.key_number < len(names) else "?")
                     self.oled.show_toast(tr("setup_test"),
                                          NAV_SLOT[ev.key_number].upper(), pin)
                 continue
@@ -1664,6 +1681,28 @@ class Ui:
             self._drain_inputs()
             self.state = S_SELECT
             self._draw_grid()
+
+    def on_xfer(self, active):
+        """The app started or finished moving files (App.begin_xfer).
+
+        Two repaints for a whole save, no matter how many files it touches:
+        one to put the screen up and one to give the keypad back. The grid is
+        what we come back to rather than wherever the user was, because the
+        files that screen was reading — macro names, icons, speeds — are the
+        ones that just changed underneath it.
+
+        A firmware update is not routed here: it has its own locked screen
+        with a real progress bar, and the two must not fight over the glass."""
+        if active:
+            if self.state in (S_XFER, S_PLAYING):
+                return
+            self._drain_inputs()
+            self.state = S_XFER
+            self.oled.show_transfer()
+        elif self.state == S_XFER:
+            self._drain_inputs()
+            self._drop_macro_cache()
+            self._enter_grid()
 
     def _st_home(self, now, d, press):
         self._custom_input(now, d, press, self.ctx_slots("home"),

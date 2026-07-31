@@ -103,7 +103,11 @@ gc.collect()  # the display stack litters the heap; start the app compacted
 
 DEBOUNCE_S = 0.02
 PING_TIMEOUT_S = 5.0
-PROTO_VERSION = 11 # v11: macro files may carry a top-level "icon" naming one of
+PROTO_VERSION = 12 # v12: "icon" may also be the picture itself — "px:" + 16 hex
+                   # is eight packed rows drawn by hand in the app, decoded in
+                   # icons.py get() rather than looked up. hello also reports
+                   # wheel_layers so the app can offer that switch.
+                   # v11: macro files may carry a top-level "icon" naming one of
                    # the icons in icons/src/icons.txt — the grid draws it above
                    # the key's name; absent falls back to the action kind's
                    # default (KIND_ICON in ui.py). Plus mtype:"obs", a live OBS
@@ -131,6 +135,12 @@ PROTO_VERSION = 11 # v11: macro files may carry a top-level "icon" naming one of
                    # v4: streamed JSONL macro files (full-rate playback);
                    # v3: fs_* file management over serial (hidden-drive mode)
 UPDATE_IDLE_ABORT_S = 30.0  # app silent this long mid-update: back to normal
+# No fs op for this long ends the data-transfer screen. A save is a run of
+# independent file transfers with the app's own work in the gaps, so this has
+# to outlast a gap comfortably — leaving and re-entering costs two repaints,
+# and a repaint mid-save is the exact thing the screen exists to prevent. It
+# is also the only way out if the app dies with the keypad held still.
+XFER_IDLE_S = 3.0
 WATCHDOG_S = 8.0  # hardware watchdog window (RP2040 max ~8.3s)
 MACRO_FORMATS = ("mkyada-macro", "asil-macro")
 LAYER_NAMES = "abcdefgh"
@@ -315,6 +325,12 @@ class App:
         self.upload = None  # in-flight fs_write: {"path", "tmp", "f", "seq"}
         self.upload_at = 0.0  # last chunk received (stale-upload reclaim)
         self.ui_stale = False  # a repaint was skipped during a transfer
+        # The app is moving files (a save, a backup, a key read). The keypad is
+        # held still for the duration — see begin_xfer — and the screen says so
+        # instead of looking hung. Ends XFER_IDLE_S after the last fs op, which
+        # is also what recovers it if the app dies mid-save.
+        self.xfer = False
+        self.xfer_at = 0.0
         self.pin_watch = None  # ("names", Buttons) while pin-detect mode is on
         self.pin_watch_until = 0.0
         self.host_label = None  # app-pushed profile/app label for the band
@@ -430,6 +446,10 @@ class App:
         cfg["usb_drive"] = cfg.get("usb_drive") is True  # same rule as boot.py
         cfg["show_layer"] = cfg.get("show_layer") is True
         cfg["show_profile"] = cfg.get("show_profile") is True
+        # ui.py indexes cfg["wheel_layers"] directly (the Settings toggle and
+        # the wheel's own paging test), so it has to be a real bool here — a
+        # hand-edited "true" string would otherwise page layers forever.
+        cfg["wheel_layers"] = cfg.get("wheel_layers") is True
         # timeout: light bounds here (the UI clamps to its exact TMO range);
         # null means "use the device's NVM value".
         tmo = cfg.get("timeout")
@@ -591,6 +611,9 @@ class App:
                 "key_map": c["key_map"], "usb_drive": c["usb_drive"],
                 "pins": self.key_pin_names(), "nav": self.nav_pin_names(),
                 "show_layer": c["show_layer"], "show_profile": c["show_profile"],
+                # The wheel's paging mode is a device setting the app can flip
+                # too, and it can't offer a switch for a state it can't read.
+                "wheel_layers": c["wheel_layers"],
                 "timeout": c.get("timeout"),
                 "enc_swap": c.get("enc_swap"), "layer_names": c.get("layer_names"),
                 # Biggest raw fs_write chunk this board can digest. A chunk
@@ -675,6 +698,7 @@ class App:
                     return self.fs_err("bootloader", "unsupported")
             microcontroller.reset()
         elif t in ("fs_list", "fs_read", "fs_write", "fs_delete"):
+            self.begin_xfer()
             # An fs op that OOMs (fragmented heap right after a connect's
             # display churn) must answer "oom" — an escaped MemoryError would
             # hit run()'s fatal handler and hard-RESET the board, and a
@@ -685,7 +709,12 @@ class App:
                 gc.collect()
                 self.fs_err(t, "oom", "out of memory")
         elif t == "fs_ack":
-            pass  # stray ack from a transfer we already gave up on
+            # A stray ack from a transfer we already gave up on (fs_read waits
+            # for its own acks inline). Nothing to do with it but note that the
+            # app is still working, so the transfer screen doesn't time out
+            # underneath it.
+            if self.xfer:
+                self.xfer_at = time.monotonic()
         elif t == "host_enter":
             self.set_mode("host")
             self.proto.send({"t": "ok", "re": "host_enter"})
@@ -863,6 +892,28 @@ class App:
         if ".." in p or p == "/":
             return None
         return p
+
+    def begin_xfer(self):
+        """An fs op arrived: hold the keypad still and say why.
+
+        Called before the op is answered, which is what makes the one repaint
+        safe: every fs command is acknowledged one at a time, so the app is
+        waiting on our reply and nothing is arriving at the port while the
+        300ms paint runs. Once up, the screen is NOT repainted per file — a
+        save is dozens of transfers and each repaint is a window in which the
+        USB FIFO goes undrained and a chunk loses bytes out of its middle."""
+        self.xfer_at = time.monotonic()
+        if self.xfer or self.updating:
+            return  # the update screen owns the glass in its own right
+        self.xfer = True
+        self.ui_call("on_xfer", True)
+
+    def end_xfer(self):
+        """The app has gone quiet: give the keypad back in one repaint."""
+        if not self.xfer:
+            return
+        self.xfer = False
+        self.ui_call("on_xfer", False)
 
     def close_upload(self, discard=False):
         up = self.upload
@@ -1405,6 +1456,12 @@ class App:
         if self.updating:
             return  # keys are dead during a locked update
         c = self.config
+        # Mid-transfer the keypad is deliberately inert: the macro file under
+        # the key may be half-written, and answering the press would mean
+        # serial traffic interleaved with the chunk flow. Swallowed outright —
+        # not even streamed to the app, which is busy writing.
+        if self.xfer:
+            return
         key_no = c["key_map"][i]  # logical key; i is the GPIO (solder) index
         # stream edges to a connected app in BOTH modes: standalone edges
         # power computer-side key actions (launch/command/sound) and the live
@@ -1578,6 +1635,12 @@ class App:
             # ...and neither must a locked update session
             if self.updating and not self.proto.connected:
                 self.end_update()
+            # The transfer screen ends when the app stops asking for files —
+            # or when it goes away mid-save, which is the case that would
+            # otherwise leave a keypad sitting there refusing its own keys.
+            if self.xfer and (not self.proto.connected
+                              or time.monotonic() - self.xfer_at > XFER_IDLE_S):
+                self.end_xfer()
             # A file transfer needs every contiguous byte it can get: the UI's
             # repaints allocate in the SAME size class as an incoming chunk,
             # so hold the screen still until the upload lands. (A save is a

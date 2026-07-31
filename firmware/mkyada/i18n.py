@@ -60,6 +60,13 @@ STRINGS = {
         "updating": "updating",
         "updating2": "do not unplug",
         "restarting": "restarting...",
+        # Shown for the whole time the app is reading or writing files. The
+        # keypad is deliberately dead while it is up, so the screen has to say
+        # why — a keypad that ignores its keys and explains nothing reads as a
+        # crash.
+        "transfer_title": "DATA TRANSFER",
+        "transfer": "app is writing files",
+        "transfer2": "keys paused",
         "setup_test": "SETUP - TEST",
         "press_key": "press a key",
         "keys_test": "KEY TEST",
@@ -138,6 +145,9 @@ STRINGS = {
         "updating": "güncelleniyor",
         "updating2": "fişi çekmeyin",
         "restarting": "yeniden başlatılıyor",
+        "transfer_title": "VERİ AKTARIMI",
+        "transfer": "uygulama yazıyor",
+        "transfer2": "tuşlar duraklatıldı",
         "setup_test": "KURULUM - TEST",
         "press_key": "bir tuşa bas",
         "keys_test": "TUŞ TESTİ",

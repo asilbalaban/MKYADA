@@ -75,10 +75,23 @@ SCREENS = [
      lambda d: d.show_grid(GRID, 1, band="STREAM")),
     ("speed", "Speed editor — 0.1x-10.0x per macro",
      lambda d: d.show_speed("A", 6, 15)),
+    # show_settings, not show_menu: the settings list has a value column of its
+    # own (a toggle draws as a switch, Language names the language), and the
+    # plain list this used to render was a screen the device never draws.
+    # Items mirror Ui._set_items in firmware/mkyada/ui.py.
     ("settings", "Settings menu",
-     lambda d: d.show_menu("SETTINGS", ["Auto return", "Language", "Layer band",
-                                        "Profile band", "Key test", "About",
-                                        "Restart"], 1)),
+     lambda d: d.show_settings("SETTINGS",
+                               [("Auto return", "text", "10s"),
+                                ("Language", "text", "English"),
+                                ("Layer band", "toggle", True),
+                                ("Profile band", "toggle", False),
+                                ("Wheel layers", "toggle", False),
+                                ("Key test", "none", None),
+                                ("Pixel test", "none", None),
+                                ("About", "none", None),
+                                ("Restart", "none", None)], 1)),
+    ("transfer", "Data transfer — the app is writing files",
+     lambda d: d.show_transfer()),
     ("about", "About — model, firmware, device id",
      lambda d: d.show_about((("Model", "vision6"), ("Firmware", "0.21.1"),
                              ("Device ID", "5035586072b9")))),
@@ -94,9 +107,16 @@ SCREENS = [
     # folding them, which is the whole reason the font was drawn by hand.
     ("menu-tr", "Turkish is drawn, not folded",
      lambda d: (i18n.set_lang("tr"),
-                d.show_menu("AYARLAR", ["Otomatik Dönüş", "Dil", "Katman bandı",
-                                        "Profil bandı", "Tuş testi", "Hakkında",
-                                        "Yeniden Başlat"], 0),
+                d.show_settings("AYARLAR",
+                                [("Otomatik Dönüş", "text", "10sn"),
+                                 ("Dil", "text", "Türkçe"),
+                                 ("Katman bandı", "toggle", True),
+                                 ("Profil bandı", "toggle", False),
+                                 ("Tekerle katman", "toggle", False),
+                                 ("Tuş testi", "none", None),
+                                 ("Piksel testi", "none", None),
+                                 ("Hakkında", "none", None),
+                                 ("Yeniden Başlat", "none", None)], 1),
                 i18n.set_lang("en"))),
 ]
 

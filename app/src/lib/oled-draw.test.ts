@@ -20,7 +20,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { renderWheelScreen, type WheelPreview } from "./oled-draw";
 import { OledScreens, type SettingsItem } from "./oled-screens";
 import { oledFont } from "./oled-fb";
-import { iconBytes } from "./oled-icons";
+import { iconBytes, packCustomIcon } from "./oled-icons";
 import { setLang } from "./oled-i18n";
 
 const GOLDEN = resolve(__dirname, "../../../tests/golden");
@@ -67,6 +67,7 @@ const OBS = {
 const SCREENS: { name: string; lang: "en" | "tr"; paint: (o: OledScreens) => void }[] = [
   { name: "boot", lang: "en", paint: (o) => o.show_boot() },
   { name: "update", lang: "en", paint: (o) => o.show_update(0.42, false, 26000, 62914) },
+  { name: "transfer", lang: "en", paint: (o) => o.show_transfer() },
   { name: "home", lang: "en", paint: (o) => o.show_home(0, 3, ["A", "B", "C"], "Main", true) },
   { name: "settings", lang: "en", paint: (o) => o.show_settings("SETTINGS", SET_ITEMS, 1) },
   { name: "menu", lang: "en", paint: (o) => o.show_menu("MEDIA", MENU_ITEMS, 1, 0, "run") },
@@ -236,5 +237,30 @@ describe("the icon family", () => {
     for (const n of ["chevron-left", "chevron-right", "check", "warning"]) {
       expect(iconBytes(n), n).not.toBeNull();
     }
+  });
+
+  // A hand-drawn icon isn't a lookup: the eight rows travel inside the macro's
+  // own json as "px:" + 16 hex. This side packs them and the firmware decodes
+  // them (icons.py get()), so the two spellings have to agree exactly — the
+  // round-trip below is the whole contract between the drawing grid and the
+  // glass.
+  it("packs and unpacks a drawn icon", () => {
+    const rows = [0x18, 0x3c, 0x7e, 0xff, 0xc3, 0xc3, 0x00, 0x00];
+    const name = packCustomIcon(rows);
+    expect(name).toBe("px:183c7effc3c30000");
+    expect(Array.from(iconBytes(name)!)).toEqual(rows);
+  });
+
+  it("round-trips a named icon through the drawn form", () => {
+    const src = iconBytes("rocket")!;
+    expect(Array.from(iconBytes(packCustomIcon(src))!)).toEqual(Array.from(src));
+  });
+
+  it("reads a malformed drawn icon as no icon", () => {
+    // Falling back to "no icon" is what keeps a bad hand-edit from blanking a
+    // tile in a way that looks like the icon family lost a name.
+    expect(iconBytes("px:1234")).toBeNull();
+    expect(iconBytes("px:zzzzzzzzzzzzzzzz")).toBeNull();
+    expect(iconBytes("px:")).toBeNull();
   });
 });

@@ -75,6 +75,7 @@ export function AssignmentPanel({
           onChange={(icon) => onChange({ ...value, icon })}
           assignment={value}
           name={value.label?.trim() || compileAssignment({ ...value, label: undefined })?.name || "Key"}
+          fwVersion={fwVersion}
         />
       )}
       <AssignmentEditor

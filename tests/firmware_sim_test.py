@@ -644,7 +644,7 @@ app.proto.send = _orig_send
 app.proto.ser = None
 
 # --- serial "led" op (proto v2): app feedback override --------------------
-check("hello reports proto v11", app.hello()["proto"] == 11, str(app.hello()["proto"]))
+check("hello reports proto v12", app.hello()["proto"] == 12, str(app.hello()["proto"]))
 check("hello reports usb_drive", app.hello()["usb_drive"] == app.config["usb_drive"], str(app.hello()))
 
 # profile path resolution (issue #23): a profile is a full independent config —
@@ -1765,6 +1765,32 @@ ui.enc.position += 1
 ui.tick(_kt + 2.3)
 check("the app-driven wiring test still streams the wheel",
       any(m.get("t") == "enc" for m in voutbox), str(voutbox))
+# ...but only the WIRING test names the control on the glass. The Keys tab
+# (test_ui "keys") puts up a static "macros are paused, use the other tab"
+# warning and leaves it up; repainting a SETUP TEST card over it for a wheel
+# detent or a BACK press turned the Keys test into a different test in front
+# of the user. Key presses already knew this (on_test_key); the wheel and the
+# nav buttons were the two paths that didn't.
+_toasts = []
+_orig_toast = ui.oled.show_toast
+ui.oled.show_toast = lambda *a, **k: _toasts.append(a)
+ui.test_ui = "keys"
+voutbox.clear()
+ui.enc.position += 1
+ui.tick(_kt + 2.4)
+ui.nav.events.queue.append(FakeKeyEvent(uimod.K_BACK, True))
+ui.tick(_kt + 2.5)
+check("the Keys tab test does not repaint over its own warning",
+      not _toasts, str(_toasts))
+check("the Keys tab test still streams the wheel to the app",
+      any(m.get("t") == "enc" for m in voutbox), str(voutbox))
+check("the Keys tab test still streams the nav buttons to the app",
+      any(m.get("t") == "btn" and "slot" in m for m in voutbox), str(voutbox))
+ui.test_ui = "wiring"
+ui.nav.events.queue.append(FakeKeyEvent(uimod.K_BACK, True))
+ui.tick(_kt + 2.6)
+check("the wiring test does still name the button it saw", bool(_toasts))
+ui.oled.show_toast = _orig_toast
 ui.test_ui = "self"
 vapp.proto.ser = _kt_ser
 ui._drain_inputs()

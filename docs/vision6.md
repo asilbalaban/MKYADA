@@ -72,9 +72,9 @@ device's pixels rather than a drawing of them.
 |---|---|---|---|---|
 | ![Home](images/oled/home.png) | ![Grid](images/oled/grid.png) | ![Speed](images/oled/speed.png) | ![Settings](images/oled/settings.png) | ![About](images/oled/about.png) |
 
-| Scene picker | Record status | Volume | Turkish |
-|---|---|---|---|
-| ![Scene picker](images/oled/wheel-scene.png) | ![Record status](images/oled/wheel-status.png) | ![Volume](images/oled/wheel-volume.png) | ![Turkish menu](images/oled/menu-tr.png) |
+| Scene picker | Record status | Volume | Turkish | Data transfer |
+|---|---|---|---|---|
+| ![Scene picker](images/oled/wheel-scene.png) | ![Record status](images/oled/wheel-status.png) | ![Volume](images/oled/wheel-volume.png) | ![Turkish menu](images/oled/menu-tr.png) | ![Data transfer](images/oled/transfer.png) |
 
 - **Boot** — branded "MKYADA loading" screen from the first frame; no
   CircuitPython console text.
@@ -102,14 +102,25 @@ device's pixels rather than a drawing of them.
   be found one press at a time; hold PSH to leave. **Pixel test** lights the
   whole panel so a dead column or a stuck row shows against a solid field —
   nothing on it is readable, so PSH, BACK and CONFIRM all leave.
-  Timeout is stored on the board (NVM); language and
-  the band toggles live in `config.json` (rewritten on-device, like the app
-  does) so the app always shows the same values. All survive power cycles
+  Timeout is stored on the board (NVM); language,
+  the band toggles and wheel paging live in `config.json` (rewritten
+  on-device, like the app does) so the app always shows the same values —
+  all three switches are also in the app's Settings → Keypad. All survive power cycles
   and firmware updates.
   The font-size entry is gone as of 0.20.0: one font ships now, and its
   proportional spacing fits more into a grid cell than the old fixed 4×6
   did. The `font` field left `config.json` and `hello` in 0.21.0 (protocol
   v10); a `font` key in an old config file is ignored.
+- **Data transfer** (fw 0.25.0) — while the app is reading or writing files
+  (a save, a backup, reading the keys back), the keypad shows a locked screen
+  and stops responding to its own keys, wheel and buttons. It is not a
+  politeness: every repaint costs 100–300 ms in which the USB receive FIFO
+  goes undrained, and the chunk that arrives then loses bytes out of its
+  middle — a failed save. So the screen is painted exactly twice, once going
+  in and once coming out, no matter how many files the operation touches.
+  Presses during it are dropped rather than queued. It ends three seconds
+  after the last file operation, which is also what recovers the keypad if
+  the app dies mid-save.
 - **Host mode** (a per-app profile is active) — key, encoder and button
   events stream to the app. Since fw 0.10.0 the screen shows the active
   profile's six key names as a grid (the app pushes them over serial), with
@@ -161,7 +172,15 @@ packing *is* the flash layout, so the firmware reads the same bytes without
 conversion. A macro picks one by **name** (`"icon": "rocket"` in its JSON),
 never by index: names are permanent, so reordering or extending the set can
 never repoint a user's macro at a different picture. An unknown name falls back
-to the action family's default. Icons live under `icons/`, not `fonts/` — they
+to the action family's default.
+
+Since firmware 0.25.0 the field can also be the picture instead of a name:
+`"icon": "px:183c7effc3c30000"` is those same eight rows written out in hex,
+drawn by hand on the app's 8×8 grid (Keys → the key → **Draw your own**).
+`icons.get()` decodes it rather than looking it up, so a drawing needs no
+second file and no index — it rides inside the macro it belongs to, travels
+with a backup, and goes away with a delete. A malformed one reads as "no icon"
+rather than blanking the tile. Icons live under `icons/`, not `fonts/` — they
 are their own asset, not glyphs, and `build-font.mjs` compiles every `.txt` it
 finds beside the font source.
 

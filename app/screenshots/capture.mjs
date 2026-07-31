@@ -50,7 +50,7 @@ const RECORDED_KEY = /Post the clip/;
 // firmware's own drawing code, so these are photographs of the device rather
 // than an artist's impression of it.
 const OLED_SHOTS = ["home", "grid", "speed", "settings", "about",
-  "wheel-scene", "wheel-status", "wheel-volume", "menu-tr"];
+  "wheel-scene", "wheel-status", "wheel-volume", "menu-tr", "transfer"];
 
 async function waitForServer(url, tries = 100) {
   for (let i = 0; i < tries; i++) {
@@ -70,9 +70,21 @@ async function main() {
   await mkdir(OLED_DIR, { recursive: true });
 
   console.log("· starting vite dev server…");
+  // Run Vite's own JS entry under this node rather than going through `npx`.
+  // On Windows npx is a .cmd, which spawn() either can't find (ENOENT) or
+  // since Node 22 refuses outright (EINVAL) — the harness died before drawing
+  // a single pixel, which is a good part of why the published shots went
+  // stale. This path needs no shell and no PATH lookup at all.
   const vite = spawn(
-    "npx",
-    ["vite", "--port", String(PORT), "--strictPort", "--clearScreen", "false"],
+    process.execPath,
+    [
+      resolve(APP_DIR, "node_modules/vite/bin/vite.js"),
+      "--port",
+      String(PORT),
+      "--strictPort",
+      "--clearScreen",
+      "false",
+    ],
     { cwd: APP_DIR, stdio: "inherit" },
   );
   const stopVite = () => {

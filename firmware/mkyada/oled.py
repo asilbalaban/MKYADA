@@ -291,6 +291,27 @@ class Oled:
         self._txt("%d%%" % int(p * 100), self.W - 4, PBAR_FOOT, 1.0)
         self.paint("update")
 
+    def show_transfer(self):
+        """The app is reading or writing files: the keypad is held still for
+        the duration, so say so.
+
+        Sibling of show_update on purpose — both are screens the keypad cannot
+        be used from, and the inverted strip is what the two have in common.
+        No progress bar: a save is a run of independent file transfers and the
+        app never says how many, so a bar here would be invented. Painted once
+        on the way in and once on the way out; every repaint in between is
+        300ms of a USB FIFO nobody is draining, which is a corrupted chunk."""
+        if not self._begin("transfer"):
+            return
+        from mkyada import icons
+        fb = self.fb
+        self._bar9(tr("transfer_title"))
+        fb.rect(0, 12, self.W, 11)
+        self._txt(tr("transfer2"), self.CX, 14, 0.5, True)
+        fb.icon2(self.CX - 8, 30, icons.get("upload"))
+        self._txt(tr("transfer"), self.CX, 50, 0.5)
+        self.paint("transfer")
+
     def show_settings(self, title, items, sel):
         """Settings list. items = [(label, kind, value)] where kind is
         "text" | "toggle" | "none" — the state used to be baked into the label

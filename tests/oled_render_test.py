@@ -154,6 +154,20 @@ check("chrome icons exist", all(icons.get(n) is not None for n in
                                 ("chevron-left", "chevron-right", "check",
                                  "warning")))
 check("names are unique", len(set(icons.IDX)) == len(icons.IDX))
+# A hand-drawn icon has no name to look up — the eight rows ride inside the
+# macro json as "px:" + 16 hex, and get() decodes rather than resolves them.
+# The grid draws whatever comes back, so a malformed one has to read as "no
+# icon" and not as an exception four tiles into a repaint.
+check("a drawn icon decodes to its own bytes",
+      icons.get("px:183c7effc3c30000") == b"\x18\x3c\x7e\xff\xc3\xc3\x00\x00")
+check("a drawn icon is 8 bytes like any other",
+      len(icons.get("px:00000000000000ff")) == 8)
+check("a drawn icon round-trips a named one",
+      icons.get("px:" + "".join("%02x" % b for b in icons.get("rocket")))
+      == icons.get("rocket"))
+check("a short drawn icon is None", icons.get("px:1234") is None)
+check("a non-hex drawn icon is None", icons.get("px:zzzzzzzzzzzzzzzz") is None)
+check("bare 'px:' is None", icons.get("px:") is None)
 check("every index addresses 8 packed bytes",
       all(len(icons.PIX[i * 8:i * 8 + 8]) == 8 for i in icons.IDX.values()))
 
@@ -499,6 +513,7 @@ i18n.set_lang("en")
 for name, fn in (
     ("boot", lambda d: d.show_boot()),
     ("update", lambda d: d.show_update(0.42, False, 26000, 62914)),
+    ("transfer", lambda d: d.show_transfer()),
     ("home", lambda d: d.show_home(0, 3, ["A", "B", "C"], "Main", True)),
     ("settings", lambda d: d.show_settings("SETTINGS", SET_ITEMS, 1)),
     ("menu", lambda d: d.show_menu("MEDIA", ITEMS, 1, marked=0, action="run")),

@@ -129,6 +129,7 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
       if (msg.t === "config" && "show_layer" in msg) {
         const c = msg as {
           show_profile?: unknown;
+          wheel_layers?: unknown;
           timeout?: unknown;
         };
         setHello((h) =>
@@ -137,6 +138,11 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
                 ...h,
                 show_layer: msg.show_layer === true,
                 show_profile: c.show_profile === true,
+                // wheel_layers only appears on firmware ≥ 0.25.0; folding an
+                // absent field in as `false` would make the Settings switch
+                // claim "Off" on a keypad that never reported a state at all,
+                // which is what the "needs firmware" badge is there to say.
+                ...("wheel_layers" in c ? { wheel_layers: c.wheel_layers === true } : {}),
                 // timeout mirrors the on-device Settings menu (firmware
                 // ≥ 0.14.0 rewrites config.json + announces it)
                 ...(typeof c.timeout === "number" ? { timeout: c.timeout } : {}),

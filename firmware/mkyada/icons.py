@@ -141,7 +141,25 @@ IDX = {
 
 
 def get(name):
-    """The 8 bytes for `name`, or None if the set does not have it."""
+    """The 8 bytes for `name`, or None if the set does not have it.
+
+    A name of the form "px:" + 16 hex digits is not a lookup at all:
+    it IS the picture, one hex byte per row, drawn by the user in the
+    app. Carrying the eight bytes inside the macro's own json is what
+    keeps a hand-drawn icon working with no second file to ship, no
+    index to keep in step, and nothing to leak when the macro is
+    deleted."""
+    if name is not None and name[:3] == "px:":
+        h = name[3:]
+        if len(h) != 16:
+            return None
+        try:
+            b = bytearray(8)
+            for i in range(8):
+                b[i] = int(h[i * 2:i * 2 + 2], 16)
+        except ValueError:
+            return None  # garbage in the json must not stop the grid
+        return bytes(b)
     i = IDX.get(name, -1)
     if i < 0:
         return None

@@ -12,7 +12,12 @@
 // picture, and a name we later drop simply falls back to the kind's default.
 
 import { useMemo, useRef, useState, useEffect } from "react";
-import { ICON_CATEGORIES, iconBytes } from "../lib/oled-icons";
+import {
+  CUSTOM_ICON_PREFIX,
+  ICON_CATEGORIES,
+  iconBytes,
+  packCustomIcon,
+} from "../lib/oled-icons";
 import { drawIconSwatch, renderWheelScreen, OLED_W, OLED_H } from "../lib/oled-draw";
 import type { Assignment } from "../lib/types";
 import { Input } from "./ui";
@@ -108,11 +113,120 @@ function CellPreview({ name, icon }: { name: string; icon: string | null }) {
   );
 }
 
+/** Draw the eight rows by hand.
+ *
+ * The canvas is the real thing, not a sketch of it: the grid below is the same
+ * 8×8 the glass lights up, and what it packs is the exact byte string the
+ * firmware decodes (icons.py get(), "px:" + 16 hex). There is no upload step
+ * and no second file — the picture rides inside the macro's own json, so it
+ * travels with a backup and vanishes with a delete.
+ *
+ * A click toggles its pixel. Dragging keeps doing whatever the first pixel
+ * did, so a stroke paints or erases as a whole rather than flickering under
+ * the pointer. */
+function IconDrawer({
+  rows,
+  onRows,
+}: {
+  rows: Uint8Array;
+  onRows: (rows: Uint8Array) => void;
+}) {
+  // null while the pointer is up; true = the stroke is painting, false = erasing
+  const stroke = useRef<boolean | null>(null);
+
+  function apply(x: number, y: number, on: boolean) {
+    const bit = 0x80 >> x;
+    const cur = (rows[y] & bit) !== 0;
+    if (cur === on) return;
+    const next = new Uint8Array(rows);
+    next[y] = on ? next[y] | bit : next[y] & ~bit;
+    onRows(next);
+  }
+
+  useEffect(() => {
+    const up = () => {
+      stroke.current = null;
+    };
+    window.addEventListener("pointerup", up);
+    return () => window.removeEventListener("pointerup", up);
+  }, []);
+
+  return (
+    <div className="flex flex-col gap-2">
+      <div
+        className="grid w-max touch-none select-none gap-px rounded bg-line p-px"
+        style={{ gridTemplateColumns: "repeat(8, 22px)" }}
+      >
+        {Array.from({ length: 64 }, (_, i) => {
+          const x = i % 8;
+          const y = (i / 8) | 0;
+          const on = (rows[y] & (0x80 >> x)) !== 0;
+          return (
+            <button
+              key={i}
+              type="button"
+              aria-label={`Pixel ${x + 1}, ${y + 1}`}
+              aria-pressed={on}
+              className={`h-[22px] w-[22px] ${on ? "bg-accent" : "bg-panel2 hover:bg-panel"}`}
+              onPointerDown={(e) => {
+                // Capture on the cell that started the stroke: without it the
+                // browser keeps sending the moves to that one element and
+                // dragging across the grid paints a single pixel.
+                e.currentTarget.releasePointerCapture?.(e.pointerId);
+                stroke.current = !on;
+                apply(x, y, !on);
+              }}
+              onPointerEnter={() => {
+                if (stroke.current !== null) apply(x, y, stroke.current);
+              }}
+            />
+          );
+        })}
+      </div>
+      <div className="flex items-center gap-3 text-xs">
+        <button
+          type="button"
+          className="text-fg-faint underline hover:text-fg-muted"
+          onClick={() => onRows(new Uint8Array(8))}
+        >
+          Clear
+        </button>
+        <button
+          type="button"
+          className="text-fg-faint underline hover:text-fg-muted"
+          onClick={() => onRows(rows.map((b) => ~b & 0xff))}
+        >
+          Invert
+        </button>
+        <span className="text-fg-faint">
+          Click a pixel to light it, click again to clear. Drag to draw.
+        </span>
+      </div>
+    </div>
+  );
+}
+
+/** Eight editable rows seeded from an existing icon, blank if there is none. */
+function seedRows(icon: string | null | undefined): Uint8Array {
+  const b = iconBytes(icon);
+  return b ? new Uint8Array(b) : new Uint8Array(8);
+}
+
+/** Firmware that decodes a "px:" icon name instead of looking it up. Below it
+ *  a drawing is silently ignored and the tile shows the kind's default, so the
+ *  drawer is not offered rather than offered and quietly dropped. */
+function fwDrawsCustomIcons(fw: string | undefined): boolean {
+  if (!fw) return true; // nothing connected — don't hide a feature on a guess
+  const [maj = 0, min = 0] = fw.split(".").map((n) => parseInt(n) || 0);
+  return maj > 0 || min >= 25;
+}
+
 export function IconPicker({
   value,
   onChange,
   assignment,
   name,
+  fwVersion,
 }: {
   /** The chosen icon name, or undefined for the kind's default. */
   value: string | undefined;
@@ -120,11 +234,32 @@ export function IconPicker({
   assignment: Assignment;
   /** The name that will sit under the icon on the glass. */
   name: string;
+  /** The connected keypad's firmware, for the hand-drawn icon gate. */
+  fwVersion?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
   const fallback = defaultIconFor(assignment.kind);
   const effective = value ?? fallback;
+  const custom = !!value?.startsWith(CUSTOM_ICON_PREFIX);
+  // An icon already drawn stays editable even on firmware that can't show it —
+  // hiding the way back in would strand the drawing inside the macro file.
+  const canDraw = custom || fwDrawsCustomIcons(fwVersion);
+  const [drawing, setDrawing] = useState(false);
+  // Opening the drawer on an icon that already exists starts from its pixels
+  // rather than from a blank grid — tracing one of the 270 is how most
+  // hand-drawn icons actually begin.
+  const [rows, setRows] = useState<Uint8Array>(() => seedRows(effective));
+
+  // Mid-stroke the saved value and `rows` are the same picture; before the
+  // first stroke they aren't, so the preview follows the grid, not the macro.
+  const shown = drawing ? packCustomIcon(rows) : effective;
+
+  function openDrawer() {
+    setRows(seedRows(effective));
+    setDrawing(true);
+    setOpen(false);
+  }
 
   const groups = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -142,24 +277,57 @@ export function IconPicker({
       <div className="flex items-center gap-3">
         <button
           type="button"
-          onClick={() => setOpen((o) => !o)}
+          onClick={() => {
+            setDrawing(false);
+            setOpen((o) => !o);
+          }}
           aria-expanded={open}
           className="flex items-center gap-2 rounded-md border border-line bg-panel2 px-2.5 py-1.5 text-sm text-fg outline-none focus:border-accent"
         >
-          <Swatch name={effective} scale={2} />
-          <span className="text-fg-muted">{value ?? `Automatic${fallback ? ` (${fallback})` : ""}`}</span>
+          <Swatch name={shown} scale={2} />
+          <span className="text-fg-muted">
+            {custom ? "Drawn by you" : (value ?? `Automatic${fallback ? ` (${fallback})` : ""}`)}
+          </span>
         </button>
+        {canDraw && (
+          <button
+            type="button"
+            onClick={() => (drawing ? setDrawing(false) : openDrawer())}
+            aria-expanded={drawing}
+            className="text-xs text-fg-faint underline hover:text-fg-muted"
+          >
+            {drawing ? "Close" : custom ? "Edit drawing" : "Draw your own"}
+          </button>
+        )}
         {value && (
           <button
             type="button"
-            onClick={() => onChange(undefined)}
+            onClick={() => {
+              setDrawing(false);
+              onChange(undefined);
+            }}
             className="text-xs text-fg-faint underline hover:text-fg-muted"
           >
             Use automatic
           </button>
         )}
-        <CellPreview name={name} icon={effective} />
+        <CellPreview name={name} icon={shown} />
       </div>
+
+      {drawing && (
+        <div className="flex flex-col gap-2 rounded-md border border-line p-2">
+          <IconDrawer
+            rows={rows}
+            onRows={(r) => {
+              setRows(r);
+              // Save on every stroke rather than behind a button: the cell
+              // preview beside it is the point, and a drawing you have to
+              // confirm before you can judge it is a drawing you judge twice.
+              onChange(packCustomIcon(r));
+            }}
+          />
+        </div>
+      )}
 
       {open && (
         <div className="flex flex-col gap-2 rounded-md border border-line p-2">

@@ -16,6 +16,7 @@ import {
   Plug,
   Power,
   Rocket,
+  RotateCw,
   Sun,
   Video,
   type LucideIcon,
@@ -293,6 +294,11 @@ function ObsCard() {
   );
 }
 
+/** The Vision 6 screen settings this card flips straight in config.json.
+ * Each one is also reachable from the keypad's own Settings menu, so the
+ * names here are exactly the config keys the firmware reads. */
+type ScreenToggle = "show_layer" | "show_profile" | "wheel_layers";
+
 /** Device-level settings that live in the keypad's own config.json. */
 function KeypadCard() {
   const { hello, drive, send, disconnect, writeAndReload } = useDevice();
@@ -313,7 +319,10 @@ function KeypadCard() {
   // firmware < 0.9.0 has no grid band (config show_layer / show_profile)
   const bandSupported = hello?.show_layer !== undefined;
   const wheelAccel = useWheelAccel();
-  const [bandBusy, setBandBusy] = useState<"show_layer" | "show_profile" | null>(null);
+  // firmware < 0.25.0 doesn't report the wheel's paging mode, so the switch
+  // below would have nothing to show a state from.
+  const wheelLayersSupported = hello?.wheel_layers !== undefined;
+  const [bandBusy, setBandBusy] = useState<ScreenToggle | null>(null);
   const [fieldBusy, setFieldBusy] = useState<string | null>(null);
   // firmware < 0.14.0 doesn't mirror prefs into config.json. This used to
   // probe `font`, which firmware 0.20.0 dropped along with the setting itself;
@@ -342,8 +351,8 @@ function KeypadCard() {
     }
   }
 
-  /** Flip a band toggle in the keypad's config.json and reload the firmware. */
-  async function setBand(key: "show_layer" | "show_profile", value: boolean) {
+  /** Flip a screen toggle in the keypad's config.json and reload the firmware. */
+  async function setBand(key: ScreenToggle, value: boolean) {
     if (!hello || !drive) return;
     setBandBusy(key);
     try {
@@ -512,6 +521,32 @@ function KeypadCard() {
                 >
                   <AppWindow size={14} aria-hidden />
                   {hello?.show_profile ? "On" : "Off"}
+                </Button>
+              )}
+            </div>
+
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex flex-col gap-0.5 text-sm">
+                <span className="text-fg font-medium">Wheel walks layers too</span>
+                <span className="text-xs text-fg-faint">
+                  Turning past the sixth tile wraps into the next layer's first key
+                  instead of stopping, and the grid grows a page counter. Off keeps the
+                  wheel inside one layer. Also on the device (Settings → Wheel layers).
+                </span>
+              </div>
+              {!wheelLayersSupported ? (
+                <Badge tone="amber">needs firmware ≥ 0.25.0</Badge>
+              ) : (
+                <Button
+                  variant={hello?.wheel_layers ? "primary" : "default"}
+                  role="switch"
+                  aria-checked={!!hello?.wheel_layers}
+                  loading={bandBusy === "wheel_layers"}
+                  disabled={!drive || bandBusy !== null}
+                  onClick={() => void setBand("wheel_layers", !hello?.wheel_layers)}
+                >
+                  <RotateCw size={14} aria-hidden />
+                  {hello?.wheel_layers ? "On" : "Off"}
                 </Button>
               )}
             </div>

@@ -241,6 +241,19 @@ export class OledScreens {
     this._txt(`${Math.trunc(p * 100)}%`, this.W - 4, PBAR_FOOT, 1);
   }
 
+  /** The app is reading or writing files and the keypad is held still for the
+   * duration. Sibling of show_update; no progress bar, because a save is a run
+   * of independent file transfers and nothing says how many. */
+  show_transfer() {
+    const fb = this.fb;
+    this.clear();
+    this._bar9(tr("transfer_title"));
+    fb.rect(0, 12, this.W, 11);
+    this._txt(tr("transfer2"), this.CX, 14, 0.5, true);
+    fb.icon2(this.CX - 8, 30, iconBytes("upload"));
+    this._txt(tr("transfer"), this.CX, 50, 0.5);
+  }
+
   /** Settings list. The state used to be baked into the label ("Layer band:
    * on"); it is a column of its own now. */
   show_settings(title: string, items: SettingsItem[], sel: number) {

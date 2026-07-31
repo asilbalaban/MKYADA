@@ -1,4 +1,20 @@
-# MKYADA serial protocol (v11)
+# MKYADA serial protocol (v12)
+
+v12 (firmware 0.25.0) adds two things, both additive:
+
+- **Hand-drawn icons** — the macro `icon` field may be the picture instead of a
+  name: `"icon":"px:183c7effc3c30000"` is 16 hex digits, one byte per row,
+  bit 7 = leftmost pixel — the same packing `icons/src/icons.txt` compiles to.
+  `icons.get()` decodes it rather than looking it up, so a drawing needs no
+  second file, no index, and travels inside the macro it belongs to (a backup
+  carries it; a delete takes it with them). A malformed one reads as "no icon"
+  and falls back to the kind's default. Firmware < 0.25.0 simply doesn't
+  recognise the name and draws that default, so the app only offers the
+  drawing grid above it.
+- **`wheel_layers` in `hello`** — the Vision 6 wheel-paging mode (config.json
+  `"wheel_layers"`, already editable in the device's own SETTINGS menu) is now
+  reported, so the app can render the switch for it. Absent = firmware that
+  predates the field, which is how the app knows to say so.
 
 v11 (firmware 0.23.0) is the **new menu** release. Two additions:
 
@@ -9,7 +25,8 @@ v11 (firmware 0.23.0) is the **new menu** release. Two additions:
   gets. Icons are addressed **by name, never by index**, so extending or
   reordering the family cannot repoint an existing macro at a different
   picture; an unknown name falls back to the default rather than blanking the
-  cell. Old firmware ignores the field entirely.
+  cell. Old firmware ignores the field entirely. Since v12 the field may also
+  carry the eight rows inline (`px:` above) instead of a name.
 - **`mtype:"obs"`** — a fourth wheel-menu shape (see `menu` below): a live OBS
   status screen rather than a chooser.
 
@@ -253,6 +270,14 @@ the device (SETTINGS menu, which rewrites config.json like the language
 setting — needs the hidden-drive mode, else the filesystem is host-owned
 and the device shows the read-only notice). `hello` mirrors both fields so
 the app can render the switches without reading the file.
+
+`config.json` `"wheel_layers"` (boolean, default false) is the third screen
+toggle and rides the same path: past the sixth tile the wheel wraps into the
+next layer's first key instead of stopping, and the grid grows a page
+counter. Off by default — it changes what the wheel does, and an existing
+keypad must not have that move under it on an update. `hello` reports it
+since v12 (firmware 0.25.0); before that the app can't read the state and
+says so instead of guessing.
 
 ### Encoder / module-button custom slots (vision6)
 

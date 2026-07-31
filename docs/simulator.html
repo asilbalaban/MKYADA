@@ -1045,8 +1045,16 @@ var MKOLED = (() => {
     PIX[i] = parseInt(PIX_HEX.slice(i * 2, i * 2 + 2), 16);
   }
   var IDX = new Map(ICON_NAMES.map((n, i) => [n, i]));
+  var CUSTOM_ICON_PREFIX = "px:";
   function iconBytes(name) {
     if (!name) return null;
+    if (name.startsWith(CUSTOM_ICON_PREFIX)) {
+      const h = name.slice(CUSTOM_ICON_PREFIX.length);
+      if (!/^[0-9a-fA-F]{16}$/.test(h)) return null;
+      const b = new Uint8Array(8);
+      for (let i2 = 0; i2 < 8; i2++) b[i2] = parseInt(h.slice(i2 * 2, i2 * 2 + 2), 16);
+      return b;
+    }
     const i = IDX.get(name);
     if (i === void 0) return null;
     return PIX.subarray(i * 8, i * 8 + 8);
@@ -1104,6 +1112,9 @@ var MKOLED = (() => {
       "updating": "updating",
       "updating2": "do not unplug",
       "restarting": "restarting...",
+      "transfer_title": "DATA TRANSFER",
+      "transfer": "app is writing files",
+      "transfer2": "keys paused",
       "setup_test": "SETUP - TEST",
       "press_key": "press a key",
       "keys_test": "KEY TEST",
@@ -1179,6 +1190,9 @@ var MKOLED = (() => {
       "updating": "güncelleniyor",
       "updating2": "fişi çekmeyin",
       "restarting": "yeniden başlatılıyor",
+      "transfer_title": "VERİ AKTARIMI",
+      "transfer": "uygulama yazıyor",
+      "transfer2": "tuşlar duraklatıldı",
       "setup_test": "KURULUM - TEST",
       "press_key": "bir tuşa bas",
       "keys_test": "TUŞ TESTİ",
@@ -1391,6 +1405,18 @@ var MKOLED = (() => {
       this._pbar(p, 1);
       this._txt(tr("updating"), 4, PBAR_FOOT, 0);
       this._txt(`${Math.trunc(p * 100)}%`, this.W - 4, PBAR_FOOT, 1);
+    }
+    /** The app is reading or writing files and the keypad is held still for the
+     * duration. Sibling of show_update; no progress bar, because a save is a run
+     * of independent file transfers and nothing says how many. */
+    show_transfer() {
+      const fb = this.fb;
+      this.clear();
+      this._bar9(tr("transfer_title"));
+      fb.rect(0, 12, this.W, 11);
+      this._txt(tr("transfer2"), this.CX, 14, 0.5, true);
+      fb.icon2(this.CX - 8, 30, iconBytes("upload"));
+      this._txt(tr("transfer"), this.CX, 50, 0.5);
     }
     /** Settings list. The state used to be baked into the label ("Layer band:
      * on"); it is a column of its own now. */
@@ -1814,7 +1840,7 @@ const UI_SLOTS=["enc-cw","enc-ccw","btn-back","btn-confirm","btn-psh"];
 const KEY_PINS=["GP29","GP28","GP27","GP26","GP15","GP14"];   // vision6 pin_order
 const NAV_PINS=["GP4","GP5","GP6"];                            // PSH, BACK, CONFIRM
 const ENC_PINS=["GP2","GP3"];
-const FW_VERSION="0.24.0";
+const FW_VERSION="0.25.0";
 const UID="E66138935F63";
 
 const CFG={
@@ -1964,12 +1990,17 @@ const NAV_SLOT=["psh","back","confirm"];
 const NAV_SLOTS={0:"btn-psh",1:"btn-back",2:"btn-confirm"};
 const ESC_HOLD_S=1.2, TEST_EXIT_HOLD_S=3.0, TEST_IDLE_MIN_S=15, CTX_WAIT_S=1.5;
 const MENU_HOLD_S=0.4, SAVED_DWELL_S=1.1, TOAST_DWELL_S=1.6;
+// app.py XFER_IDLE_S: son fs işleminden bu kadar sonra veri aktarımı ekranı
+// kapanır. Cihazda kaydın kaç dosya sürdüğünü kimse söylemediği için tek
+// çıkış yolu bu sessizlik.
+const XFER_IDLE_S=3.0;
 
 const S_HOME=0,S_SELECT=1,S_SPEED=2,S_SAVED=3,S_SET_MENU=4,S_TIMEOUT=5,
       S_PLAYING=6,S_HOST=7,S_TOAST=8,S_LANG=9,S_TEST=10,S_ABOUT=11,S_CTX=12,
-      S_PIXELS=13;
+      S_PIXELS=13,S_XFER=14;
 const S_NAME=["home","grid","speed","saved","settings","timeout","playing",
-              "host","toast","language","keytest","about","wheel"];
+              "host","toast","language","keytest","about","wheel","pixels",
+              "transfer"];
 
 const MEDIA_OPTS=["play_pause","prev_track","next_track","stop","mute",
                   "volume_up","volume_down","brightness_up","brightness_down"];
@@ -1993,6 +2024,7 @@ const DEV={
   bootT:0, booting:true, playingUntil:0, playPath:null, errorMsg:null,
   headless:false, updateT:0, updateRestartT:0,
   updateTotal:62914,   // update_begin "bytes" — bir firmware paketi kadar
+  xferUntil:0,         // uygulama dosya yazıyor: bu ana kadar ekran kilitli
 };
 
 const OLED=new Oled();
@@ -2188,6 +2220,19 @@ const UI={
   _enc_custom(){ const s=this.slots(DEV.layer); return !!(s["enc-cw"]||s["enc-ccw"]); },
   _grid_custom(){ const s=this.slots(DEV.layer); return UI_SLOTS.some(k=>!!s[k]); },
   _enter_grid(){ this.sel_mode=false; this.state=S_SELECT; this._draw_grid(); },
+  // Uygulama dosya okuyup yazarken cihaz bilerek ölü: tuşlar kuyruğa
+  // alınmaz, atılır — yoksa kayıt biter bitmez kullanıcının donuk ekrana
+  // bastığı menüler arka arkaya açılırdı.
+  on_xfer(active){
+    if(active){
+      if(this.state===S_XFER||this.state===S_PLAYING) return;
+      this.state=S_XFER; OLED.show_transfer();
+    } else if(this.state===S_XFER){
+      // (Cihazda burada makro önbelleği de atılır — _drop_macro_cache;
+      //  simülatörün böyle bir önbelleği yok, ızgarayı doğrudan okur.)
+      this._enter_grid();
+    }
+  },
   _draw_home(){
     const p=this.home_pos, names=CFG.layer_names;
     OLED.show_home(p,CFG.layer_count,LAYER_NAMES.slice(0,CFG.layer_count),
@@ -2946,6 +2991,13 @@ function tick(){
         if(p>=1) DEV.updateRestartT=now;
       }
     }
+    // Veri aktarımı: uygulama dosya yazarken cihaz kilitli. Cihazdaki gibi
+    // TEK sefer çizilir (App.begin_xfer) ve son fs işleminden XFER_IDLE_S
+    // sonra ızgaraya döner; arada her yeniden çizim, boşaltılmayan bir USB
+    // FIFO demek. Burada da o yüzden ekran donuk durur.
+    else if(DEV.xferUntil){
+      if(now>=DEV.xferUntil){ DEV.xferUntil=0; UI.on_xfer(false); }
+    }
     else{
       holdTick(now);
       if(DEV.playingUntil&&now>=DEV.playingUntil){ DEV.playingUntil=0; UI.on_play_done(); }
@@ -3051,7 +3103,8 @@ const JUMPS=[
   ["host_card","HOST MENÜ: KART"],["obs_rec","HOST: OBS KAYIT"],
   ["obs_main","HOST: OBS"],["host","HOST MODU (ızgara)"],
   ["host_plain","HOST MODU (ad yokken)"],["boot","AÇILIŞ"],
-  ["update","YAZILIM GÜNCELLEME"],["error","HATA EKRANI"],["headless","MENÜ YÜKLENEMEDİ"]
+  ["update","YAZILIM GÜNCELLEME"],["transfer","VERİ AKTARIMI"],
+  ["error","HATA EKRANI"],["headless","MENÜ YÜKLENEMEDİ"]
 ];
 const jump=document.getElementById("jump");
 for(const [v,t] of JUMPS){
@@ -3113,6 +3166,9 @@ jump.onchange=()=>{
       APP.keys=null; UI._draw_host(); break;
     case "boot": reboot(); break;
     case "update": startUpdate(); break;
+    case "transfer":
+      if(!APP.connected) toggleApp();
+      DEV.xferUntil=nowS()+XFER_IDLE_S; UI.on_xfer(true); break;
     case "error": DEV.errorMsg="MemoryError: memory allocation failed"; break;
     case "headless": DEV.headless=true; break;
   }

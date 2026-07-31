@@ -145,9 +145,30 @@ for (let i = 0; i < PIX.length; i++) {
 
 const IDX = new Map<string, number>(ICON_NAMES.map((n, i) => [n, i]));
 
-/** The 8 packed rows for `name`, or null if the set does not have it. */
+/** A hand-drawn icon: the eight rows carried inline instead of named.
+ *  Same syntax the firmware decodes in icons.py get(). */
+export const CUSTOM_ICON_PREFIX = "px:";
+
+/** Pack eight row bytes into the `px:` name a macro can store. */
+export function packCustomIcon(rows: ArrayLike<number>): string {
+  let h = "";
+  for (let i = 0; i < 8; i++) {
+    h += ((rows[i] ?? 0) & 0xff).toString(16).padStart(2, "0");
+  }
+  return CUSTOM_ICON_PREFIX + h;
+}
+
+/** The 8 packed rows for `name`, or null if the set does not have it.
+ *  A `px:` name is decoded rather than looked up — see icons.py get(). */
 export function iconBytes(name: string | null | undefined): Uint8Array | null {
   if (!name) return null;
+  if (name.startsWith(CUSTOM_ICON_PREFIX)) {
+    const h = name.slice(CUSTOM_ICON_PREFIX.length);
+    if (!/^[0-9a-fA-F]{16}$/.test(h)) return null;
+    const b = new Uint8Array(8);
+    for (let i = 0; i < 8; i++) b[i] = parseInt(h.slice(i * 2, i * 2 + 2), 16);
+    return b;
+  }
   const i = IDX.get(name);
   if (i === undefined) return null;
   return PIX.subarray(i * 8, i * 8 + 8);
