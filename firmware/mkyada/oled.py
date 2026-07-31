@@ -308,7 +308,7 @@ class Oled:
         self._bar9(tr("transfer_title"))
         fb.rect(0, 12, self.W, 11)
         self._txt(tr("transfer2"), self.CX, 14, 0.5, True)
-        fb.icon2(self.CX - 8, 30, icons.get("upload"))
+        fb.icon2(self.CX - 8, 30, icons.get("database"))
         self._txt(tr("transfer"), self.CX, 50, 0.5)
         self.paint("transfer")
 

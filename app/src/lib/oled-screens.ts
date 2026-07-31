@@ -250,7 +250,7 @@ export class OledScreens {
     this._bar9(tr("transfer_title"));
     fb.rect(0, 12, this.W, 11);
     this._txt(tr("transfer2"), this.CX, 14, 0.5, true);
-    fb.icon2(this.CX - 8, 30, iconBytes("upload"));
+    fb.icon2(this.CX - 8, 30, iconBytes("database"));
     this._txt(tr("transfer"), this.CX, 50, 0.5);
   }
 
