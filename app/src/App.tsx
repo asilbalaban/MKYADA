@@ -43,6 +43,9 @@ const NAV: { id: Page; label: string; icon: LucideIcon; needsDevice?: boolean }[
 
 function Shell() {
   const [page, setPage] = useState<Page>("devices");
+  // Set by the permissions banner so Settings opens on the Application tab
+  // (where the permissions card lives) instead of the default Keypad tab.
+  const [settingsTab, setSettingsTab] = useState<{ id: string } | null>(null);
   const [update, setUpdate] = useState<UpdateInfo | null>(null);
   const [nickname, setNickname] = useState("");
   const { hello, port, layer, status, linkWedged, keysLoading } = useDevice();
@@ -150,7 +153,12 @@ function Shell() {
         </aside>
 
         <div className="flex-1 flex flex-col min-w-0">
-          <PermissionsBanner onOpenSettings={() => setPage("settings")} />
+          <PermissionsBanner
+            onOpenSettings={() => {
+              setSettingsTab({ id: "app" });
+              setPage("settings");
+            }}
+          />
           {update && (
             <div className="flex items-center justify-between bg-warning-bg border-b border-warning-line px-4 py-2 text-sm">
               <span className="text-fg">
@@ -199,7 +207,7 @@ function Shell() {
               <RecorderPage active={page === "recorder"} />
             </div>
             {page === "profiles" && <ProfilesPage />}
-            {page === "settings" && <SettingsPage />}
+            {page === "settings" && <SettingsPage openTab={settingsTab} />}
           </main>
         </div>
       </div>

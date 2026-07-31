@@ -10,8 +10,15 @@
 // Choice is stored by NAME, never by index — names are permanent, so growing
 // or reordering the family can never repoint an existing macro at a different
 // picture, and a name we later drop simply falls back to the kind's default.
+//
+// The user chooses between exactly three things: an icon from the list, a
+// drawing of their own, or no icon. There is no "automatic" choice — a macro
+// saved without an icon field (older versions offered that) simply shows the
+// kind's default as if it had been picked, and the first explicit pick
+// replaces it.
 
 import { useMemo, useRef, useState, useEffect } from "react";
+import { ChevronDown, Pencil } from "lucide-react";
 import {
   CUSTOM_ICON_PREFIX,
   ICON_CATEGORIES,
@@ -22,9 +29,9 @@ import { drawIconSwatch, renderWheelScreen, OLED_W, OLED_H } from "../lib/oled-d
 import type { Assignment } from "../lib/types";
 import { Input } from "./ui";
 
-/** What the firmware falls back to when a macro carries no icon.
+/** What the firmware falls back to when a macro carries no icon field.
  * Mirrors KIND_ICON in firmware/mkyada/ui.py — if that map changes, this one
- * has to move with it or the "Automatic" swatch lies about what you'll get. */
+ * has to move with it or the picker lies about what an older macro shows. */
 const KIND_ICON: Record<string, string> = {
   keystroke: "keyboard",
   combo: "keyboard",
@@ -99,9 +106,12 @@ function CellPreview({ name, icon }: { name: string; icon: string | null }) {
     c.putImageData(img, 0, 0);
   }, [name, icon]);
   // Only the first tile is drawn, so show that corner rather than a mostly
-  // empty 128×64 — the cell is 41×23 at (0,11).
+  // empty 128×64 — the cell is 41×23 at (0,11). shrink-0: the preview is the
+  // ground truth for the choice, so the flex row must never squeeze or crop
+  // it — at narrow widths it wraps whole onto its own line instead.
   return (
     <div
+      className="shrink-0"
       style={{
         width: 41 * 3,
         height: 23 * 3,
@@ -296,63 +306,66 @@ export function IconPicker({
 
   const total = groups.reduce((n, [, names]) => n + names.length, 0);
 
+  // Which of the three ways is in effect right now. A macro saved without an
+  // icon field behaves as "picked" (the kind's default stands in), except when
+  // the kind has no default — then the cell is bare and "No icon" is the truth.
+  const mode: "picked" | "drawn" | "none" =
+    drawing || custom ? "drawn" : none || !effective ? "none" : "picked";
+
+  const seg = (on: boolean) =>
+    `flex items-center gap-2 whitespace-nowrap rounded px-2.5 py-1.5 text-sm transition-colors ${
+      on ? "bg-panel border border-accent text-fg" : "border border-transparent text-fg-muted hover:text-fg"
+    }`;
+
   return (
     <div className="flex flex-col gap-2">
       <span className="text-xs font-medium text-fg-muted">Screen icon</span>
-      <div className="flex items-center gap-3">
-        <button
-          type="button"
-          onClick={() => {
-            setDrawing(false);
-            setOpen((o) => !o);
-          }}
-          aria-expanded={open}
-          className="flex items-center gap-2 rounded-md border border-line bg-panel2 px-2.5 py-1.5 text-sm text-fg outline-none focus:border-accent"
+      {/* flex-wrap, and every piece is one line (whitespace-nowrap) — at any
+        * width the row reflows whole pieces instead of breaking labels in two
+        * or squeezing the preview. */}
+      <div className="flex flex-wrap items-center gap-3">
+        <div
+          role="group"
+          aria-label="Icon choice"
+          className="flex items-center gap-0.5 rounded-md border border-line bg-panel2 p-0.5"
         >
-          <Swatch name={shown} scale={2} />
-          <span className="text-fg-muted">
-            {custom
-              ? "Drawn by you"
-              : none
-                ? "No icon"
-                : (value ?? `Automatic${fallback ? ` (${fallback})` : ""}`)}
-          </span>
-        </button>
-        <button
-          type="button"
-          aria-pressed={none}
-          onClick={() => {
-            setDrawing(false);
-            // Clicking it again is the way back to automatic, the same rule
-            // the swatches follow — otherwise "no icon" is a one-way door.
-            onChange(none ? undefined : NO_ICON);
-          }}
-          className={`text-xs underline ${none ? "text-fg" : "text-fg-faint hover:text-fg-muted"}`}
-        >
-          No icon
-        </button>
-        {canDraw && (
-          <button
-            type="button"
-            onClick={() => (drawing ? setDrawing(false) : openDrawer())}
-            aria-expanded={drawing}
-            className="text-xs text-fg-faint underline hover:text-fg-muted"
-          >
-            {drawing ? "Close" : custom ? "Edit drawing" : "Draw your own"}
-          </button>
-        )}
-        {value && (
           <button
             type="button"
             onClick={() => {
               setDrawing(false);
-              onChange(undefined);
+              setOpen((o) => !o);
             }}
-            className="text-xs text-fg-faint underline hover:text-fg-muted"
+            aria-expanded={open}
+            className={seg(mode === "picked")}
           >
-            Use automatic
+            {mode === "picked" && <Swatch name={effective} scale={2} />}
+            <span>{mode === "picked" ? effective : "Choose icon"}</span>
+            <ChevronDown size={13} aria-hidden className={open ? "rotate-180" : ""} />
           </button>
-        )}
+          {canDraw && (
+            <button
+              type="button"
+              onClick={() => (drawing ? setDrawing(false) : openDrawer())}
+              aria-expanded={drawing}
+              className={seg(mode === "drawn")}
+            >
+              {mode === "drawn" ? <Swatch name={shown} scale={2} /> : <Pencil size={13} aria-hidden />}
+              <span>{mode === "drawn" ? "Drawn by you" : "Draw your own"}</span>
+            </button>
+          )}
+          <button
+            type="button"
+            aria-pressed={none}
+            onClick={() => {
+              setDrawing(false);
+              setOpen(false);
+              onChange(NO_ICON);
+            }}
+            className={seg(mode === "none")}
+          >
+            No icon
+          </button>
+        </div>
         <CellPreview name={name} icon={shown} />
       </div>
 
@@ -384,17 +397,14 @@ export function IconPicker({
                 <span className="text-[11px] uppercase tracking-wide text-fg-faint">{label}</span>
                 <div className="flex flex-wrap gap-1">
                   {names.map((n) => {
-                    const picked = n === value;
+                    const picked = mode === "picked" && n === effective;
                     return (
                       <button
                         key={n}
                         type="button"
                         title={n}
                         aria-pressed={picked}
-                        // Clicking the chosen one again clears back to the
-                        // automatic icon — otherwise there is no way out of a
-                        // choice except finding the kind's default by eye.
-                        onClick={() => onChange(picked ? undefined : n)}
+                        onClick={() => onChange(n)}
                         // text-fg is not decoration: Swatch draws the icon in
                         // its own computed colour, so this is what makes the
                         // pixels legible on the panel.
@@ -414,11 +424,9 @@ export function IconPicker({
         </div>
       )}
       <span className="text-[11px] text-fg-faint">
-        {none
+        {mode === "none"
           ? "No picture on this key — the cell is the name alone, on two lines if it needs them."
-          : iconBytes(effective)
-            ? "Shown above the name in the key grid. A name that needs two lines drops the icon."
-            : "This action has no default icon; the cell shows the name alone."}
+          : "Shown above the name in the key grid. A name that needs two lines drops the icon."}
       </span>
     </div>
   );

@@ -782,8 +782,13 @@ const TABS: { id: string; label: string; icon: LucideIcon; body: () => ReactNode
   },
 ];
 
-export function SettingsPage() {
-  const [tab, setTab] = useState(TABS[0].id);
+export function SettingsPage({ openTab }: { openTab?: { id: string } | null }) {
+  const [tab, setTab] = useState(openTab?.id ?? TABS[0].id);
+  // A fresh object per request, so repeated jumps to the same tab still land
+  // even if the user has since switched away.
+  useEffect(() => {
+    if (openTab) setTab(openTab.id);
+  }, [openTab]);
   const active = TABS.find((t) => t.id === tab) ?? TABS[0];
 
   return (
