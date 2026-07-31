@@ -102,6 +102,24 @@ export class OledFont {
     return 0x3f - this.first; // '?'
   }
 
+  /** Every codepoint the font actually draws, in glyph-index order: the ASCII
+   * run first, then the extras (the Turkish letters). The font tab on the demo
+   * page enumerates the specimen from this rather than guessing the range. */
+  chars(): number[] {
+    const nAscii = this.last - this.first + 1;
+    const out: number[] = [];
+    for (let c = this.first; c <= this.last; c++) out.push(c);
+    const extras: number[] = new Array(this.extra.size);
+    for (const [cp, i] of this.extra) extras[i - nAscii] = cp;
+    return out.concat(extras);
+  }
+
+  /** True when the font has a glyph of its own for `cp` — as opposed to
+   * folding it (é → e) or falling back to '?'. */
+  has(cp: number): boolean {
+    return (cp >= this.first && cp <= this.last) || this.extra.has(cp);
+  }
+
   /** Pixel width of a string — proportional, so 'IIII' and 'WWWW' differ. */
   measure(s: string): number {
     let w = 0;
@@ -175,6 +193,125 @@ export class Fb {
     }
   }
 
+  // --- v2 chrome ----------------------------------------------------------
+  // Everything below mirrors firmware/mkyada/font.py primitive for primitive,
+  // and is built on rect() there for the same reason it is here: the device
+  // allocates nothing per frame. Keep the two in step — oled-draw.test.ts
+  // compares the result against the firmware's own golden images.
+
+  /** Whole screen to one value. clear() is fill(0); the boot screen is fill(1)
+   * with everything carved out of it. */
+  fill(c = 1) {
+    this.px.fill(c);
+  }
+
+  /** Plain rectangle outline. */
+  frame(x: number, y: number, w: number, h: number, c = 1) {
+    this.hline(x, y, w, c);
+    this.hline(x, y + h - 1, w, c);
+    this.vline(x, y, h, c);
+    this.vline(x + w - 1, y, h, c);
+  }
+
+  /** Filled block with its four corner pixels punched back to `bg` — at this
+   * size that reads as a rounded block. */
+  rfill(x: number, y: number, w: number, h: number, c = 1, bg = 0) {
+    this.rect(x, y, w, h, c);
+    this.rect(x, y, 1, 1, bg);
+    this.rect(x + w - 1, y, 1, 1, bg);
+    this.rect(x, y + h - 1, 1, 1, bg);
+    this.rect(x + w - 1, y + h - 1, 1, 1, bg);
+  }
+
+  /** rfill's outline: edges drawn, corners left empty. */
+  rframe(x: number, y: number, w: number, h: number, c = 1) {
+    this.hline(x + 1, y, w - 2, c);
+    this.hline(x + 1, y + h - 1, w - 2, c);
+    this.vline(x, y + 1, h - 2, c);
+    this.vline(x + w - 1, y + 1, h - 2, c);
+  }
+
+  /** 17x8 on/off switch. `c` is the drawing colour: a selected settings row is
+   * an inverted block, so its switch has to be carved out of it (0). */
+  sw(x: number, y: number, on: boolean, c = 1) {
+    const b = c ? 0 : 1;
+    if (on) {
+      this.rfill(x, y, 17, 8, c, b);
+      this.rect(x + 10, y + 2, 5, 4, b);
+    } else {
+      this.rframe(x, y, 17, 8, c);
+      this.rect(x + 3, y + 2, 5, 4, c);
+    }
+  }
+
+  /** Thin vertical scrollbar: dotted track one pixel to the right, a 3px wide
+   * thumb over it. */
+  sbarv(x: number, y: number, h: number, ty: number, th: number) {
+    for (let yy = y; yy < y + h; yy += 2) this.rect(x + 1, yy, 1, 1);
+    this.rect(x, ty, 3, th);
+  }
+
+  /** Segmented value bar: `n` segments, the first `f` filled, the rest showing
+   * only their baseline. */
+  segbar(x: number, y: number, w: number, h: number, n: number, f: number) {
+    const step = Math.trunc((w + 1) / n);
+    const sw = step - 1;
+    for (let i = 0; i < n; i++) {
+      const sx = x + i * step;
+      if (i < f) this.rect(sx, y, sw, h);
+      else this.rect(sx, y + h - 1, sw, 1);
+    }
+  }
+
+  /** 8x8 icon from 8 packed bytes, one per row, bit 7 = leftmost pixel. */
+  icon(x: number, y: number, data: Uint8Array | null | undefined, c = 1) {
+    if (!data) return;
+    for (let row = 0; row < 8; row++) {
+      const bits = data[row];
+      if (!bits) continue;
+      let run = 0;
+      for (let col = 0; col < 8; col++) {
+        if (bits & (0x80 >> col)) {
+          run += 1;
+          continue;
+        }
+        if (run) {
+          this.rect(x + col - run, y + row, run, 1, c);
+          run = 0;
+        }
+      }
+      if (run) this.rect(x + 8 - run, y + row, run, 1, c);
+    }
+  }
+
+  /** Same icon at 2x — the dialog and alert screens. */
+  icon2(x: number, y: number, data: Uint8Array | null | undefined, c = 1) {
+    if (!data) return;
+    for (let row = 0; row < 8; row++) {
+      const bits = data[row];
+      if (!bits) continue;
+      let run = 0;
+      for (let col = 0; col < 8; col++) {
+        if (bits & (0x80 >> col)) {
+          run += 1;
+          continue;
+        }
+        if (run) {
+          this.rect(x + (col - run) * 2, y + row * 2, run * 2, 2, c);
+          run = 0;
+        }
+      }
+      if (run) this.rect(x + (8 - run) * 2, y + row * 2, run * 2, 2, c);
+    }
+  }
+
+  /** 50% checkerboard — the backdrop the saved/toast dialogs sit on. */
+  dither() {
+    for (let y = 0; y < this.H; y++) {
+      for (let x = y & 1; x < this.W; x += 2) this.rect(x, y, 1, 1);
+    }
+  }
+
   /** Draw `s` with its box-left at x (anchor 0), centred (0.5) or right-
    * aligned (1). y is the cap-centre when vcenter, else the box top. */
   text(s: string, x: number, y: number, anchor = 0.5, invert = false, vcenter = true): number {
@@ -211,8 +348,11 @@ export class Fb {
     return x;
   }
 
-  /** Scaled text for the hero numbers, by expanding lit pixels. */
-  big(s: string, x: number, y: number, scale = 2, anchor = 0.5): number {
+  /** Scaled text for the hero numbers, by expanding lit pixels.
+   *
+   * `c` is the drawing colour. The boot splash is an inverted field, so its
+   * wordmark is carved out of it with c=0 rather than blitted onto it. */
+  big(s: string, x: number, y: number, scale = 2, anchor = 0.5, c = 1): number {
     if (!s) return x;
     const f = this.font;
     if (anchor) x -= Math.trunc(f.measure(s) * scale * anchor);
@@ -227,11 +367,11 @@ export class Fb {
             continue;
           }
           if (run) {
-            this.rect(x + (cx - run) * scale, y + cy * scale, run * scale, scale);
+            this.rect(x + (cx - run) * scale, y + cy * scale, run * scale, scale, c);
             run = 0;
           }
         }
-        if (run) this.rect(x + (f.boxW - run) * scale, y + cy * scale, run * scale, scale);
+        if (run) this.rect(x + (f.boxW - run) * scale, y + cy * scale, run * scale, scale, c);
       }
       x += f.adv[i] * scale;
     }

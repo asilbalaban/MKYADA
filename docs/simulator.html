@@ -5,26 +5,38 @@
 <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no">
 <title>MKYADA Vision 6 — Menü Simülatörü</title>
 <!--
-  Vision 6 MENÜ SİMÜLATÖRÜ — cihaza yükleme yapmadan menüyü çalıştırma ve
-  değiştirme yüzeyi. Tek dosya, bağımlılık yok: tarayıcıda aç, çalışır.
+  Vision 6 MENÜ SİMÜLATÖRÜ + İKON AİLESİ + FONT REFERANSI
+  Tek dosya, bağımlılık yok, sunucu yok: tarayıcıda aç, çalışır.
 
-  Bu bir maket DEĞİL: firmware/mkyada/oled.py (çizim) ve firmware/mkyada/ui.py
-  (durum makinesi) JavaScript'e birebir taşındı, yerleşim sabitleri (BAR_H,
-  BOT_SEP, HERO_Y, MENU_TOP, MENU_VIS...) aynı kaynaktan. Yazı tipi de gerçek:
-  firmware/fonts/mkyada.fnt base64 olarak gömülü, bu yüzden her piksel cihazın
-  yaktığı pikselle aynı. Yalnızca firmware'in desteklediği ekranlar var.
+  Bu bir maket DEĞİL, ve artık bir "port" da değil. Çizim katmanının tamamı —
+  framebuffer, font, 270 ikon, dil tablosu ve 28 ekranın hepsi — masaüstü
+  uygulamasının kullandığı modüllerin TA KENDİSİ; sayfaya paketlenmiş halde
+  geliyor:
 
-  SENKRON TUTMA: ui.py / oled.py / i18n.py değişince buradaki karşılığı da
-  değişmeli — aksi halde simülatör cihazdan sapar. Değişikliği önce burada
-  denemek, sonra firmware'e taşımak amaçlanan akış.
-    - bölüm 1  yazı tipi          <- firmware/fonts/mkyada.fnt
-    - bölüm 2  framebuffer        <- firmware/mkyada/font.py  : class Fb
-    - bölüm 3  dil tablosu        <- firmware/mkyada/i18n.py
-    - bölüm 4  ekran çizimleri    <- firmware/mkyada/oled.py   : class Oled
-    - bölüm 7  durum makinesi     <- firmware/mkyada/ui.py     : class Ui
-  Font değişirse FONT_B64 bloğunu elle yazmayın:
-    node scripts/embed-sim-font.mjs
-  mkyada.fnt'yi okuyup bloğu yeniden üretir (--check ile sadece doğrular).
+    kaynak : app/src/lib/oled-bundle.ts
+             (oled-fb · oled-screens · oled-icons · oled-i18n · oled-font)
+    üretim : node scripts/build-demo.mjs        (CI: --check)
+
+  Yani bu sayfa, uygulamanın makro düzenleyicisindeki ekran önizlemesi ve
+  cihazın kendisi üç ayrı menü gösteremez. Cihazdaki Python uygulamasıyla
+  (firmware/mkyada/oled.py) uyum ayrı denetleniyor: firmware
+  tests/golden/*.txt resimlerini üretiyor, app/src/lib/oled-draw.test.ts aynı
+  paketten piksel piksel aynısını istiyor — 28 ekran, iki dil.
+
+  Bu dosyada elle yazılan tek şey, cihazın DURUM MAKİNESİ
+  (firmware/mkyada/ui.py karşılığı: hangi tuş hangi ekrana götürür) ve
+  masaüstü uygulamasını taklit eden panel. Onlar hâlâ elle senkron tutuluyor.
+
+  Sekmeler:
+    SİMÜLATÖR  menüyü sür — altı makro tuşu, teker + PSH, BACK, CONFIRM,
+               ve uygulamayı taklit eden panel (host modu, OBS, USB disk,
+               yazılım güncelleme). Ölçek 1× (gerçek 128×64) ile 7× arası.
+    İKONLAR    bir makronun seçebileceği 270 ikon, 21 kategoride; tıklayınca
+               doğrudan seçili ızgara tuşuna atanıyor, 1:1 görülüyor.
+    FONT       istediğin metnin cihaz ölçeğinde nasıl çizildiği (düz, ters,
+               2× kahraman) ve her glifin piksel bedeli + inceleyici.
+               Eskiden docs/font.html ayrı bir sayfaydı; ekranların üçüncü
+               bir kopyasını çizdiği ve ayrıştığı için o kopya taşınmadı.
 -->
 <style>
   :root{--bg:#0a0c0f;--line:#252d36;--txt:#e7ecf2;--sub:#79838e;--ac:#8ed8ff;}
@@ -77,6 +89,7 @@
   .d[disabled]{opacity:.35;pointer-events:none;}
   select{background:#12171d;border:1px solid var(--line);border-radius:7px;color:var(--sub);
      font:600 9.5px ui-monospace,monospace;padding:7px 8px;max-width:100%;}
+  .note{font:400 9.5px ui-monospace,monospace;color:var(--sub);line-height:1.5;}
 
   .log{margin-top:11px;font:400 10px ui-monospace,monospace;color:var(--sub);
     background:#0e1217;border:1px solid #1c222a;border-radius:6px;padding:7px 9px;
@@ -89,6 +102,49 @@
   .hlp p{margin:0 0 9px;}
   .hlp code{font:400 10.5px ui-monospace,monospace;color:var(--ac);
     background:#161b21;padding:1px 5px;border-radius:4px;}
+
+  /* ikon ailesi sekmesi */
+  .tabs{display:flex;gap:6px;margin-top:13px;}
+  .tab{flex:1;text-align:center;background:transparent;border:1px solid var(--line);
+    border-radius:7px;padding:8px 6px;font:700 9.5px ui-monospace,monospace;
+    letter-spacing:1px;color:var(--sub);cursor:pointer;}
+  .tab.on{border-color:var(--ac);color:#0a0c0f;background:var(--ac);}
+  .pane[hidden]{display:none;}
+  input.q{flex:1;min-width:120px;background:#12171d;border:1px solid var(--line);
+    border-radius:7px;color:var(--txt);font:600 10px ui-monospace,monospace;padding:7px 9px;}
+  .icat{margin-top:10px;}
+  .icat h3{margin:0 0 6px;font:700 9px ui-monospace,monospace;letter-spacing:1.2px;
+    color:var(--sub);}
+  .igrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(52px,1fr));gap:5px;}
+  .ic{border:1px solid var(--line);border-radius:7px;padding:5px 2px 4px;cursor:pointer;
+    display:flex;flex-direction:column;align-items:center;gap:3px;background:#0e1217;}
+  .ic:hover{border-color:#3d4956;}
+  .ic.on{border-color:var(--ac);background:#16222b;}
+  .ic canvas{image-rendering:pixelated;display:block;}
+  .ic span{font:400 7.5px ui-monospace,monospace;color:var(--sub);text-align:center;
+    line-height:1.25;word-break:break-all;}
+  /* FONT sekmesi */
+  /* Tuvaller cihazın 128px'ini büyüterek çiziyor; panel dar olduğunda
+     taşmasınlar diye genişlik panele oranlanıyor, yükseklik ona uyuyor.
+     Piksel kılavuzu bozulmasın diye image-rendering yine pixelated. */
+  .fspecs{gap:10px;flex-wrap:wrap;align-items:flex-start;flex-direction:column;}
+  .fspecs figure{margin:0;display:flex;flex-direction:column;gap:4px;width:100%;}
+  .fspecs figcaption{font:400 7.5px ui-monospace,monospace;color:var(--sub);}
+  .fspecs canvas{image-rendering:pixelated;border:1px solid var(--line);
+    border-radius:5px;background:#05070a;display:block;
+    width:100%;max-width:100%;height:auto;}
+  .fbody{display:flex;gap:12px;align-items:flex-start;flex-wrap:wrap;}
+  .fglyphs{flex:1;min-width:220px;display:grid;
+    grid-template-columns:repeat(auto-fill,minmax(46px,1fr));gap:4px;}
+  .fg{border:1px solid var(--line);border-radius:6px;padding:4px 2px 3px;cursor:pointer;
+    display:flex;flex-direction:column;align-items:center;gap:2px;background:#0e1217;}
+  .fg:hover{border-color:#3d4956;}
+  .fg.on{border-color:var(--ac);background:#16222b;}
+  .fg canvas{image-rendering:pixelated;display:block;}
+  .fg span{font:400 7px ui-monospace,monospace;color:var(--sub);}
+  .finspect{display:flex;flex-direction:column;gap:6px;align-items:center;}
+  .finspect canvas{image-rendering:pixelated;border:1px solid var(--line);
+    border-radius:6px;background:#05070a;}
 </style>
 </head>
 <body><div class="wrap" id="wrap">
@@ -110,9 +166,70 @@
   </div>
 </div>
 
+<div class="tabs">
+  <div class="tab on" id="tab-sim">SİMÜLATÖR</div>
+  <div class="tab" id="tab-ico">İKONLAR</div>
+  <div class="tab" id="tab-font">FONT</div>
+</div>
+
+<!-- FONT sekmesi. Eskiden docs/font.html ayrı bir sayfaydı ve ekranların
+     üçüncü bir kopyasını çiziyordu; o kopya buraya taşınmadı, çünkü ekranlar
+     zaten SİMÜLATÖR sekmesinde ve tek kaynaktan geliyor. Buraya yalnızca
+     fontun kendisiyle ilgili, başka hiçbir yerde olmayan şeyler geldi. -->
+<div class="pane" id="pane-font" hidden>
+  <div class="panel">
+    <h2>YAZI TİPİ</h2>
+    <div class="row"><span class="note" id="f-note"></span></div>
+    <div class="row">
+      <input class="q" id="fq" placeholder="cihazın göstereceği bir metin yazın…"
+             autocomplete="off" value="Masaüstü ve Kamera">
+    </div>
+    <div class="row fspecs">
+      <figure><canvas id="f-normal"></canvas><figcaption>1×</figcaption></figure>
+      <figure><canvas id="f-invert"></canvas><figcaption>ters (bar içinde)</figcaption></figure>
+      <figure><canvas id="f-hero"></canvas><figcaption>2× kahraman</figcaption></figure>
+    </div>
+    <div class="row"><span class="note" id="f-fit"></span></div>
+  </div>
+
+  <div class="panel">
+    <h2>HER GLİF, VE PİKSEL BEDELİ</h2>
+    <div class="row"><span class="note">Bir glife tıklayın: sağda 5×8 kutusu
+      büyütülür. Genişlikler oransal — bu yüzden "IIII" ile "WWWW" aynı yeri
+      kaplamaz.</span></div>
+    <div class="fbody">
+      <div class="fglyphs" id="f-glyphs"></div>
+      <div class="finspect">
+        <canvas id="f-zoom" width="120" height="192"></canvas>
+        <div class="note" id="f-zoomnote"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="pane" id="pane-ico" hidden>
+  <div class="panel">
+    <h2>İKON AİLESİ</h2>
+    <div class="row">
+      <input class="q" id="iq" placeholder="ara: play, mic, folder…" autocomplete="off">
+      <div class="d" id="i-clear">TEMİZLE</div>
+    </div>
+    <div class="row">
+      <span class="note" id="i-note"></span>
+    </div>
+  </div>
+  <div id="ilist"></div>
+</div>
+
+<div class="pane" id="pane-sim">
+
 <div class="panel">
-  <h2>EKRAN BOYUTU</h2>
+  <h2>GÖRÜNÜM</h2>
   <div class="row" id="zoom"></div>
+  <div class="row">
+    <div class="d" id="t-idle">OTOMATİK DÖNÜŞ: KAPALI</div>
+    <span class="note" id="idle-note"></span>
+  </div>
 </div>
 
 <div class="panel">
@@ -136,6 +253,8 @@
   </div>
 </div>
 
+</div><!-- /pane-sim -->
+
 <div class="log" id="log">başlatılıyor…</div>
 
 <div class="hlp">
@@ -157,409 +276,1535 @@
 "use strict";
 
 /* ═════════════════════════════════════════════════════════════════════
-   1. YAZI TİPİ — firmware/fonts/mkyada.fnt (gömülü, birebir)
-   Biçim: scripts/build-font.mjs · çözücü: firmware/mkyada/font.py
+   1-4. ÇİZİM KATMANI — app/src/lib/ (ÜRETİLMİŞ PAKET)
+
+   Bu sayfa font, ikon, dil tablosu ve 28 ekranın hiçbirinin kendi kopyasını
+   taşımıyor. Hepsi aşağıdaki üretilmiş paketten geliyor ve masaüstü
+   uygulaması da AYNI modülleri doğrudan içe aktarıyor — bir ekran burada
+   düzelip orada bozuk kalamaz.
+
+     kaynak : app/src/lib/oled-bundle.ts
+              (oled-fb · oled-screens · oled-icons · oled-i18n · oled-font)
+     üretim : node scripts/build-demo.mjs        (CI: --check)
+
+   Cihazdaki Python uygulamasıyla (firmware/mkyada/oled.py) arasındaki uyum
+   ayrı denetleniyor: firmware tests/golden/*.txt resimlerini üretiyor,
+   app/src/lib/oled-draw.test.ts bu paketten piksel piksel aynısını istiyor.
    ═════════════════════════════════════════════════════════════════════ */
-const FONT_B64 =
-"TUtGMgUIIF8RAAMCBAUFBgUCAwMEBAMEAgUFBAUFBQUFBQUFAgMEBQQFBQUFBQUFBQUFBAUFBQYF" +
-"BQUFBQUGBQYGBgYFAwUDBAUDBAQEBAQEBAQCAwQCBgQEBAQEBAQEBAYEBAQEAgQFBQUEBQUFBAQC" +
-"BAQEBQQGBgbHAB4BMAHWAF4B3ADnAB8BMQH2AF8B/ADPJbglEyeyJbwlAAAAAABfAAAAAAMAAwAA" +
-"FH8UfwAkKn8SAAMzCGZhNklZZgADAAAAAD5BAAAAQT4AAAAqHCoAAAgcCAAAgGAAAAAICAgAAEAA" +
-"AAAAYBAMAwA+SUU+AEJ/QAAAYlFJRgAhSU0zAAwKfwgAJ0VFOQA+SUkyAAFxDQMANklJNgAmSUk+" +
-"AEQAAAAAgGQAAAAIFCIAABQUFBQAIhQIAAACUQkGAD5BTS4AfgkJfgB/SUk2AD5BQSIAf0FBPgB/" +
-"SUlBAH8JCQEAPkFJegB/CAh/AEF/QQAAIEBBPwB/DBJhAH9AQEAAfwIMAn9/Bhh/AD5BQT4AfwkJ" +
-"BgA+QXFeAH8JGWYARklJMQABAX8BAT9AQD8ADzBAMA9/IBggf2MUCBRjAwR4BANxSUVDAH9BAAAA" +
-"AwwQYABBfwAAAAIBAgAAgICAgAABAgAAADRUeAAAf0Q4AAA4REQAADhEfwAAOFRYAAAEfgUAAJik" +
-"fAAAfwR4AAB9AAAAAIB9AAAAfxhkAAB/AAAAAHwEeAR4fAR4AAA4RDgAAPwkGAAAGCT8AAB8CAQA" +
-"AEhUJAAABD9EAAA8QHwAADxAPAAAfCAQIHxsEGwAAJygfAAAZFRMAAAIf0EAAH8AAAAAQX8IAAAI" +
-"BAgEAD5BwSIAOEVVcABEfUQAADlERDkARknJMQA9QEA9ADjERAAAmaV9AAB8AAAAADlEOQAASNQk" +
-"AAA9QH0AABg8PBgAPhwIAAAQIEAwDBAYHBgQBAwcDAQ=";
+/* OLED_BUNDLE_BEGIN — ÜRETİLMİŞTİR, elle düzenlemeyin.
+   Kaynak: app/src/lib/oled-bundle.ts (+ oled-fb / oled-screens / oled-icons /
+           oled-i18n / oled-font — uygulamanın kullandığı modüllerin aynısı)
+   Üreten: node scripts/build-demo.mjs
 
-// NOT: iki bayt ('A' satırı) yukarıda okunabilirlik için sarmalandı; içerik
-// firmware/fonts/mkyada.fnt ile bit-bit aynıdır.
-
-function b64bytes(s){
-  const bin = atob(s.replace(/\s+/g,""));
-  const out = new Uint8Array(bin.length);
-  for(let i=0;i<bin.length;i++) out[i]=bin.charCodeAt(i);
-  return out;
-}
-
-// firmware/mkyada/font.py FOLD tablosu
-const FOLD={"á":"a","à":"a","â":"a","ä":"a","å":"a","ã":"a","é":"e","è":"e",
-"ê":"e","ë":"e","í":"i","ì":"i","î":"i","ï":"i","ó":"o","ò":"o","ô":"o","õ":"o",
-"ú":"u","ù":"u","û":"u","ñ":"n","ý":"y","ÿ":"y","æ":"a","ø":"o","ß":"s",
-"Á":"A","À":"A","Â":"A","Ä":"A","Å":"A","Ã":"A","É":"E","È":"E","Ê":"E","Ë":"E",
-"Í":"I","Ì":"I","Î":"I","Ï":"I","Ó":"O","Ò":"O","Ô":"O","Õ":"O","Ú":"U","Ù":"U",
-"Û":"U","Ñ":"N","Æ":"A","Ø":"O","–":"-","—":"-","'":"'","'":"'","“":'"',
-"”":'"',"…":"."};
-
-class Font{
-  constructor(bytes){
-    const d=bytes;
-    if(String.fromCharCode(d[0],d[1],d[2],d[3])!=="MKF2") throw new Error("bad font");
-    this.box_w=d[4]; this.box_h=d[5]; this.first=d[6];
-    const nAscii=d[7], nExtra=d[8];
-    this.n=nAscii+nExtra;
-    this.last=this.first+nAscii-1;
-    let off=10;
-    this.adv=d.subarray(off,off+this.n); off+=this.n;
-    this.extra={};
-    for(let i=0;i<nExtra;i++){
-      this.extra[d[off]|(d[off+1]<<8)]=nAscii+i; off+=2;
+   Bu sayfa ile uygulama aynı çizim kodunu çalıştırır; bir ekran burada
+   düzelip orada bozuk kalamaz. Cihazdaki Python uygulamasıyla arasındaki
+   uyum da tests/golden/*.txt üzerinden her commit'te denetlenir. */
+"use strict";
+var MKOLED = (() => {
+  var __defProp = Object.defineProperty;
+  var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
+  var __getOwnPropNames = Object.getOwnPropertyNames;
+  var __hasOwnProp = Object.prototype.hasOwnProperty;
+  var __defNormalProp = (obj, key, value) => key in obj ? __defProp(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
+  var __export = (target, all) => {
+    for (var name in all)
+      __defProp(target, name, { get: all[name], enumerable: true });
+  };
+  var __copyProps = (to, from, except, desc) => {
+    if (from && typeof from === "object" || typeof from === "function") {
+      for (let key of __getOwnPropNames(from))
+        if (!__hasOwnProp.call(to, key) && key !== except)
+          __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
     }
-    this.bpc=this.box_h>>3;
-    this.cols=d.subarray(off);
-  }
-  index(ch){
-    const c=ch.codePointAt(0);
-    if(c>=this.first&&c<=this.last) return c-this.first;
-    const i=this.extra[c];
-    if(i!==undefined) return i;
-    const f=FOLD[ch];
-    if(f!==undefined) return f.codePointAt(0)-this.first;
-    return 0x3F-this.first;               // '?'
-  }
-  pix(i,cx,cy){
-    const base=(i*this.box_w+cx)*this.bpc;
-    return (this.cols[base+(cy>>3)]>>(cy&7))&1;
-  }
-  measure(s){ let w=0; for(const ch of String(s)) w+=this.adv[this.index(ch)]; return w; }
-  fit(s,px){
-    s=String(s); let w=0,n=0;
-    for(const ch of s){ w+=this.adv[this.index(ch)]; if(w>px) return s.slice(0,n); n++; }
-    return s;
-  }
-}
+    return to;
+  };
+  var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
+  var __publicField = (obj, key, value) => __defNormalProp(obj, typeof key !== "symbol" ? key + "" : key, value);
 
-/* ═════════════════════════════════════════════════════════════════════
-   2. FRAMEBUFFER — firmware/mkyada/font.py : class Fb
-   ═════════════════════════════════════════════════════════════════════ */
-class Fb{
-  constructor(w,h,font){
-    this.W=w; this.H=h; this.CX=w>>1; this.font=font;
-    this.bmp=new Uint8Array(w*h);
-  }
-  clear(){ this.bmp.fill(0); }
-  px(x,y,c){ if(x<0||y<0||x>=this.W||y>=this.H)return; this.bmp[y*this.W+x]=c; }
-  rect(x,y,w,h,c){
-    if(c===undefined)c=1;
-    let x2=x+w, y2=y+h;
-    if(x<0)x=0; if(y<0)y=0;
-    if(x2>this.W)x2=this.W; if(y2>this.H)y2=this.H;
-    for(let j=y;j<y2;j++) this.bmp.fill(c, j*this.W+x, j*this.W+x2);
-  }
-  hline(x,y,w,c){ this.rect(x,y,w,1,c===undefined?1:c); }
-  vline(x,y,h,c){ this.rect(x,y,1,h,c===undefined?1:c); }
-  tri(x,y,w,h,down,c){
-    if(down===undefined)down=true; if(c===undefined)c=1;
-    for(let row=0;row<h;row++){
-      const span=down? w-2*row : 2*row+1;
-      if(span<=0)continue;
-      this.rect(x+((w-span)>>1), y+row, span, 1, c);
+  // app/src/lib/oled-bundle.ts
+  var oled_bundle_exports = {};
+  __export(oled_bundle_exports, {
+    BAR_H: () => BAR_H,
+    DEFAULT_LANG: () => DEFAULT_LANG,
+    DLG_H: () => DLG_H,
+    DLG_Y: () => DLG_Y,
+    Fb: () => Fb,
+    HERO_SCALE: () => HERO_SCALE,
+    ICON_CATEGORIES: () => ICON_CATEGORIES,
+    ICON_NAMES: () => ICON_NAMES,
+    LANGS: () => LANGS,
+    LANG_DESC: () => LANG_DESC,
+    OledFont: () => OledFont,
+    OledScreens: () => OledScreens,
+    PBAR_FOOT: () => PBAR_FOOT,
+    PBAR_H: () => PBAR_H,
+    PBAR_Y: () => PBAR_Y,
+    ROW_H: () => ROW_H,
+    ROW_TOP: () => ROW_TOP,
+    SB_H: () => SB_H,
+    SB_X: () => SB_X,
+    SB_Y: () => SB_Y,
+    SPEED_MAX_T: () => SPEED_MAX_T,
+    SPEED_MIN_T: () => SPEED_MIN_T,
+    STRINGS: () => STRINGS,
+    TILE_W: () => TILE_W,
+    TILE_X: () => TILE_X,
+    VIS: () => VIS,
+    drawIconSwatch: () => drawIconSwatch,
+    fmtBytes: () => fmtBytes,
+    fmtHero: () => fmtHero,
+    fmtSpeed: () => fmtSpeed,
+    getLang: () => getLang,
+    iconBytes: () => iconBytes,
+    oledFont: () => oledFont,
+    paintFb: () => paintFb,
+    setLang: () => setLang,
+    tr: () => tr
+  });
+
+  // app/src/lib/oled-font.ts
+  var FONT_B64 = "TUtGMgUIIF8RAAMCBAUFBgUCAwMEBAMEAgUFBAUFBQUFBQUFAgMEBQQFBQUFBQUFBQUFBAUFBQYFBQUFBQUGBQYGBgYFAwUDBAUDBAQEBAQEBAQCAwQCBgQEBAQEBAQEBAYEBAQEAgQFBQUEBQUFBAQCBAQEBQQGBgbHAB4BMAHWAF4B3ADnAB8BMQH2AF8B/ADPJbglEyeyJbwlAAAAAABfAAAAAAMAAwAAFH8UfwAkKn8SAAMzCGZhNklZZgADAAAAAD5BAAAAQT4AAAAqHCoAAAgcCAAAgGAAAAAICAgAAEAAAAAAYBAMAwA+SUU+AEJ/QAAAYlFJRgAhSU0zAAwKfwgAJ0VFOQA+SUkyAAFxDQMANklJNgAmSUk+AEQAAAAAgGQAAAAIFCIAABQUFBQAIhQIAAACUQkGAD5BTS4AfgkJfgB/SUk2AD5BQSIAf0FBPgB/SUlBAH8JCQEAPkFJegB/CAh/AEF/QQAAIEBBPwB/DBJhAH9AQEAAfwIMAn9/Bhh/AD5BQT4AfwkJBgA+QXFeAH8JGWYARklJMQABAX8BAT9AQD8ADzBAMA9/IBggf2MUCBRjAwR4BANxSUVDAH9BAAAAAwwQYABBfwAAAAIBAgAAgICAgAABAgAAADRUeAAAf0Q4AAA4REQAADhEfwAAOFRYAAAEfgUAAJikfAAAfwR4AAB9AAAAAIB9AAAAfxhkAAB/AAAAAHwEeAR4fAR4AAA4RDgAAPwkGAAAGCT8AAB8CAQAAEhUJAAABD9EAAA8QHwAADxAPAAAfCAQIHxsEGwAAJygfAAAZFRMAAAIf0EAAH8AAAAAQX8IAAAIBAgEAD5BwSIAOEVVcABEfUQAADlERDkARknJMQA9QEA9ADjERAAAmaV9AAB8AAAAADlEOQAASNQkAAA9QH0AABg8PBgAPhwIAAAQIEAwDBAYHBgQBAwcDAQ=";
+
+  // app/src/lib/oled-fb.ts
+  var FOLD = {
+    á: "a",
+    à: "a",
+    â: "a",
+    ä: "a",
+    å: "a",
+    ã: "a",
+    é: "e",
+    è: "e",
+    ê: "e",
+    ë: "e",
+    í: "i",
+    ì: "i",
+    î: "i",
+    ï: "i",
+    ó: "o",
+    ò: "o",
+    ô: "o",
+    õ: "o",
+    ú: "u",
+    ù: "u",
+    û: "u",
+    ñ: "n",
+    ý: "y",
+    ÿ: "y",
+    æ: "a",
+    ø: "o",
+    ß: "s",
+    Á: "A",
+    À: "A",
+    Â: "A",
+    Ä: "A",
+    Å: "A",
+    Ã: "A",
+    É: "E",
+    È: "E",
+    Ê: "E",
+    Ë: "E",
+    Í: "I",
+    Ì: "I",
+    Î: "I",
+    Ï: "I",
+    Ó: "O",
+    Ò: "O",
+    Ô: "O",
+    Õ: "O",
+    Ú: "U",
+    Ù: "U",
+    Û: "U",
+    Ñ: "N",
+    Æ: "A",
+    Ø: "O",
+    "–": "-",
+    "—": "-",
+    "‘": "'",
+    "’": "'",
+    "“": '"',
+    "”": '"',
+    "…": "."
+  };
+  function decodeBase64(b64) {
+    if (typeof atob === "function") {
+      const s = atob(b64);
+      const out = new Uint8Array(s.length);
+      for (let i = 0; i < s.length; i++) out[i] = s.charCodeAt(i);
+      return out;
     }
+    return new Uint8Array(Buffer.from(b64, "base64"));
   }
-  text(s,x,y,anchor,invert,vcenter){
-    if(anchor===undefined)anchor=0.5;
-    if(vcenter===undefined)vcenter=true;
-    s=String(s==null?"":s);
-    const f=this.font;
-    if(!s) return x;
-    if(anchor) x-=Math.trunc(f.measure(s)*anchor);
-    if(vcenter) y-=3;                       // büyük harfler 0..6 satırında
-    const bw=f.box_w, bh=f.box_h, v=invert?0:1;
-    for(const ch of s){
-      const i=f.index(ch), a=f.adv[i];
-      if(x+a>0 && x<this.W){
-        const w = (x+bw<=this.W)? bw : this.W-x;
-        for(let cx=0;cx<w;cx++)
-          for(let cy=0;cy<bh;cy++)
-            if(f.pix(i,cx,cy)) this.px(x+cx,y+cy,v);
+  var OledFont = class {
+    constructor(data) {
+      __publicField(this, "boxW");
+      __publicField(this, "boxH");
+      __publicField(this, "first");
+      __publicField(this, "last");
+      __publicField(this, "adv");
+      /** atlas[y * atlasW + x] — 1 where a glyph pixel is lit. */
+      __publicField(this, "atlas");
+      __publicField(this, "atlasW");
+      __publicField(this, "extra", /* @__PURE__ */ new Map());
+      if (String.fromCharCode(...data.subarray(0, 4)) !== "MKF2") throw new Error("bad font");
+      this.boxW = data[4];
+      this.boxH = data[5];
+      this.first = data[6];
+      const nAscii = data[7];
+      const nExtra = data[8];
+      const n = nAscii + nExtra;
+      this.last = this.first + nAscii - 1;
+      let off = 10;
+      this.adv = data.subarray(off, off + n);
+      off += n;
+      for (let i = 0; i < nExtra; i++) {
+        this.extra.set(data[off] | data[off + 1] << 8, nAscii + i);
+        off += 2;
       }
-      x+=a;
-    }
-    return x;
-  }
-  big(s,x,y,scale,anchor){
-    if(scale===undefined)scale=2;
-    if(anchor===undefined)anchor=0.5;
-    s=String(s==null?"":s);
-    const f=this.font;
-    if(!s) return x;
-    if(anchor) x-=Math.trunc(f.measure(s)*scale*anchor);
-    y-=Math.trunc(7*scale/2);
-    const bw=f.box_w, bh=f.box_h;
-    for(const ch of s){
-      const i=f.index(ch);
-      for(let cy=0;cy<bh;cy++){
-        let run=0;
-        for(let cx=0;cx<bw;cx++){
-          if(f.pix(i,cx,cy)){ run++; continue; }
-          if(run){ this.rect(x+(cx-run)*scale, y+cy*scale, run*scale, scale, 1); run=0; }
+      const bpc = this.boxH >> 3;
+      const aw = n * this.boxW;
+      this.atlasW = aw;
+      this.atlas = new Uint8Array(aw * this.boxH);
+      for (let col = 0; col < aw; col++) {
+        for (let b = 0; b < bpc; b++) {
+          const bits = data[off + col * bpc + b];
+          if (!bits) continue;
+          for (let bit = 0; bit < 8; bit++) {
+            if (bits & 1 << bit) this.atlas[((b << 3) + bit) * aw + col] = 1;
+          }
         }
-        if(run) this.rect(x+(bw-run)*scale, y+cy*scale, run*scale, scale, 1);
       }
-      x+=f.adv[i]*scale;
     }
-    return x;
+    /** Glyph index for a character. Never -1: unknown characters fold (é → e)
+     * and whatever is left becomes '?', so a name is never silently shortened. */
+    index(ch) {
+      const c = ch.codePointAt(0) ?? 63;
+      if (c >= this.first && c <= this.last) return c - this.first;
+      const i = this.extra.get(c);
+      if (i !== void 0) return i;
+      const f = FOLD[ch];
+      if (f !== void 0) return f.charCodeAt(0) - this.first;
+      return 63 - this.first;
+    }
+    /** Every codepoint the font actually draws, in glyph-index order: the ASCII
+     * run first, then the extras (the Turkish letters). The font tab on the demo
+     * page enumerates the specimen from this rather than guessing the range. */
+    chars() {
+      const nAscii = this.last - this.first + 1;
+      const out = [];
+      for (let c = this.first; c <= this.last; c++) out.push(c);
+      const extras = new Array(this.extra.size);
+      for (const [cp, i] of this.extra) extras[i - nAscii] = cp;
+      return out.concat(extras);
+    }
+    /** True when the font has a glyph of its own for `cp` — as opposed to
+     * folding it (é → e) or falling back to '?'. */
+    has(cp) {
+      return cp >= this.first && cp <= this.last || this.extra.has(cp);
+    }
+    /** Pixel width of a string — proportional, so 'IIII' and 'WWWW' differ. */
+    measure(s) {
+      let w = 0;
+      for (const ch of s) w += this.adv[this.index(ch)];
+      return w;
+    }
+    /** The longest prefix of `s` that fits in `px` pixels. */
+    fit(s, px) {
+      let w = 0;
+      let n = 0;
+      for (const ch of s) {
+        w += this.adv[this.index(ch)];
+        if (w > px) return [...s].slice(0, n).join("");
+        n += 1;
+      }
+      return s;
+    }
+  };
+  var cached = null;
+  function oledFont() {
+    if (!cached) cached = new OledFont(decodeBase64(FONT_B64));
+    return cached;
   }
-}
+  var Fb = class {
+    constructor(w = 128, h = 64, font = oledFont()) {
+      __publicField(this, "W");
+      __publicField(this, "H");
+      __publicField(this, "CX");
+      __publicField(this, "font");
+      __publicField(this, "px");
+      this.W = w;
+      this.H = h;
+      this.CX = w >> 1;
+      this.font = font;
+      this.px = new Uint8Array(w * h);
+    }
+    clear() {
+      this.px.fill(0);
+    }
+    rect(x, y, w, h, c = 1) {
+      let x2 = x + w;
+      let y2 = y + h;
+      if (x < 0) x = 0;
+      if (y < 0) y = 0;
+      if (x2 > this.W) x2 = this.W;
+      if (y2 > this.H) y2 = this.H;
+      for (let yy = y; yy < y2; yy++) this.px.fill(c, yy * this.W + x, yy * this.W + x2);
+    }
+    hline(x, y, w, c = 1) {
+      this.rect(x, y, w, 1, c);
+    }
+    vline(x, y, h, c = 1) {
+      this.rect(x, y, 1, h, c);
+    }
+    /** Solid triangle — the menu's scroll arrows. */
+    tri(x, y, w, h, down = true, c = 1) {
+      for (let row = 0; row < h; row++) {
+        const span = down ? w - 2 * row : 2 * row + 1;
+        if (span <= 0) continue;
+        this.rect(x + (w - span >> 1), y + row, span, 1, c);
+      }
+    }
+    // --- v2 chrome ----------------------------------------------------------
+    // Everything below mirrors firmware/mkyada/font.py primitive for primitive,
+    // and is built on rect() there for the same reason it is here: the device
+    // allocates nothing per frame. Keep the two in step — oled-draw.test.ts
+    // compares the result against the firmware's own golden images.
+    /** Whole screen to one value. clear() is fill(0); the boot screen is fill(1)
+     * with everything carved out of it. */
+    fill(c = 1) {
+      this.px.fill(c);
+    }
+    /** Plain rectangle outline. */
+    frame(x, y, w, h, c = 1) {
+      this.hline(x, y, w, c);
+      this.hline(x, y + h - 1, w, c);
+      this.vline(x, y, h, c);
+      this.vline(x + w - 1, y, h, c);
+    }
+    /** Filled block with its four corner pixels punched back to `bg` — at this
+     * size that reads as a rounded block. */
+    rfill(x, y, w, h, c = 1, bg = 0) {
+      this.rect(x, y, w, h, c);
+      this.rect(x, y, 1, 1, bg);
+      this.rect(x + w - 1, y, 1, 1, bg);
+      this.rect(x, y + h - 1, 1, 1, bg);
+      this.rect(x + w - 1, y + h - 1, 1, 1, bg);
+    }
+    /** rfill's outline: edges drawn, corners left empty. */
+    rframe(x, y, w, h, c = 1) {
+      this.hline(x + 1, y, w - 2, c);
+      this.hline(x + 1, y + h - 1, w - 2, c);
+      this.vline(x, y + 1, h - 2, c);
+      this.vline(x + w - 1, y + 1, h - 2, c);
+    }
+    /** 17x8 on/off switch. `c` is the drawing colour: a selected settings row is
+     * an inverted block, so its switch has to be carved out of it (0). */
+    sw(x, y, on, c = 1) {
+      const b = c ? 0 : 1;
+      if (on) {
+        this.rfill(x, y, 17, 8, c, b);
+        this.rect(x + 10, y + 2, 5, 4, b);
+      } else {
+        this.rframe(x, y, 17, 8, c);
+        this.rect(x + 3, y + 2, 5, 4, c);
+      }
+    }
+    /** Thin vertical scrollbar: dotted track one pixel to the right, a 3px wide
+     * thumb over it. */
+    sbarv(x, y, h, ty, th) {
+      for (let yy = y; yy < y + h; yy += 2) this.rect(x + 1, yy, 1, 1);
+      this.rect(x, ty, 3, th);
+    }
+    /** Segmented value bar: `n` segments, the first `f` filled, the rest showing
+     * only their baseline. */
+    segbar(x, y, w, h, n, f) {
+      const step = Math.trunc((w + 1) / n);
+      const sw = step - 1;
+      for (let i = 0; i < n; i++) {
+        const sx = x + i * step;
+        if (i < f) this.rect(sx, y, sw, h);
+        else this.rect(sx, y + h - 1, sw, 1);
+      }
+    }
+    /** 8x8 icon from 8 packed bytes, one per row, bit 7 = leftmost pixel. */
+    icon(x, y, data, c = 1) {
+      if (!data) return;
+      for (let row = 0; row < 8; row++) {
+        const bits = data[row];
+        if (!bits) continue;
+        let run = 0;
+        for (let col = 0; col < 8; col++) {
+          if (bits & 128 >> col) {
+            run += 1;
+            continue;
+          }
+          if (run) {
+            this.rect(x + col - run, y + row, run, 1, c);
+            run = 0;
+          }
+        }
+        if (run) this.rect(x + 8 - run, y + row, run, 1, c);
+      }
+    }
+    /** Same icon at 2x — the dialog and alert screens. */
+    icon2(x, y, data, c = 1) {
+      if (!data) return;
+      for (let row = 0; row < 8; row++) {
+        const bits = data[row];
+        if (!bits) continue;
+        let run = 0;
+        for (let col = 0; col < 8; col++) {
+          if (bits & 128 >> col) {
+            run += 1;
+            continue;
+          }
+          if (run) {
+            this.rect(x + (col - run) * 2, y + row * 2, run * 2, 2, c);
+            run = 0;
+          }
+        }
+        if (run) this.rect(x + (8 - run) * 2, y + row * 2, run * 2, 2, c);
+      }
+    }
+    /** 50% checkerboard — the backdrop the saved/toast dialogs sit on. */
+    dither() {
+      for (let y = 0; y < this.H; y++) {
+        for (let x = y & 1; x < this.W; x += 2) this.rect(x, y, 1, 1);
+      }
+    }
+    /** Draw `s` with its box-left at x (anchor 0), centred (0.5) or right-
+     * aligned (1). y is the cap-centre when vcenter, else the box top. */
+    text(s, x, y, anchor = 0.5, invert = false, vcenter = true) {
+      if (!s) return x;
+      const f = this.font;
+      if (anchor) x -= Math.trunc(f.measure(s) * anchor);
+      if (vcenter) y -= 3;
+      for (const ch of s) {
+        const i = f.index(ch);
+        const a = f.adv[i];
+        if (x + a > 0 && x < this.W) {
+          const w = x + f.boxW <= this.W ? f.boxW : this.W - x;
+          for (let gy = 0; gy < f.boxH; gy++) {
+            const dy = y + gy;
+            if (dy < 0 || dy >= this.H) continue;
+            for (let gx = 0; gx < w; gx++) {
+              const lit = f.atlas[gy * f.atlasW + i * f.boxW + gx];
+              if (invert) {
+                if (!lit) continue;
+                this.px[dy * this.W + x + gx] = 0;
+              } else if (lit) {
+                this.px[dy * this.W + x + gx] = 1;
+              }
+            }
+          }
+        }
+        x += a;
+      }
+      return x;
+    }
+    /** Scaled text for the hero numbers, by expanding lit pixels.
+     *
+     * `c` is the drawing colour. The boot splash is an inverted field, so its
+     * wordmark is carved out of it with c=0 rather than blitted onto it. */
+    big(s, x, y, scale = 2, anchor = 0.5, c = 1) {
+      if (!s) return x;
+      const f = this.font;
+      if (anchor) x -= Math.trunc(f.measure(s) * scale * anchor);
+      y -= Math.trunc(7 * scale / 2);
+      for (const ch of s) {
+        const i = f.index(ch);
+        for (let cy = 0; cy < f.boxH; cy++) {
+          let run = 0;
+          for (let cx = 0; cx < f.boxW; cx++) {
+            if (f.atlas[cy * f.atlasW + i * f.boxW + cx]) {
+              run += 1;
+              continue;
+            }
+            if (run) {
+              this.rect(x + (cx - run) * scale, y + cy * scale, run * scale, scale, c);
+              run = 0;
+            }
+          }
+          if (run) this.rect(x + (f.boxW - run) * scale, y + cy * scale, run * scale, scale, c);
+        }
+        x += f.adv[i] * scale;
+      }
+      return x;
+    }
+    /** ASCII picture, the format tests/golden/*.txt uses. */
+    rows() {
+      const out = [];
+      for (let y = 0; y < this.H; y++) {
+        let line = "";
+        for (let x = 0; x < this.W; x++) line += this.px[y * this.W + x] ? "#" : ".";
+        out.push(line);
+      }
+      return out;
+    }
+  };
 
-/* ═════════════════════════════════════════════════════════════════════
-   3. DİL — firmware/mkyada/i18n.py (birebir)
-   ═════════════════════════════════════════════════════════════════════ */
-const LANGS=["en","tr"], LANG_DESC=["English","Türkçe"], DEFAULT_LANG="en";
-const STRINGS={
- en:{loading:"loading",back:"< back",save:"save",select:"select",settings:"SETTINGS",
-  auto_return:"Auto return",language:"Language",show_layer:"Layer band",
-  show_profile:"Profile band",on:"on",off:"off",layer_band:"Layer %s",about:"About",
-  about_title:"ABOUT",model:"Model",firmware:"Firmware",device_id:"Device ID",
-  restart:"Restart",speed:"speed",auto_return_title:"AUTO RETURN",
-  lang_title:"SETTINGS > LANGUAGE",host:"Connected to app",menu_fail:"menu unavailable",
-  menu_fail_hint:"reinstall from app",err_title:"error - see serial log",
-  no_macro:"no macro on this key",assign_app:"assign one in the app",
-  usb_on:"USB drive is on",read_only:"read-only - use the app",save_fail:"could not save",
-  updating:"updating",updating2:"do not unplug",restarting:"restarting...",
-  setup_test:"SETUP - TEST",press_key:"press a key",keys_test:"KEY TEST",
-  keys_test_paused:"Macros paused",keys_test_switch:"Use another tab",
-  key_test:"Key test",test_press:"press a key or turn",hold_exit:"hold PSH: exit",
-  wheel:"WHEEL",key_t:"KEY",media:"MEDIA",volume:"VOLUME",bright:"BRIGHTNESS",
-  scroll_t:"SCROLL",run_t:"ACTION",run:"run",hint_repeat:"turn: repeat",
-  hint_track:"turn: track",hint_vol:"turn: volume",hint_bright:"turn: bright",
-  hint_scroll:"turn: scroll",app_needed:"MKYADA app required",
-  open_app:"open it on the computer",no_assign:"no action here",assigned:"assigned",
-  hold_set:"hold: assign",menu_t:"LAYER",mic_t:"MIC"},
- tr:{loading:"yükleniyor",back:"< geri",save:"kaydet",select:"seç",settings:"AYARLAR",
-  auto_return:"Otomatik Dönüş",language:"Dil",show_layer:"Katman bandı",
-  show_profile:"Profil bandı",on:"açık",off:"kapalı",layer_band:"Katman %s",
-  about:"Hakkında",about_title:"HAKKINDA",model:"Model",firmware:"Yazılım",
-  device_id:"Cihaz No",restart:"Yeniden Başlat",speed:"hız",
-  auto_return_title:"OTOMATİK DÖNÜŞ",lang_title:"AYARLAR > DİL",host:"Uygulamaya bağlı",
-  menu_fail:"menü yüklenemedi",menu_fail_hint:"uygulamadan yükleyin",
-  err_title:"hata - seri kayda bak",no_macro:"bu tuşta makro yok",
-  assign_app:"uygulamadan atayın",usb_on:"USB disk açık",
-  read_only:"salt okunur - uygulamayı kullan",save_fail:"kaydedilemedi",
-  updating:"güncelleniyor",updating2:"fişi çekmeyin",restarting:"yeniden başlatılıyor",
-  setup_test:"KURULUM - TEST",press_key:"bir tuşa bas",keys_test:"TUŞ TESTİ",
-  keys_test_paused:"Makrolar durduruldu",keys_test_switch:"Başka sekme kullan",
-  key_test:"Tuş testi",test_press:"tuşa bas veya çevir",hold_exit:"PSH tut: çık",
-  wheel:"TEKER",key_t:"TUŞ",media:"MEDYA",volume:"SES",bright:"PARLAKLIK",
-  scroll_t:"KAYDIR",run_t:"EYLEM",run:"çalıştır",hint_repeat:"çevir: tekrarla",
-  hint_track:"çevir: parça",hint_vol:"çevir: ses",hint_bright:"çevir: parlaklık",
-  hint_scroll:"çevir: kaydır",app_needed:"MKYADA uygulaması gerekli",
-  open_app:"bilgisayarda aç",no_assign:"burada atama yok",assigned:"atandı",
-  hold_set:"tut: ata",menu_t:"KATMAN",mic_t:"MİKROFON"}
+  // app/src/lib/oled-icons.ts
+  var ICON_CATEGORIES = [
+    ["navigasyon", ["arrow-up", "arrow-down", "arrow-left", "arrow-right", "chevron-up", "chevron-down", "chevron-left", "chevron-right", "home", "back", "refresh", "external", "expand", "collapse"]],
+    ["medya", ["play", "pause", "stop", "record", "next", "prev", "forward", "rewind", "shuffle", "repeat", "repeat-one", "eject", "volume", "mute", "volume-up", "volume-down"]],
+    ["ses", ["mic", "mic-off", "headphones", "speaker", "wave", "note", "music", "equalizer", "metronome", "podcast"]],
+    ["video ve yayın", ["camera", "webcam", "film", "clapper", "live", "broadcast", "scene", "monitor", "screen-share", "tv", "stream"]],
+    ["düzenleme", ["copy", "paste", "cut", "undo", "redo", "save", "trash", "duplicate", "select-all", "replace", "new", "open", "rename", "edit"]],
+    ["metin", ["bold", "italic", "underline", "strikethrough", "align-left", "align-center", "align-right", "list", "indent", "quote", "link", "code", "text"]],
+    ["dosya", ["file", "folder", "folder-open", "archive", "download", "upload", "cloud", "cloud-up", "cloud-down", "print", "disk"]],
+    ["sistem", ["power", "restart", "sleep", "settings", "wrench", "tools", "cpu", "memory", "usb", "battery", "plug", "bug", "terminal", "database", "server"]],
+    ["ağ", ["globe", "wifi", "signal", "share", "send", "mail", "chat", "bell", "at", "user", "users"]],
+    ["durum", ["check", "cross", "warning", "info", "question", "plus", "minus", "star", "heart", "flag", "lock", "unlock", "eye", "eye-off", "shield", "tag"]],
+    ["zaman", ["clock", "timer", "alarm", "calendar", "hourglass", "history"]],
+    ["pencere ve düzen", ["window", "windows", "tabs", "split", "layout", "grid", "layers", "pin", "minimize", "maximize", "close", "fullscreen"]],
+    ["grafik ve tasarım", ["brush", "pen", "pencil", "eraser", "palette", "crop", "zoom-in", "zoom-out", "move", "rotate", "ruler", "shapes"]],
+    ["oyun ve akış", ["gamepad", "dice", "target", "trophy", "rocket", "lightning", "fire", "sparkle"]],
+    ["çeşitli", ["search", "filter", "sort", "bookmark", "key", "gift", "coffee", "bulb", "magnet", "map-pin", "calculator", "chart", "percent", "hash", "keyboard", "mouse", "scroll-v", "scroll-h", "sequence", "webhook", "macro"]],
+    ["profil ve ekran", ["brightness-low", "brightness-high", "contrast", "screen-lock", "profile-switch", "cube", "bezier", "workspace"]],
+    ["3d ve cad", ["sketch", "extrude", "revolve", "fillet", "chamfer", "split-body", "view-top", "view-front", "view-side", "view-iso", "hide-body", "show-body", "measure-dist", "measure-angle", "constraint", "origin"]],
+    ["vektorel cizim", ["pen-tool", "select-arrow", "select-direct", "node-add", "node-remove", "path-union", "path-subtract", "path-intersect", "path-exclude", "align-l", "align-c", "align-r", "align-t", "align-b", "distribute-h", "distribute-v", "layer-lock", "mask", "artboard"]],
+    ["pencere ve sistem", ["clipboard", "clipboard-history", "snap-left", "snap-right", "snap-max", "task-manager", "app-switch", "always-on-top", "screen-record"]],
+    ["3d baski", ["printer-3d", "preheat", "auto-home", "bed-level", "filament", "nozzle", "fan", "print-pause"]],
+    ["eglence ve retro", ["ghost", "pacman", "invader", "invader2", "alien", "skull", "robot", "mushroom", "sword", "coin", "bomb", "ufo", "cat", "smiley", "joystick", "arcade", "tetromino", "crown", "potion", "chest"]]
+  ];
+  var ICON_NAMES = [
+    "arrow-up",
+    "arrow-down",
+    "arrow-left",
+    "arrow-right",
+    "chevron-up",
+    "chevron-down",
+    "chevron-left",
+    "chevron-right",
+    "home",
+    "back",
+    "refresh",
+    "external",
+    "expand",
+    "collapse",
+    "play",
+    "pause",
+    "stop",
+    "record",
+    "next",
+    "prev",
+    "forward",
+    "rewind",
+    "shuffle",
+    "repeat",
+    "repeat-one",
+    "eject",
+    "volume",
+    "mute",
+    "volume-up",
+    "volume-down",
+    "mic",
+    "mic-off",
+    "headphones",
+    "speaker",
+    "wave",
+    "note",
+    "music",
+    "equalizer",
+    "metronome",
+    "podcast",
+    "camera",
+    "webcam",
+    "film",
+    "clapper",
+    "live",
+    "broadcast",
+    "scene",
+    "monitor",
+    "screen-share",
+    "tv",
+    "stream",
+    "copy",
+    "paste",
+    "cut",
+    "undo",
+    "redo",
+    "save",
+    "trash",
+    "duplicate",
+    "select-all",
+    "replace",
+    "new",
+    "open",
+    "rename",
+    "edit",
+    "bold",
+    "italic",
+    "underline",
+    "strikethrough",
+    "align-left",
+    "align-center",
+    "align-right",
+    "list",
+    "indent",
+    "quote",
+    "link",
+    "code",
+    "text",
+    "file",
+    "folder",
+    "folder-open",
+    "archive",
+    "download",
+    "upload",
+    "cloud",
+    "cloud-up",
+    "cloud-down",
+    "print",
+    "disk",
+    "power",
+    "restart",
+    "sleep",
+    "settings",
+    "wrench",
+    "tools",
+    "cpu",
+    "memory",
+    "usb",
+    "battery",
+    "plug",
+    "bug",
+    "terminal",
+    "database",
+    "server",
+    "globe",
+    "wifi",
+    "signal",
+    "share",
+    "send",
+    "mail",
+    "chat",
+    "bell",
+    "at",
+    "user",
+    "users",
+    "check",
+    "cross",
+    "warning",
+    "info",
+    "question",
+    "plus",
+    "minus",
+    "star",
+    "heart",
+    "flag",
+    "lock",
+    "unlock",
+    "eye",
+    "eye-off",
+    "shield",
+    "tag",
+    "clock",
+    "timer",
+    "alarm",
+    "calendar",
+    "hourglass",
+    "history",
+    "window",
+    "windows",
+    "tabs",
+    "split",
+    "layout",
+    "grid",
+    "layers",
+    "pin",
+    "minimize",
+    "maximize",
+    "close",
+    "fullscreen",
+    "brush",
+    "pen",
+    "pencil",
+    "eraser",
+    "palette",
+    "crop",
+    "zoom-in",
+    "zoom-out",
+    "move",
+    "rotate",
+    "ruler",
+    "shapes",
+    "gamepad",
+    "dice",
+    "target",
+    "trophy",
+    "rocket",
+    "lightning",
+    "fire",
+    "sparkle",
+    "search",
+    "filter",
+    "sort",
+    "bookmark",
+    "key",
+    "gift",
+    "coffee",
+    "bulb",
+    "magnet",
+    "map-pin",
+    "calculator",
+    "chart",
+    "percent",
+    "hash",
+    "keyboard",
+    "mouse",
+    "scroll-v",
+    "scroll-h",
+    "sequence",
+    "webhook",
+    "macro",
+    "brightness-low",
+    "brightness-high",
+    "contrast",
+    "screen-lock",
+    "profile-switch",
+    "cube",
+    "bezier",
+    "workspace",
+    "sketch",
+    "extrude",
+    "revolve",
+    "fillet",
+    "chamfer",
+    "split-body",
+    "view-top",
+    "view-front",
+    "view-side",
+    "view-iso",
+    "hide-body",
+    "show-body",
+    "measure-dist",
+    "measure-angle",
+    "constraint",
+    "origin",
+    "pen-tool",
+    "select-arrow",
+    "select-direct",
+    "node-add",
+    "node-remove",
+    "path-union",
+    "path-subtract",
+    "path-intersect",
+    "path-exclude",
+    "align-l",
+    "align-c",
+    "align-r",
+    "align-t",
+    "align-b",
+    "distribute-h",
+    "distribute-v",
+    "layer-lock",
+    "mask",
+    "artboard",
+    "clipboard",
+    "clipboard-history",
+    "snap-left",
+    "snap-right",
+    "snap-max",
+    "task-manager",
+    "app-switch",
+    "always-on-top",
+    "screen-record",
+    "printer-3d",
+    "preheat",
+    "auto-home",
+    "bed-level",
+    "filament",
+    "nozzle",
+    "fan",
+    "print-pause",
+    "ghost",
+    "pacman",
+    "invader",
+    "invader2",
+    "alien",
+    "skull",
+    "robot",
+    "mushroom",
+    "sword",
+    "coin",
+    "bomb",
+    "ufo",
+    "cat",
+    "smiley",
+    "joystick",
+    "arcade",
+    "tetromino",
+    "crown",
+    "potion",
+    "chest"
+  ];
+  var PIX_HEX = "183c7eff18181800181818ff7e3c1800103070ff70301000080c0eff0e0c080000183c66c30000000000c3663c1800000c18306030180c0030180c060c183000183c66c3dbdbdb00002060fe632303003e63c0c0c3663c087f434549d1b08ff0e7818100008181e7007e424242427e00c0f0fcfffcf0c0006666666666666600007e7e7e7e7e7e003c7effffffff7e3cc3e3f3fbf3e3c300c3c7cfdfcfc7c30088cceeffeecc8800113377ff7733110083452911294583007ec3c0c3fd0f0d007ec3c8d8fc0f0d00183c7eff00ffff0008183af2f23a1808081a3af2f438180808183af5f53a1808001838f0f0381800383838baba827c10393a38b2a5857d123c7ec3c3dbdbdb007e425a425a5a427e002476f7f77624000f090808083878303f212121e7f7630000a5b5b5b6b6a60018183c246642ff003c425a423c183c0000f88a8c8c8af8003c4299bd99423c18ffa5ff81ffa5ff0055aaff818181ff0000327a79797a320002020a0a2a2aaaaaf8888f89f9090f00ff818181ff183c00ff99bd9981ff183c2418ff818181ff00ff81b1bdb181ff187c445e5272121e003c5ac3dbc3dbc37ec34224183c66663c2060fe6323030e0004067fc6c4c07000ffc3c3c381bdbdff3cff007e5a5a7e007c44445f5171111fdb008181818100db78849e9272121e007c4642424a5e4a7e00e09f8181427e007c46424e5c48407c070f1d3870c000ff78444478444478003e0c0c181830f80066666666663c00ff3c66603806663c78ff00f800ff00f800ff007e00ff007e00ff001f00ff001f009f009f009f009f00c767e7c700ff00ff66666622440000003e63c10083c67c002263c18080c16322ffe7181818183c007c46424242427e00e09f81818181ff00e09f81ff42241800ff81ff998181ff0018181899fe7c381010387cfe99181818003c42c181817f00183c5ad981817f00003c42c199bd6d183c24ff8181ff3c3cff81bda5bd8185ff18185adbc3c37e003e63c2c0c3663c087c0c183764fa020724bd7e66667ebd24070f1d70e0c08000c76f3a182c46c3005affbdc3c3bdff5affaaaaaaaaff4242183c18185a5a7a0e00fd85bdbd85fd002424ff81817e1818bd7e7effff7ebd81ff81a191a181bdff7ec37ec37ec37e00ffa3ff00ffa3ff003c5a99ff995a3c00003c42992418000003030f0f3f3fffff07053d42819e90f080e0f8fef8e08000ffc3a5998181ff007e8181817e306000183c424242ff00183c429da5a59c403e3c42423c7e81810066999966fd858500010386ccec7c3810c3e77e3c3c7ee7c31824245a5a9981ff1818003818183c003c4283060c0c000c181818ffff181800000000ffff0000001818fe7c386cc60066ffffff7e3c1800c0dededec0c0c0003c4242ffdbc3ff003c4240ffdbc3ff00003c429999423c00033d439ab2443cc07ec3c3c3663c18007fc1a191898583ff3c4289898e81423c247ec3cbcbc37e00c37e99999d817ec342ff81a981a9ff00ff422418182442ff3e63d3ddc3663c08ffff81818181ff00efef81bfa1e1213fe79981818181ff00ff9999999999ff00ff81ff999999ff00cccc00cccc00cccc183c7eff007e3c1818183c7e7e3c18180000000000ffff00ffffc3c3c3c3ffff7ec3a59999a5c37ee7819918189981e7070f1d3878783800070f1d3870e0c08003070e1c3870e0c0070d1b366c6878003c5ac399a5c37c1c3030ff3033330f037c92ba927c0c06037c82ba827c0c0603183c66dbdb663c183c66c3c2c0663c40ffa981a981a9ff003c42818181817e007ea5e781a5e7817eff81b1818d81ff003c4299bd99423c00ffbdbd7e3c183c7e183c5a5a7e5ac3810e1c387c0c183060081c3a766e4e6c3810387cfe7c3810007c8282827c0c0603ff7e3c18181818002672f826222622007e424242425a66003c429999423c0c0f247eff819999ff0000fc8586868578ff3c4281995a3c183cc3c3c3c3c37e00003c429999423c1808ff81ffa981a9ff0000030f3fff00ff00c1c20408102043832424ff24ff242400ff81ab81b581ff003c5a99818181423c183c660000663c18002466c3c3662400dfc000dfc000dfc0fc8485878584fc00bdc3bd81bdc3bd0000003c7e7e3c000018813c66663c81183c7af9f9f9f97a3cff99a5bd9981ff3c3f21e19f8181ff003f43c2868484fc00c0c0301c06030300ffa1a1a1a1a1ff00ff83868d99b1ff00183c7e18ff8181ff10362321212336103f4181818181ff001f3161c18181ff00e7a5a5a5a5a5e700ffffff818181ff00ff81bdbdbd81ff00ff8787878787ff001824428181422418e7810081810081e77effffffffff7e008181a5ffa5818100808098848281ff003c427e7e00ff0000808080808698b0ff387c6c7c38101000c0e0f0f8fce0b00cc0a09088849ca0203c243c00187e18003c243c00007e0000fc84878181e1213ffc84849e90f00000fc84bdbdbd3d013ffc84a5a5a525213f80be80b880be8000107c1038107c1000017d011d017d0100ffdadad8d8c0c000c0c0d8d8dadaff009999999999999900ff0000ff0000ff003c427e00183c7efff5f2f5f2f5f2f50042bd3c3c3c3cbd423c5ac3c3c3c3c37e3c5ac3dbd3dec37efff1f1f1f1f1f1ffff8f8f8f8f8f8fffff81bdbdbdbd81ffff818595a5a5ff00f88888fb09090f0018183cff818181ffff8199bd9981ff18ff81bd81c3423c181818242424667e3c82c6aa10aac6820000030f3fff003c663c4299bd99423c0f7e427e3c3c1818083c64c4999123263cff81b5b5b581ff003c7edbffffffffb63c7ef8f0f0f87e3c24183c66ffbd8142183c7edbff245aa53c7edbff7e2442817effdbdbff7e5a5a187ebddbff7e42663c7edbff7e3c243c03060c1830f830503c7edbdbdbdb7e3c060c3c7effff7e3c3c42ffaa7e24428181c3ffa5ff997e3c3c7edbffbdc37e3c183c18187effff7eff81bdbd81dbff81c0c0c0c0f0f0000099dbffffff7e7e00423c24247effff7e7ec3ffdbffc3ff00";
+  var PIX = new Uint8Array(PIX_HEX.length / 2);
+  for (let i = 0; i < PIX.length; i++) {
+    PIX[i] = parseInt(PIX_HEX.slice(i * 2, i * 2 + 2), 16);
+  }
+  var IDX = new Map(ICON_NAMES.map((n, i) => [n, i]));
+  function iconBytes(name) {
+    if (!name) return null;
+    const i = IDX.get(name);
+    if (i === void 0) return null;
+    return PIX.subarray(i * 8, i * 8 + 8);
+  }
+
+  // app/src/lib/oled-i18n.ts
+  var LANGS = ["en", "tr"];
+  var LANG_DESC = {
+    en: "English",
+    tr: "Türkçe"
+  };
+  var DEFAULT_LANG = "en";
+  var STRINGS = {
+    en: {
+      "loading": "loading",
+      "back": "< back",
+      "save": "save",
+      "select": "select",
+      "settings": "SETTINGS",
+      "auto_return": "Auto return",
+      "language": "Language",
+      "show_layer": "Layer band",
+      "show_profile": "Profile band",
+      "on": "on",
+      "off": "off",
+      "layer_band": "Layer %s",
+      "about": "About",
+      "about_title": "ABOUT",
+      "model": "Model",
+      "firmware": "Firmware",
+      "device_id": "Device ID",
+      "restart": "Restart",
+      "wheel_layers": "Wheel layers",
+      "boot_disp": "display",
+      "boot_cfg": "profiles",
+      "boot_hid": "USB HID",
+      "update_title": "FIRMWARE UPDATE",
+      "sec_unit": "SEC",
+      "idle_t": "IDLE",
+      "live_t": "LIVE",
+      "rec_t": "REC",
+      "scene_t": "SCENE",
+      "speed": "speed",
+      "auto_return_title": "AUTO RETURN",
+      "lang_title": "SETTINGS > LANGUAGE",
+      "host": "Connected to app",
+      "menu_fail": "menu unavailable",
+      "menu_fail_hint": "reinstall from app",
+      "err_title": "error - see serial log",
+      "no_macro": "no macro on this key",
+      "assign_app": "assign one in the app",
+      "usb_on": "USB drive is on",
+      "read_only": "read-only - use the app",
+      "save_fail": "could not save",
+      "updating": "updating",
+      "updating2": "do not unplug",
+      "restarting": "restarting...",
+      "setup_test": "SETUP - TEST",
+      "press_key": "press a key",
+      "keys_test": "KEY TEST",
+      "pixel_test": "Pixel test",
+      "pixel_hint": "any button: back",
+      "keys_test_paused": "Macros paused",
+      "keys_test_switch": "Use another tab",
+      "key_test": "Key test",
+      "test_press": "press a key or turn",
+      "hold_exit": "hold PSH: exit",
+      "wheel": "WHEEL",
+      "key_t": "KEY",
+      "media": "MEDIA",
+      "volume": "VOLUME",
+      "bright": "BRIGHTNESS",
+      "scroll_t": "SCROLL",
+      "run_t": "ACTION",
+      "run": "run",
+      "hint_repeat": "turn: repeat",
+      "hint_track": "turn: track",
+      "hint_vol": "turn: volume",
+      "hint_bright": "turn: bright",
+      "hint_scroll": "turn: scroll",
+      "app_needed": "MKYADA app required",
+      "open_app": "open it on the computer",
+      "no_assign": "no action here",
+      "assigned": "assigned",
+      "hold_set": "hold: assign",
+      "menu_t": "LAYER",
+      "mic_t": "MIC"
+    },
+    tr: {
+      "loading": "yükleniyor",
+      "back": "< geri",
+      "save": "kaydet",
+      "select": "seç",
+      "settings": "AYARLAR",
+      "auto_return": "Otomatik Dönüş",
+      "language": "Dil",
+      "show_layer": "Katman bandı",
+      "show_profile": "Profil bandı",
+      "on": "açık",
+      "off": "kapalı",
+      "layer_band": "Katman %s",
+      "about": "Hakkında",
+      "about_title": "HAKKINDA",
+      "model": "Model",
+      "firmware": "Yazılım",
+      "device_id": "Cihaz No",
+      "restart": "Yeniden Başlat",
+      "wheel_layers": "Tekerle katman",
+      "boot_disp": "ekran",
+      "boot_cfg": "profiller",
+      "boot_hid": "USB HID",
+      "update_title": "YAZILIM GÜNCELLEME",
+      "sec_unit": "SN",
+      "idle_t": "BOŞTA",
+      "live_t": "YAYINDA",
+      "rec_t": "KAYIT",
+      "scene_t": "SAHNE",
+      "speed": "hız",
+      "auto_return_title": "OTOMATİK DÖNÜŞ",
+      "lang_title": "AYARLAR > DİL",
+      "host": "Uygulamaya bağlı",
+      "menu_fail": "menü yüklenemedi",
+      "menu_fail_hint": "uygulamadan yükleyin",
+      "err_title": "hata - seri kayda bak",
+      "no_macro": "bu tuşta makro yok",
+      "assign_app": "uygulamadan atayın",
+      "usb_on": "USB disk açık",
+      "read_only": "salt okunur - uygulamayı kullan",
+      "save_fail": "kaydedilemedi",
+      "updating": "güncelleniyor",
+      "updating2": "fişi çekmeyin",
+      "restarting": "yeniden başlatılıyor",
+      "setup_test": "KURULUM - TEST",
+      "press_key": "bir tuşa bas",
+      "keys_test": "TUŞ TESTİ",
+      "pixel_test": "Piksel testi",
+      "pixel_hint": "herhangi bir tuş: geri",
+      "keys_test_paused": "Makrolar durduruldu",
+      "keys_test_switch": "Başka sekme kullan",
+      "key_test": "Tuş testi",
+      "test_press": "tuşa bas veya çevir",
+      "hold_exit": "PSH tut: çık",
+      "wheel": "TEKER",
+      "key_t": "TUŞ",
+      "media": "MEDYA",
+      "volume": "SES",
+      "bright": "PARLAKLIK",
+      "scroll_t": "KAYDIR",
+      "run_t": "EYLEM",
+      "run": "çalıştır",
+      "hint_repeat": "çevir: tekrarla",
+      "hint_track": "çevir: parça",
+      "hint_vol": "çevir: ses",
+      "hint_bright": "çevir: parlaklık",
+      "hint_scroll": "çevir: kaydır",
+      "app_needed": "MKYADA uygulaması gerekli",
+      "open_app": "bilgisayarda aç",
+      "no_assign": "burada atama yok",
+      "assigned": "atandı",
+      "hold_set": "tut: ata",
+      "menu_t": "KATMAN",
+      "mic_t": "MİKROFON"
+    }
+  };
+  var current = DEFAULT_LANG;
+  function setLang(l) {
+    current = LANGS.includes(l ?? "") ? l : DEFAULT_LANG;
+    return current;
+  }
+  function getLang() {
+    return current;
+  }
+  function tr(key) {
+    return STRINGS[current][key] ?? STRINGS[DEFAULT_LANG][key] ?? key;
+  }
+  function upper(s) {
+    let t = String(s);
+    if (current === "tr") t = t.replace(/i/g, "İ").replace(/\u0131/g, "I");
+    return t.toUpperCase();
+  }
+
+  // app/src/lib/oled-screens.ts
+  var BAR_H = 9;
+  var ROW_H = 13;
+  var ROW_TOP = 12;
+  var VIS = 4;
+  var SB_X = 125;
+  var SB_Y = 11;
+  var SB_H = 52;
+  var PBAR_Y = 43;
+  var PBAR_H = 8;
+  var PBAR_FOOT = 53;
+  var TILE_X = [0, 43, 86];
+  var TILE_W = 41;
+  var HERO_SCALE = 3;
+  var DLG_Y = 10;
+  var DLG_H = 44;
+  var SPEED_MIN_T = 1;
+  var SPEED_MAX_T = 100;
+  function fmtSpeed(t) {
+    return `${(t / 10).toFixed(1)}x`;
+  }
+  function fmtHero(t) {
+    const v = t / 10;
+    return v >= 10 ? String(Math.trunc(v)) : v.toFixed(1);
+  }
+  function fmtBytes(done, total) {
+    if (total) return `${(done / 1024).toFixed(1)} / ${(total / 1024).toFixed(1)} KB`;
+    return `${(done / 1024).toFixed(1)} KB`;
+  }
+  var OledScreens = class {
+    constructor(fb = new Fb(128, 64)) {
+      __publicField(this, "W", 128);
+      __publicField(this, "H", 64);
+      __publicField(this, "CX", 64);
+      __publicField(this, "fb");
+      __publicField(this, "font");
+      /** Printed in the boot splash's corner. */
+      __publicField(this, "fw", "");
+      this.fb = fb;
+      this.font = fb.font;
+    }
+    // --- coordinate helpers -------------------------------------------------
+    /** Text with y = TOP of the glyph box. */
+    _txt(s, x, y, anchor = 0.5, invert = false) {
+      this.fb.text(s, x, y, anchor, invert, false);
+    }
+    /** Scaled text with y = TOP of the glyph box.
+     *
+     * `fit` is the room the hero has, in SCREEN pixels. It is applied here rather
+     * than at the call sites because it has to be measured against the SCALED
+     * advance: fitting at scale 1 and drawing at 2x or 3x is how a long macro
+     * name used to run off both edges of the glass instead of being cut. */
+    _hero(s, x, y, scale = 2, anchor = 0.5, c = 1, fit) {
+      const str = fit === void 0 ? s : this.font.fit(String(s), Math.trunc(fit / scale));
+      this.fb.big(str, x, y + Math.trunc(7 * scale / 2), scale, anchor, c);
+    }
+    /** Position dots. The selected one is a 3x3 square, the rest single pixels —
+     * three rects for the whole row instead of n circle objects. */
+    _dots(y, n, sel) {
+      const x0 = this.CX - Math.trunc((n * 8 - 8) / 2) - 1;
+      for (let i = 0; i < n; i++) {
+        const x = x0 + i * 8;
+        if (i === sel) this.fb.rect(x, y, 3, 3);
+        else this.fb.rect(x + 1, y + 1, 1, 1);
+      }
+    }
+    clear() {
+      this.fb.clear();
+    }
+    /** Break a macro name into the (line1, line2) a grid cell shows.
+     *
+     * Splitting is by PIXELS, not characters. A fixed character count was wrong
+     * in both directions: "IIIIIIIIII" left half the cell empty and "WWWWWWWWWW"
+     * ran over its divider. */
+    split_name(name, cols = 3) {
+      const f = this.font;
+      const s = String(name ?? "").trim();
+      const cell = Math.trunc(this.W / cols) - 2;
+      if (f.measure(s) <= cell) return [s, ""];
+      const head = f.fit(s, cell);
+      const cut = head.lastIndexOf(" ");
+      if (cut > 0) return [s.slice(0, cut), f.fit(s.slice(cut + 1), cell)];
+      return [head, f.fit(s.slice(head.length), cell)];
+    }
+    // --- chrome -------------------------------------------------------------
+    /** The design's bar(): 9px inverted strip, title left, optional label right. */
+    _bar9(left, right) {
+      this.fb.rect(0, 0, this.W, BAR_H);
+      this._txt(left, 2, 1, 0, true);
+      if (right) this._txt(right, this.W - 2, 1, 1, true);
+    }
+    /** The design's hdr(): back chevron, title, hairline at y=9. The old bottom
+     * bar is gone in this design, so the action / "hold" hint moved up here —
+     * which is what buys the list its fourth row back at 13px pitch. */
+    _hdr9(title, hint) {
+      const f = this.font;
+      this.fb.icon(1, 1, iconBytes("chevron-left"));
+      let rw = 0;
+      if (hint) {
+        const s = f.fit(String(hint), 52);
+        rw = f.measure(s) + 3;
+        this._txt(s, this.W - 2, 1, 1);
+      }
+      this._txt(f.fit(String(title), 115 - rw), 11, 1, 0);
+      this.fb.hline(0, 9, this.W);
+    }
+    /** The corner badge on the editors: a carved box with lit text. Its width
+     * follows the text — the design's was a fixed 29px because it always said
+     * "EDIT", and ours says SEC / SN / SPEED. */
+    _badge(s) {
+      const f = this.font;
+      const t = f.fit(String(s), 44);
+      const w = f.measure(t) + 6;
+      const x = this.W - 2 - w;
+      this.fb.rfill(x, 1, w, 7, 0, 1);
+      this._txt(t, x + 3, 1, 0);
+    }
+    /** The progress bar boot and update share. `c` is 0 on boot (an inverted
+     * field, so it is carved) and 1 on update. */
+    _pbar(frac, c) {
+      const p = Math.min(1, Math.max(0, frac));
+      this.fb.frame(4, PBAR_Y, 120, PBAR_H, c);
+      this.fb.rect(6, PBAR_Y + 2, Math.trunc(116 * p), PBAR_H - 4, c);
+    }
+    /** The dithered backdrop plus the rounded box both overlays sit in. */
+    _dialog(art) {
+      const y = DLG_Y;
+      const h = DLG_H;
+      this.fb.dither();
+      this.fb.rfill(8, y, 112, h, 0);
+      this.fb.rframe(8, y, 112, h, 1);
+      this.fb.icon2(14, y + Math.trunc((h - 16) / 2), art);
+    }
+    // --- screens ------------------------------------------------------------
+    /** Inverted splash: the whole panel lights and everything is carved out of
+     * it. The phase line under the wordmark says which third of the boot we are
+     * in. */
+    show_boot(frac = 0) {
+      const fb = this.fb;
+      const p = Math.min(1, Math.max(0, frac));
+      fb.fill(1);
+      this._hero("MKYADA", this.CX, 11, 2, 0.5, 0);
+      fb.hline(29, 29, 70, 0);
+      const phase = p < 0.33 ? tr("boot_disp") : p < 0.66 ? tr("boot_cfg") : tr("boot_hid");
+      this._txt(phase, this.CX, 34, 0.5, true);
+      this._pbar(p, 0);
+      this._txt("RP2040", 4, PBAR_FOOT, 0, true);
+      if (this.fw) this._txt(this.fw, this.W - 4, PBAR_FOOT, 1, true);
+    }
+    /** Locked firmware-update screen. Where the design source showed a version
+     * transition we show a byte counter instead: update_begin carries the total
+     * size and nothing else, so a version line would be invented. */
+    show_update(frac, restarting = false, done = 0, total = 0) {
+      const fb = this.fb;
+      const p = Math.min(1, Math.max(0, frac));
+      this.clear();
+      this._bar9(tr("update_title"));
+      fb.rect(0, 12, this.W, 11);
+      this._txt(tr("updating2"), this.CX, 14, 0.5, true);
+      this._txt(restarting ? tr("restarting") : fmtBytes(done, total), this.CX, 29);
+      this._pbar(p, 1);
+      this._txt(tr("updating"), 4, PBAR_FOOT, 0);
+      this._txt(`${Math.trunc(p * 100)}%`, this.W - 4, PBAR_FOOT, 1);
+    }
+    /** Settings list. The state used to be baked into the label ("Layer band:
+     * on"); it is a column of its own now. */
+    show_settings(title, items, sel) {
+      const fb = this.fb;
+      const f = this.font;
+      const n = items.length;
+      const top = sel >= VIS ? Math.min(sel - VIS + 1, Math.max(0, n - VIS)) : 0;
+      this.clear();
+      this._hdr9(title);
+      for (let i = 0; i < VIS; i++) {
+        const idx = top + i;
+        if (idx >= n) break;
+        const y = ROW_TOP + i * ROW_H;
+        const on = idx === sel;
+        const it = items[idx];
+        fb.rect(0, y, 124, 12, on ? 1 : 0);
+        this._txt(f.fit(it.label, 95), 4, y + 3, 0, on);
+        if (it.kind === "toggle") fb.sw(103, y + 2, !!it.value, on ? 0 : 1);
+        else if (it.kind === "text") this._txt(String(it.value ?? ""), 120, y + 3, 1, on);
+      }
+      const th = n ? Math.max(8, Math.trunc((SB_H * VIS + Math.trunc(n / 2)) / n)) : SB_H;
+      const ty = SB_Y + Math.trunc((SB_H - th) * top / Math.max(1, n - VIS));
+      fb.sbarv(SB_X, SB_Y, SB_H, ty, th);
+    }
+    /** Generic list — language, wheel menus, host lists. Same frame as the
+     * settings list. The device's old ">" marker for the assigned option is a
+     * tick icon on the right now, so the label stays left-aligned. */
+    show_menu(title, items, sel, marked = null, action, hold) {
+      const fb = this.fb;
+      const f = this.font;
+      const n = items.length;
+      const top = sel >= VIS ? Math.min(sel - VIS + 1, Math.max(0, n - VIS)) : 0;
+      this.clear();
+      this._hdr9(title, hold || action || null);
+      const wide = marked === null || marked === void 0 ? 115 : 95;
+      const tick = iconBytes("check");
+      for (let i = 0; i < VIS; i++) {
+        const idx = top + i;
+        if (idx >= n) break;
+        const y = ROW_TOP + i * ROW_H;
+        const on = idx === sel;
+        fb.rect(0, y, 124, 12, on ? 1 : 0);
+        this._txt(f.fit(String(items[idx]), wide), 4, y + 3, 0, on);
+        if (idx === marked) fb.icon(112, y + 2, tick, on ? 0 : 1);
+      }
+      if (n > VIS) {
+        const th = Math.max(8, Math.trunc((SB_H * VIS + Math.trunc(n / 2)) / n));
+        const ty = SB_Y + Math.trunc((SB_H - th) * top / Math.max(1, n - VIS));
+        fb.sbarv(SB_X, SB_Y, SB_H, ty, th);
+      }
+    }
+    /** Speed editor: badged title, hero number, 15 segments, the range below. */
+    show_speed(layerName, keyNo, t, lo = SPEED_MIN_T, hi = SPEED_MAX_T) {
+      const fb = this.fb;
+      this.clear();
+      fb.rect(0, 0, this.W, BAR_H);
+      fb.icon(1, 1, iconBytes("chevron-left"), 0);
+      this._txt(`${upper(layerName)} > K${keyNo}`, 11, 1, 0, true);
+      this._badge(upper(tr("speed")));
+      this._hero(fmtHero(t), this.CX, 13, HERO_SCALE);
+      fb.segbar(4, 38, 120, 10, 15, Math.max(1, Math.trunc((t * 15 + Math.trunc(hi / 2)) / hi)));
+      this._txt(fmtHero(lo), 4, 52, 0);
+      this._txt(tr("save"), this.CX, 52);
+      this._txt(fmtHero(hi), this.W - 4, 52, 1);
+    }
+    /** Auto-return editor: hero + unit, a centre sight, and a notched ruler that
+     * slides with the value. */
+    show_timeout(sec, _lo, _hi) {
+      const fb = this.fb;
+      const f = this.font;
+      this.clear();
+      fb.rect(0, 0, this.W, BAR_H);
+      fb.icon(1, 1, iconBytes("chevron-left"), 0);
+      this._txt(tr("auto_return_title"), 11, 1, 0, true);
+      const unit = tr("sec_unit");
+      this._badge(unit);
+      const bv = String(sec);
+      const bw = f.measure(bv) * HERO_SCALE;
+      const gx = Math.trunc((this.W - (bw + 4 + f.measure(unit))) / 2);
+      this._hero(bv, gx, 13, HERO_SCALE, 0);
+      this._txt(unit, gx + bw + 4, 27, 0);
+      fb.rect(64, 39, 1, 1);
+      fb.rect(63, 40, 3, 1);
+      fb.rect(62, 41, 5, 1);
+      const off = sec * 2 % 18;
+      const major = Math.trunc(sec * 2 / 18) * 3;
+      for (let i = -1; i < 24; i++) {
+        const x = 4 + i * 6 - off;
+        if (x < 1 || x > 126) continue;
+        const maj = (i + major) % 3 === 0;
+        fb.vline(x, maj ? 44 : 48, maj ? 8 : 4);
+      }
+      fb.hline(0, 52, this.W);
+      this._txt(tr("save"), this.CX, 55);
+    }
+    /** The grid's status band. Indicators are laid out right to left: page
+     * position, a LIVE pill, then the blinking record dot with a STEADY label
+     * beside it — the eye should not have to wait out the dark phase to read
+     * "recording". The layer/profile text takes whatever is left. */
+    _grid_bar(band, page, st) {
+      const fb = this.fb;
+      const f = this.font;
+      fb.rect(0, 0, this.W, BAR_H);
+      let rx = this.W - 2;
+      if (page) {
+        const s = `${page.sel + 1}/${page.n}`;
+        this._txt(s, rx, 1, 1, true);
+        rx -= f.measure(s) + 4;
+      }
+      if (st && st.live) {
+        const lab = upper(tr("live_t"));
+        const w = f.measure(lab) + 6;
+        const x = rx - w + 1;
+        fb.rfill(x, 1, w, 7, 0, 1);
+        this._txt(lab, x + 3, 1, 0);
+        rx = x - 3;
+      }
+      if (st && st.rec) {
+        const lab = upper(tr("rec_t"));
+        this._txt(lab, rx, 1, 1, true);
+        rx -= f.measure(lab) + 3;
+        if (st.blink) fb.rect(rx - 4, 3, 4, 4, 0);
+        rx -= 7;
+      }
+      if (band) this._txt(f.fit(String(band), Math.max(0, rx - 3)), 2, 1, 0, true);
+    }
+    /** 3x2 macro grid. Rounded tiles with a 2px gutter, the selected one filled;
+     * the action icon sits above the name.
+     *
+     * `page` turns on wheel paging: a dot row appears at y=60 and the tiles are
+     * the design's 23px. Without it the dot row's pixels go back to the tiles. */
+    show_grid(labels, active, invert = true, band = null, icons = null, page = null, st = null) {
+      const fb = this.fb;
+      const f = this.font;
+      this.clear();
+      const hasSt = !!(st && (st.rec || st.live));
+      const bar = !!band || hasSt;
+      const top = bar ? 11 : 2;
+      const bot = page ? 59 : 62;
+      const h = Math.trunc((bot - top - 1) / 2);
+      const blockH = 2 * h + 1;
+      const ytop = top + Math.trunc((bot - top - blockH) / 2);
+      const pad = Math.trunc((h - 23) / 2);
+      if (bar) this._grid_bar(band, band ? page : null, st);
+      for (let k = 0; k < 6; k++) {
+        const x = TILE_X[k % 3];
+        const y = ytop + Math.trunc(k / 3) * (h + 1);
+        const on = k === active && invert;
+        const art = icons ? icons[k] : null;
+        const pair = labels[k] || ["", ""];
+        if (on) fb.rfill(x, y, TILE_W, h, 1, 0);
+        else fb.rframe(x, y, TILE_W, h, 1);
+        const mid = x + 20;
+        if (pair[1]) {
+          this._txt(f.fit(pair[0], 37), mid, y + 4 + pad, 0.5, on);
+          this._txt(f.fit(pair[1], 37), mid, y + 12 + pad, 0.5, on);
+        } else if (art) {
+          fb.icon(x + 17, y + 4 + pad, art, on ? 0 : 1);
+          this._txt(f.fit(pair[0], 37), mid, y + 14 + pad, 0.5, on);
+        } else {
+          this._txt(f.fit(pair[0], 37), mid, y + 8 + pad, 0.5, on);
+        }
+      }
+      if (page) this._dots(60, page.n, page.sel);
+    }
+    /** Layer picker: arrows either side, a 2x letter, the layer's name under it
+     * when it has one, position dots at the bottom.
+     *
+     * The design source puts a 2x icon above the letter; it is dropped here
+     * because on this device the letter IS the layer — the icon added no
+     * information. The hero sits at the same y on every page so neither it nor
+     * the arrows jump as the wheel moves through them. */
+    show_home(pos, layerCount, layerNames, nick, active = false) {
+      const fb = this.fb;
+      this.clear();
+      const n = layerCount + 1;
+      this._bar9(tr("menu_t"), `${pos + 1}/${n}`);
+      const isSet = pos >= layerCount;
+      const hero = isSet ? tr("settings") : upper(layerNames[pos] ?? "");
+      const sub = isSet ? "" : nick || (active ? upper(tr("on")) : "");
+      if (pos > 0) fb.icon(1, 26, iconBytes("chevron-left"));
+      if (!isSet) fb.icon(this.W - 9, 26, iconBytes("chevron-right"));
+      this._hero(hero, this.CX, 23, 2, 0.5, 1, 106);
+      if (sub) this._txt(sub, this.CX, 42);
+      this._dots(57, n, pos);
+    }
+    /** All six keys at once with a press counter each, wheel and module buttons
+     * underneath. The old screen showed one control at a time, so finding the
+     * silent key meant pressing them in turn. */
+    show_keytest(s) {
+      const fb = this.fb;
+      this.clear();
+      this._bar9(tr("keys_test"), tr("hold_exit"));
+      for (let k = 0; k < 6; k++) {
+        const x = TILE_X[k % 3];
+        const y = 11 + Math.trunc(k / 3) * 16;
+        const on = s.last === k;
+        if (on) fb.rfill(x, y, TILE_W, 15, 1, 0);
+        else fb.rframe(x, y, TILE_W, 15, 1);
+        this._txt(`K${k + 1}`, x + 3, y + 4, 0, on);
+        this._txt(String(s.cnt[k]), x + 38, y + 4, 1, on);
+      }
+      fb.hline(0, 44, this.W);
+      this._txt(`ENC ${s.enc >= 0 ? "+" : ""}${s.enc}`, 3, 46, 0);
+      this._txt(`PSH ${s.nav[0]}`, this.W - 2, 46, 1);
+      this._txt(`BACK ${s.nav[1]}`, 3, 55, 0);
+      this._txt(`CONFIRM ${s.nav[2]}`, this.W - 2, 55, 1);
+    }
+    /** Every pixel lit. A dead column or a stuck row is invisible on a normal
+     * screen — most of it is dark anyway — but obvious against a solid field.
+     * Any button leaves, so there is no way to get stuck here. */
+    show_pixels() {
+      this.fb.fill(1);
+    }
+    /** Device info: a 9px title over label/value rows at 10px pitch. */
+    show_about(rows) {
+      this.clear();
+      for (let i = 0; i < rows.length && i < 5; i++) {
+        const y = 11 + i * 10;
+        this._txt(rows[i][0], 3, y + 2, 0);
+        this._txt(this.font.fit(String(rows[i][1]), 86), this.W - 2, y + 2, 1);
+      }
+      this._bar9(tr("about_title"));
+    }
+    show_saved(layerName, keyNo, t) {
+      this._dialog(iconBytes("check"));
+      this._hero(upper(tr("save")), 34, 19, 2, 0, 1, 90);
+      this._txt(
+        this.font.fit(`${upper(layerName)} > K${keyNo}  ${fmtSpeed(t)}`, 84),
+        34,
+        36,
+        0
+      );
+    }
+    /** Same box, but a toast has three pieces and our glyph box is a row taller
+     * than the design's — a 2x title plus two lines does not fit, so all three
+     * are one scale, at an even 11px pitch. */
+    show_toast(title, line1 = "", line2 = "", ok = false) {
+      const f = this.font;
+      this._dialog(iconBytes(ok ? "check" : "warning"));
+      this._txt(f.fit(title, 84), 34, 18, 0);
+      if (line1) this._txt(f.fit(line1, 84), 34, 29, 0);
+      if (line2) this._txt(f.fit(line2, 84), 34, 40, 0);
+    }
+    /** Action card for the wheel menu: 9px bar, a 2x hero, an optional status
+     * line, and the design's plain hint row instead of a filled bar. */
+    show_card(title, big, line, hint) {
+      const f = this.font;
+      this.clear();
+      this._bar9(title);
+      const hy = line ? 20 : 25;
+      this._hero(String(big ?? ""), this.CX, hy, 2, 0.5, 1, 124);
+      if (line) this._txt(f.fit(String(line), 124), this.CX, 38);
+      if (hint) this._txt(f.fit(String(hint), 124), this.CX, 56);
+    }
+    /** Host-driven slider — the speed editor's frame. No min/max labels: the
+     * protocol does not carry them for a slider. */
+    show_adjust(title, hero, frac, action) {
+      const fb = this.fb;
+      const f = this.font;
+      const p = Math.max(0, Math.min(1, frac));
+      this.clear();
+      fb.rect(0, 0, this.W, BAR_H);
+      fb.icon(1, 1, iconBytes("chevron-left"), 0);
+      this._txt(f.fit(String(title), 80), 11, 1, 0, true);
+      if (action) this._badge(upper(action));
+      this._hero(String(hero), this.CX, 13, HERO_SCALE, 0.5, 1, 124);
+      fb.segbar(4, 38, 120, 10, 15, Math.max(1, Math.trunc(p * 15 + 0.5)));
+      this._txt(tr("back"), 4, 52, 0);
+      this._txt(`${Math.trunc(p * 100 + 0.5)}%`, this.W - 4, 52, 1);
+    }
+    /** OBS record card. The bar is the design's recorder strip: a blinking dot
+     * with a steady REC beside it on the left, the key on the right. */
+    show_obsrec(o) {
+      const fb = this.fb;
+      const f = this.font;
+      this.clear();
+      fb.rect(0, 0, this.W, BAR_H);
+      if (o.rec) {
+        if (o.blink) fb.rect(3, 3, 4, 4, 0);
+        this._txt(upper(tr("rec_t")), 10, 1, 0, true);
+      } else {
+        this._txt(upper(tr("idle_t")), 3, 1, 0, true);
+      }
+      if (o.keyNo) this._txt(`${upper(tr("key_t"))} ${o.keyNo}`, this.W - 2, 1, 1, true);
+      this._hero(String(o.time || "00:00"), this.CX, 16, 2, 0.5, 1, 124);
+      if (o.scene) this._txt(f.fit(String(o.scene), 124), this.CX, 36);
+      if (o.hint) this._txt(f.fit(String(o.hint), 124), this.CX, 56);
+    }
+    /** OBS status screen: a state chip top right, the elapsed time, the scene as
+     * a pill and the mic level as segments. The design source ends with a
+     * CPU / DROP / FPS row; we do not have those numbers, so that row carries
+     * the action hint instead. */
+    show_obs(o) {
+      const fb = this.fb;
+      const f = this.font;
+      this.clear();
+      fb.rect(0, 0, this.W, BAR_H);
+      this._txt("OBS", 2, 1, 0, true);
+      const rec = !!o.rec;
+      const lab = rec ? upper(tr("rec_t")) : o.live ? upper(tr("live_t")) : upper(tr("idle_t"));
+      const dot = rec ? 5 : 0;
+      const bw = f.measure(lab) + 6 + dot;
+      const bx = this.W - 2 - bw;
+      fb.rfill(bx, 1, bw, 7, 0, 1);
+      if (rec && o.blink) fb.rect(bx + 3, 3, 3, 3);
+      this._txt(lab, bx + 3 + dot, 1, 0);
+      this._hero(String(o.time || "00:00"), this.CX, 12, 2, 0.5, 1, 124);
+      const sl = upper(tr("scene_t"));
+      const sx = Math.max(38, 2 + f.measure(sl) + 4);
+      this._txt(sl, 2, 30, 0);
+      const sn = f.fit(String(o.scene ?? ""), this.W - sx - 6);
+      fb.rfill(sx, 29, f.measure(sn) + 6, 9, 1);
+      this._txt(sn, sx + 3, 30, 0, true);
+      const ml = upper(tr("mic_t"));
+      const mx = Math.max(24, 2 + f.measure(ml) + 4);
+      this._txt(ml, 2, 42, 0);
+      fb.segbar(mx, 42, this.W - 6 - mx, 7, 14, Math.max(0, Math.trunc((o.mic ?? 0) * 14 / 100 + 0.5)));
+      fb.hline(0, 51, this.W);
+      if (o.hint) this._txt(f.fit(String(o.hint), 124), this.CX, 54);
+    }
+    /** The design's fault screen: a 2x warning icon with two lines beside it.
+     * Theirs sits high because an error code and a retry line follow; we have
+     * neither, so the block is centred between bar and bottom. */
+    _alert(title, l1, l2, art) {
+      this.clear();
+      this._bar9(title);
+      this.fb.icon2(6, 27, art ?? iconBytes("warning"));
+      this._txt(this.font.fit(String(l1 ?? ""), 96), 28, 29, 0);
+      if (l2) this._txt(this.font.fit(String(l2), 96), 28, 39, 0);
+    }
+    /** The menu module could not load. Keys and serial still work; show why
+     * instead of leaving the boot splash frozen, which reads as a brick. */
+    show_headless() {
+      this._alert("MKYADA", tr("menu_fail"), tr("menu_fail_hint"));
+    }
+    show_error(msg) {
+      const s = String(msg);
+      const head = this.font.fit(s, 96);
+      this._alert(upper(tr("err_title")), head, s.slice(head.length) || null);
+    }
+    /** Host mode with no key names yet: the app drives the menu but has not said
+     * what the keys are. */
+    show_host() {
+      this.clear();
+      this._bar9("MKYADA");
+      this._hero("HOST", this.CX, 22, 2);
+      this._txt(this.font.fit(tr("host"), 124), this.CX, 44);
+    }
+    /** The framebuffer as an ASCII picture — the format tests/golden/*.txt uses. */
+    rows() {
+      return this.fb.rows();
+    }
+  };
+
+  // app/src/lib/oled-draw.ts
+  function paintFb(c, fb) {
+    const img = c.createImageData(fb.W, fb.H);
+    for (let i = 0; i < fb.px.length; i++) {
+      const o = i * 4;
+      if (fb.px[i]) {
+        img.data[o] = 234;
+        img.data[o + 1] = 243;
+        img.data[o + 2] = 255;
+      }
+      img.data[o + 3] = 255;
+    }
+    c.putImageData(img, 0, 0);
+  }
+  function drawIconSwatch(c, name, scale, lit = "#eaf3ff") {
+    const data = iconBytes(name);
+    c.clearRect(0, 0, 8 * scale, 8 * scale);
+    if (!data) return;
+    c.fillStyle = lit;
+    for (let row = 0; row < 8; row++) {
+      for (let col = 0; col < 8; col++) {
+        if (data[row] & 128 >> col) c.fillRect(col * scale, row * scale, scale, scale);
+      }
+    }
+  }
+  return __toCommonJS(oled_bundle_exports);
+})();
+/* OLED_BUNDLE_END */
+
+/* Paketten sayfanın kullandığı adlar. Tek yerde durup aşağıdaki durum
+   makinesine eski adlarıyla görünsünler diye. */
+const { Fb, oledFont, OledScreens, iconBytes, ICON_NAMES, ICON_CATEGORIES,
+        setLang, getLang, tr, upper, fmtSpeed, fmtHero, fmtBytes,
+        LANGS, LANG_DESC, DEFAULT_LANG, SPEED_MIN_T, SPEED_MAX_T,
+        PBAR_Y, PBAR_H, PBAR_FOOT, DLG_Y, DLG_H } = MKOLED;
+
+const Oled = OledScreens;
+const ICON_CAT = ICON_CATEGORIES;
+/** ad -> paketlenmiş 8 bayt. Fb.icon'un beklediği biçim. */
+const ICONS = {};
+for (const n of ICON_NAMES) ICONS[n] = iconBytes(n);
+
+/** Eylem ailesi -> ikon ADI. Makronun kendi "icon" alanı yoksa ızgara buna
+    düşüyor. kind değerleri docs/actions.md ile aynı; firmware'de aynı tablo
+    ui.py'deki KIND_ICON. */
+const KIND_NAME = {
+  keystroke:"keyboard", combo:"keyboard", text:"text", recorded:"record",
+  media:"play", volume:"volume", scroll:"scroll-v", menu:"layers",
+  sequence:"sequence", launch:"rocket", command:"terminal", sound:"music",
+  mic:"mic", mic_level:"mic", webhook:"webhook", obs:"camera",
 };
-let _lang=DEFAULT_LANG;
-const setLang=l=>{ _lang=LANGS.includes(l)?l:DEFAULT_LANG; };
-const getLang=()=>_lang;
-const tr=k=>(STRINGS[_lang]&&STRINGS[_lang][k])||STRINGS[DEFAULT_LANG][k]||k;
+const KIND_ICON = {};
+for (const k in KIND_NAME) KIND_ICON[k] = iconBytes(KIND_NAME[k]);
 
-/* ═════════════════════════════════════════════════════════════════════
-   4. EKRAN — firmware/mkyada/oled.py : class Oled (birebir yerleşim)
-   ═════════════════════════════════════════════════════════════════════ */
-const BAR_H=11, BAR_Y=5, BOT_SEP=53, BOT_Y=58, HBAR_Y=41, HBAR_H=5;
-const HERO_Y=27, HERO_SCALE=3, ROW_H=10, MENU_TOP=15;
-
-const fmtSpeed=t=>(t/10).toFixed(1)+"x";
-const fmtHero=t=>{ const v=t/10; return v>=10? String(Math.trunc(v)) : v.toFixed(1); };
-
-class Oled{
-  constructor(){
-    this.W=128; this.H=64; this.CX=64;
-    this.BAND_H=10; this.MENU_VIS=4;
-    this.font=new Font(b64bytes(FONT_B64));
-    this.fb=new Fb(this.W,this.H,this.font);
-    this._bar=null;
-  }
-  splitName(name,cols){
-    cols=cols||3;
-    name=String(name||"").trim();
-    const f=this.font, cell=Math.trunc(this.W/cols)-2;
-    if(f.measure(name)<=cell) return [name,""];
-    const head=f.fit(name,cell), cut=head.lastIndexOf(" ");
-    if(cut>0) return [name.slice(0,cut), f.fit(name.slice(cut+1),cell)];
-    return [head, f.fit(name.slice(head.length),cell)];
-  }
-  // --- chrome ---
-  _topBar(title,hint){
-    const fb=this.fb;
-    fb.rect(0,0,this.W,BAR_H,1);
-    if(hint){
-      fb.text(title,2,BAR_Y,0.0,true);
-      fb.text(hint,this.W-2,BAR_Y,1.0,true);
-    } else fb.text(title,this.CX,BAR_Y,0.5,true);
-  }
-  _bottomBar(action,back){
-    if(back===undefined)back=true;
-    this.fb.hline(0,BOT_SEP,this.W);
-    if(back) this.fb.text(tr("back"),2,BOT_Y,0.0);
-    if(action) this.fb.text(action,this.W-2,BOT_Y,1.0);
-  }
-  _hbar(frac){
-    const bx=8, bw=this.W-16;
-    this.fb.hline(bx,HBAR_Y+(HBAR_H>>1),bw);
-    this.fb.rect(bx,HBAR_Y,Math.trunc(frac*bw),HBAR_H,1);
-  }
-  _dot(cx,cy,big){
-    if(big){ this.fb.rect(cx-1,cy-2,3,5,1); this.fb.rect(cx-2,cy-1,5,3,1); }
-    else this.fb.rect(cx,cy,1,1,1);
-  }
-  _begin(){ this.fb.clear(); }
-
-  // --- ekranlar ---
-  show_boot(){
-    this._begin();
-    this.fb.big("MKYADA",this.CX,24,2);
-    this.fb.text(tr("loading"),this.CX,56);
-    const bw=this.W-24;
-    this._bar=[Math.trunc((this.W-bw)/2),42,bw,5];
-    this.fb.rect(this._bar[0],this._bar[1],bw,5,0);
-  }
-  boot_progress(frac){
-    if(!this._bar)return;
-    const [x,y,w,h]=this._bar;
-    this.fb.rect(x,y,Math.trunc(Math.min(1,Math.max(0,frac))*w),h,1);
-  }
-  show_update(frac,restarting){
-    this._begin();
-    this.fb.big("MKYADA",this.CX,13,2);
-    if(restarting) this.fb.text(tr("restarting"),this.CX,33);
-    else{ this.fb.text(tr("updating"),this.CX,29); this.fb.text(tr("updating2"),this.CX,40); }
-    const bw=this.W-24, x0=Math.trunc((this.W-bw)/2);
-    this.fb.rect(x0,50,Math.trunc(Math.min(1,Math.max(0,frac))*bw),5,1);
-    this.fb.text(Math.trunc(frac*100)+"%",this.CX,59);
-  }
-  show_home(pos,layerCount,layerNames){
-    this._begin();
-    const n=layerCount+1;
-    if(pos<layerCount) this.fb.big(layerNames[pos].toUpperCase(),this.CX,26,5);
-    else this.fb.big(tr("settings"),this.CX,26,2);
-    const gap=n<=8?14:12, x0=this.CX-Math.trunc((n-1)*gap/2);
-    for(let i=0;i<n;i++) this._dot(x0+i*gap,54,i===pos);
-  }
-  show_grid(labels,active,invert,band){
-    if(invert===undefined)invert=true;
-    this._begin();
-    const banded=!!band, top=banded?this.BAND_H:0;
-    const cw=Math.trunc(this.W/3), ch=Math.trunc((this.H-top)/2);
-    this.fb.vline(cw,top,this.H-top);
-    this.fb.vline(2*cw,top,this.H-top);
-    this.fb.hline(0,top+ch,this.W);
-    if(banded) this._paintBand(band);
-    for(let k=0;k<6;k++){
-      const pair=labels[k]||["",""];
-      const t1=pair[0]||"", t2=pair[1]||"";
-      const on=(k===active&&invert);
-      const col=k%3, row=Math.trunc(k/3);
-      const x0=col*cw+(col?1:0);
-      const x1=(col===2)?this.W:(col+1)*cw;
-      const y0=top+row*ch+(row?1:0);
-      const y1=row?this.H:top+ch;
-      this.fb.rect(x0,y0,x1-x0,y1-y0,on?1:0);
-      const cx=Math.trunc((x0+x1)/2), cy=Math.trunc((y0+y1)/2);
-      if(t2){ this.fb.text(t1,cx,cy-4,0.5,on); this.fb.text(t2,cx,cy+4,0.5,on); }
-      else this.fb.text(t1,cx,cy,0.5,on);
-    }
-  }
-  _paintBand(band){
-    const b=String(band||"").slice(0,24);
-    this.fb.rect(0,0,this.W,this.BAND_H,1);
-    this.fb.text(b,this.CX,this.BAND_H>>1,0.5,true);
-  }
-  _valueScreen(title,hero,frac,action){
-    this._begin();
-    this._topBar(title);
-    this._bottomBar(action);
-    this.fb.big(hero,this.CX,HERO_Y,HERO_SCALE);
-    this._hbar(frac);
-  }
-  show_speed(layerName,keyNo,t){
-    this._valueScreen(layerName.toUpperCase()+" > K"+keyNo+"  "+tr("speed"),
-                      fmtHero(t),(t-1)/99.0,tr("save"));
-  }
-  show_card(title,big,line,hint){
-    this._begin();
-    this._topBar(title);
-    this.fb.big(this.font.fit(String(big||""),this.W>>1),this.CX,27,2);
-    if(line) this.fb.text(line,this.CX,44);
-    this._bottomBar(hint);
-  }
-  show_adjust(title,hero,frac,action){
-    this._valueScreen(title,hero,Math.max(0,Math.min(1,frac)),action);
-  }
-  show_saved(layerName,keyNo,t){
-    this._begin();
-    this._topBar(layerName.toUpperCase()+" > K"+keyNo);
-    this.fb.big("✓",this.CX,30,3);
-    this.fb.big(fmtSpeed(t),this.CX,54,2);
-  }
-  show_toast(title,line1,line2){
-    this._begin();
-    this._topBar(title);
-    this.fb.text(line1,this.CX,30);
-    if(line2) this.fb.text(line2,this.CX,42);
-  }
-  show_about(rows){
-    this._begin();
-    this._topBar(tr("about_title"));
-    let y=19;
-    for(const [l,v] of rows){
-      this.fb.text(l+":",4,y,0.0);
-      this.fb.text(v,this.W-4,y,1.0);
-      y+=11;
-    }
-    this._bottomBar(null);
-  }
-  show_menu(title,items,sel,marked,action,hold){
-    this._begin();
-    const n=items.length;
-    const top=(sel>=this.MENU_VIS)? sel-this.MENU_VIS+1 : 0;
-    const rw=(n>this.MENU_VIS)? this.W-8 : this.W;
-    const act=action||tr("select");
-    this._topBar(title,hold);
-    if(top>0) this.fb.tri(this.W-7,BAR_H+2,7,4,false);
-    if(top+this.MENU_VIS<n) this.fb.tri(this.W-7,BOT_SEP-6,7,4,true);
-    this._bottomBar(act);
-    for(let row=0;row<Math.min(this.MENU_VIS,n);row++){
-      const i=top+row;
-      const text=(marked===null||marked===undefined)? items[i]
-        : ((i===marked?">":" ")+" "+items[i]);
-      const s=this.font.fit(String(text),rw-4), on=(i===sel);
-      const y=MENU_TOP+row*ROW_H;
-      this.fb.rect(0,y-4,rw,ROW_H,on?1:0);
-      this.fb.text(s,this.CX,y,0.5,on);
-    }
-  }
-  show_timeout(sec,lo,hi){
-    this._begin();
-    this._topBar(tr("auto_return_title"));
-    this.fb.big(sec+"s",this.CX,27,3);
-    this._hbar((sec-lo)/(hi-lo));
-    this._bottomBar(tr("save"));
-  }
-  show_host(){
-    this._begin();
-    this._topBar("MKYADA");
-    this.fb.text(tr("host"),this.CX,34);
-  }
-  show_headless(){
-    this._begin();
-    this._topBar("MKYADA");
-    this.fb.text(tr("menu_fail"),this.CX,30);
-    this.fb.text(tr("menu_fail_hint"),this.CX,44);
-  }
-  show_error(msg){
-    this._begin();
-    this._topBar("MKYADA");
-    this.fb.text(tr("err_title"),this.CX,26);
-    msg=String(msg);
-    const head=this.font.fit(msg,this.W-4);
-    this.fb.text(head,this.CX,40);
-    const rest=msg.slice(head.length);
-    if(rest) this.fb.text(this.font.fit(rest,this.W-4),this.CX,50);
-  }
-}
+// Boşta kalma zaman aşımı açık mı? Yalnızca simülatör kolaylığı: kapalıyken
+// UI.idle() sonsuz döner, hiçbir ekran kendiliğinden ızgaraya dönmez.
+// Varsayılan kapalı: menü üzerinde çalışırken ekran altından kaymasın.
+let AUTO_RETURN = false;
 
 /* ═════════════════════════════════════════════════════════════════════
    5. CİHAZ DURUMU — models.py / app.py karşılıkları
@@ -569,13 +1814,18 @@ const UI_SLOTS=["enc-cw","enc-ccw","btn-back","btn-confirm","btn-psh"];
 const KEY_PINS=["GP29","GP28","GP27","GP26","GP15","GP14"];   // vision6 pin_order
 const NAV_PINS=["GP4","GP5","GP6"];                            // PSH, BACK, CONFIRM
 const ENC_PINS=["GP2","GP3"];
-const FW_VERSION="0.22.0";
+const FW_VERSION="0.24.0";
 const UID="E66138935F63";
 
 const CFG={
-  model:"vision6", key_count:6, layer_count:3,
+  model:"vision6", key_count:6, layer_count:4,
   show_layer:true, show_profile:true, timeout:10, lang:"en",
-  layer_names:["Main","Stream","Tools"],
+  // Teker ızgarada katmanlar arasında da geziyor mu? Açıkken 6. kutucuktan
+  // sonra sıradaki katmanın ilkine sarıyor, altta nokta satırı çıkıyor.
+  wheel_layers:false,
+  // Dördüncüsü bilerek adsız: adsız katman hem katman seçicide hem ızgara
+  // bandında nasıl görünüyor, yan yana denenebilsin.
+  layer_names:["Main","Stream","Tools",null],
   usb_drive:false,           // açıkken CIRCUITPY salt okunur -> kayıt reddedilir
 };
 
@@ -598,7 +1848,11 @@ const MACROS={
      {name:"Build",kind:"command"},
      {name:"Discord",kind:"launch"},
      {name:"Lights",kind:"webhook"},
-     {name:"Home",kind:"menu",sub:"home"}]
+     {name:"Home",kind:"menu",sub:"home"}],
+  // Adsız katman: yalnız iki tuşu dolu, kalanı boş — yeni açılmış bir
+  // katmanın gerçekte göründüğü hâl.
+  3:[{name:"Screenshot",kind:"combo"},
+     {name:"Focus",kind:"keystroke"}]
 };
 // Katman C'nin özel teker atamaları (uygulamadan yazılır) — açılıp kapatılabilir
 const SLOT_FILES={2:{"enc-cw":{name:"Next",kind:"media",sub:"next_track"},
@@ -633,12 +1887,16 @@ const APP_HOST={
         items:APP.scenes.map((n,i)=>[String(i),n,i===APP.scene]),
         sel:APP.scene, action:"switch", hold:true});
     } else if(k==="obs"&&s==="record"){
-      const t=APP.rec? tcode((nowS()-APP.recT)) : "00:00";
-      UI.on_menu({key:APP.ctxKey,mtype:"card",title:"OBS RECORD",
-        big:APP.rec?"REC":"IDLE", l1:t, hint:APP.rec?"stop":"start"});
+      // mtype:"obs" — protokolde henüz yok, taşınırken v11'e eklenecek.
+      UI.on_menu({key:APP.ctxKey,mtype:"obs",obsview:"rec",title:"OBS",
+        rec:APP.rec, live:APP.live, mic:APP.micgain,
+        time:APP.rec? tcode(nowS()-APP.recT) : "00:00",
+        scene:APP.scenes[APP.scene], hint:APP.rec?"stop":"start"});
     } else if(k==="obs"){
-      UI.on_menu({key:APP.ctxKey,mtype:"card",title:"OBS",
-        big:APP.live?"LIVE":"OFF", l1:"stream", hint:APP.live?"stop":"start"});
+      UI.on_menu({key:APP.ctxKey,mtype:"obs",obsview:"main",title:"OBS",
+        rec:APP.rec, live:APP.live, mic:APP.micgain,
+        time:APP.rec? tcode(nowS()-APP.recT) : "00:00",
+        scene:APP.scenes[APP.scene], hint:APP.live?"stop":"start"});
     } else if(k==="mic"){
       UI.on_menu({key:APP.ctxKey,mtype:"list",title:tr("mic_t"),
         items:[["toggle","Toggle",APP.ctxSub==="toggle"],
@@ -699,7 +1957,7 @@ const APP_HOST={
 /* ═════════════════════════════════════════════════════════════════════
    7. MENÜ DURUM MAKİNESİ — firmware/mkyada/ui.py : class Ui
    ═════════════════════════════════════════════════════════════════════ */
-const SPEED_MIN_T=1, SPEED_MAX_T=100, SPEED_DEF_T=10;
+const SPEED_DEF_T=10;   // SPEED_MIN_T / SPEED_MAX_T pakete taşındı
 const TMO_MIN=3, TMO_MAX=60, DEFAULT_TIMEOUT=10;
 const K_PSH=0, K_BACK=1, K_CONFIRM=2;
 const NAV_SLOT=["psh","back","confirm"];
@@ -708,7 +1966,8 @@ const ESC_HOLD_S=1.2, TEST_EXIT_HOLD_S=3.0, TEST_IDLE_MIN_S=15, CTX_WAIT_S=1.5;
 const MENU_HOLD_S=0.4, SAVED_DWELL_S=1.1, TOAST_DWELL_S=1.6;
 
 const S_HOME=0,S_SELECT=1,S_SPEED=2,S_SAVED=3,S_SET_MENU=4,S_TIMEOUT=5,
-      S_PLAYING=6,S_HOST=7,S_TOAST=8,S_LANG=9,S_TEST=10,S_ABOUT=11,S_CTX=12;
+      S_PLAYING=6,S_HOST=7,S_TOAST=8,S_LANG=9,S_TEST=10,S_ABOUT=11,S_CTX=12,
+      S_PIXELS=13;
 const S_NAME=["home","grid","speed","saved","settings","timeout","playing",
               "host","toast","language","keytest","about","wheel"];
 
@@ -721,7 +1980,7 @@ const MENU_LABEL={layer_next:"Next layer",layer_prev:"Prev layer",home:"Home",
   grid:"Grid",settings:"Settings"};
 
 const SET_TMO=0,SET_LANG=1,SET_BAND_LAYER=2,SET_BAND_PROFILE=3,
-      SET_KEYTEST=4,SET_ABOUT=5,SET_REBOOT=6;
+      SET_WHEEL_LAYERS=4,SET_KEYTEST=5,SET_PIXTEST=6,SET_ABOUT=7,SET_REBOOT=8;
 
 const clamp=(v,lo,hi)=>v<lo?lo:(v>hi?hi:v);
 const nowS=()=>performance.now()/1000;
@@ -733,6 +1992,7 @@ const DEV={
   layer:0, mode:"idle", updating:false, test_mode:false, test_local:false,
   bootT:0, booting:true, playingUntil:0, playPath:null, errorMsg:null,
   headless:false, updateT:0, updateRestartT:0,
+  updateTotal:62914,   // update_begin "bytes" — bir firmware paketi kadar
 };
 
 const OLED=new Oled();
@@ -747,13 +2007,21 @@ const UI={
   playing_cell:null, ctx:null, _blink_at:0, _blink_on:true,
   sysvol:null, _injecting:0,
 
+  /** Etkin boşta kalma süresi. idle_secs ayarın kendisi (ayarlar listesinde
+      ve otomatik dönüş ekranında görünen değer); bu ise zaman aşımı
+      karşılaştırmalarının okuduğu değer. Sayfadaki OTOMATİK DÖNÜŞ düğmesi
+      kapalıyken sonsuz döner: ekranları yan yana karşılaştırırken menü
+      kendiliğinden ızgaraya dönmesin diye. Cihazda böyle bir kapatma yok —
+      yalnızca simülatör kolaylığı, firmware'e taşınmaz. */
+  idle(){ return AUTO_RETURN ? this.idle_secs : Infinity; },
+
   /* --- etiket / hız / slot okuma (dosya başlığı yerine tabloları okur) --- */
   labels(l){
     const ks=MACROS[l]||[];
     const out=[];
     for(let k=0;k<6;k++){
       const m=ks[k];
-      out.push(OLED.splitName(m&&m.name? m.name : ("K"+(k+1))));
+      out.push(OLED.split_name(m&&m.name? m.name : ("K"+(k+1))));
     }
     return out;
   },
@@ -788,22 +2056,32 @@ const UI={
     return m? [m.kind||null, m.sub||null] : [null,null];
   },
   _set_items(){
-    return [tr("auto_return"), tr("language"),
-      tr("show_layer")+": "+(CFG.show_layer?tr("on"):tr("off")),
-      tr("show_profile")+": "+(CFG.show_profile?tr("on"):tr("off")),
-      tr("key_test"), tr("about"), tr("restart")];
+    // Tanımlayıcı listesi: yeni tasarım değeri/anahtarı ayrı çizdiği için durum
+    // artık etikete gömülü değil; show_settings değeri ayrı sütunda çiziyor.
+    return [
+      {label:tr("auto_return"), kind:"text",   value:this.idle_secs+"s"},
+      {label:tr("language"),    kind:"text",   value:LANG_DESC[LANGS.indexOf(getLang())]},
+      {label:tr("show_layer"),  kind:"toggle", value:CFG.show_layer},
+      {label:tr("show_profile"),kind:"toggle", value:CFG.show_profile},
+      {label:tr("wheel_layers"),kind:"toggle", value:CFG.wheel_layers},
+      {label:tr("key_test"),    kind:"none"},
+      {label:tr("pixel_test"),  kind:"none"},
+      {label:tr("about"),       kind:"none"},
+      {label:tr("restart"),     kind:"none"},
+    ];
   },
 
   /* --- App kancaları --- */
   start(){
-    OLED.boot_progress(1.0);
+    OLED.show_boot(1.0);        // açılış çubuğu dolu — hemen ızgara geliyor
     this.home_pos=DEV.layer; this.sel_key=0; this.sel_mode=false;
     this.state=S_SELECT; this.activity_at=nowS();
     this._draw_grid();
   },
   on_label(){
     if(this.state===S_HOST) this._draw_host();
-    else if(this.state===S_SELECT && (CFG.show_layer||CFG.show_profile)) this._draw_grid();
+    // Band metni kapalı olsa bile kayıt/yayın göstergesi bandı çizdiriyor.
+    else if(this.state===S_SELECT) this._draw_grid();
   },
   on_layer(){
     if(this.state===S_HOME||this.state===S_SELECT){
@@ -821,7 +2099,8 @@ const UI={
     if(trigger===null||this.state===S_HOST) return;
     this.playing_cell=trigger;
     this.state=S_PLAYING;
-    OLED.show_grid(this.labels(DEV.layer),this.playing_cell,true,this._band());
+    OLED.show_grid(this.labels(DEV.layer),this.playing_cell,true,this._band(),
+              this._grid_icons(DEV.layer));
   },
   on_play_done(){
     if(this.state===S_PLAYING){
@@ -846,25 +2125,25 @@ const UI={
   },
 
   /* --- band --- */
+  /** Bandın metin kısmı. Kayıt/yayın göstergeleri artık metne gömülü değil
+      ("(R)(L)"); bandın sağ ucunda demonun SC.home'undaki gibi grafik olarak
+      çiziliyor — bkz. _band_state / Oled._grid_bar. */
   _band(){
     const label=CFG.show_profile? (APP.connected? APP.label : null) : null;
-    const marks=this._band_marks();
     if(CFG.show_layer){
       const idx=DEV.layer, letter=LAYER_NAMES[idx].toUpperCase();
       const nick=CFG.layer_names&&CFG.layer_names[idx];
-      if(label) return "("+letter+") "+marks+label;
-      if(nick)  return "("+letter+") "+marks+nick;
-      return marks+tr("layer_band").replace("%s",letter);
+      if(label) return "("+letter+") "+label;
+      if(nick)  return "("+letter+") "+nick;
+      return tr("layer_band").replace("%s",letter);
     }
-    return label? (marks+label) : label;
+    return label;
   },
-  _band_marks(){
-    let m="";
-    if(APP.connected&&APP.rec)  m+="(R)";
-    if(APP.connected&&APP.live) m+="(L)";
-    if(!m) return "";
-    if(!this._blink_on) m=" ".repeat(m.length);
-    return m+" ";
+  /** Bandın sağ ucundaki göstergeler: yanıp sönen kayıt noktası ve YAYIN
+      rozeti — bandın sağ ucuna grafik olarak çiziliyor (Oled._grid_bar). */
+  _band_state(){
+    return {rec:APP.connected&&APP.rec, live:APP.connected&&APP.live,
+            blink:this._blink_on};
   },
 
   /* --- ızgara --- */
@@ -878,22 +2157,48 @@ const UI={
     }
     return out;
   },
+  // Yeni tasarimda her hucre eylem ailesinin ikonunu tasiyor, o yuzden
+  // kind listesi de ciziciye gidiyor.
+  /** Izgara ikonları. Makro dosyasındaki "icon" alanı kazanır (kullanıcı
+      uygulamadan seçiyor); yoksa eylem ailesinin varsayılanına düşülüyor.
+      Bilinmeyen ad da varsayılana düşer — ileride ikon ailesinden bir ad
+      kalkarsa eski makro dosyaları boş kutucuk göstermesin. */
+  _grid_icons(l){
+    const ks=MACROS[l]||[];
+    const out=[];
+    for(let k=0;k<6;k++){
+      const m=ks[k];
+      if(!m){ out.push(null); continue; }
+      out.push((m.icon&&ICONS[m.icon]) || KIND_ICON[m.kind] || null);
+    }
+    return out;
+  },
   _draw_grid(){
     const l=DEV.layer;
     const invert=this.sel_mode||!this._enc_custom();
-    OLED.show_grid(this._grid_labels(l),this.sel_key,invert,this._band());
+    OLED.show_grid(this._grid_labels(l),this.sel_key,invert,this._band(),this._grid_icons(l),
+              this._grid_page(),this._band_state());
+  },
+  /** Teker geçişi açıkken ızgara sayfalı: her katman bir sayfa. Bar'ın
+      sağındaki konum ve alttaki nokta satırı bundan geliyor; kapalıyken
+      null dönüyor ve kutucuklar nokta satırının yerini kaplıyor. */
+  _grid_page(){
+    return CFG.wheel_layers? {sel:DEV.layer,n:CFG.layer_count} : null;
   },
   _enc_custom(){ const s=this.slots(DEV.layer); return !!(s["enc-cw"]||s["enc-ccw"]); },
   _grid_custom(){ const s=this.slots(DEV.layer); return UI_SLOTS.some(k=>!!s[k]); },
   _enter_grid(){ this.sel_mode=false; this.state=S_SELECT; this._draw_grid(); },
   _draw_home(){
-    OLED.show_home(this.home_pos,CFG.layer_count,LAYER_NAMES.slice(0,CFG.layer_count));
+    const p=this.home_pos, names=CFG.layer_names;
+    OLED.show_home(p,CFG.layer_count,LAYER_NAMES.slice(0,CFG.layer_count),
+              (names&&names[p])||null, p===DEV.layer);
   },
   _draw_host(){
     if(!APP.keys){ OLED.show_host(); return; }
     const labels=[];
-    for(let i=0;i<6;i++) labels.push(OLED.splitName(APP.keys[i]||("K"+(i+1))));
-    OLED.show_grid(labels,null,false,this._band());
+    for(let i=0;i<6;i++) labels.push(OLED.split_name(APP.keys[i]||("K"+(i+1))));
+    // Uygulamanin gonderdigi adlarin eylem ailesi yok -> ikonsuz, iki satirli
+    OLED.show_grid(labels,null,false,this._band(),null);
   },
   _cell_name(l,k0){
     const p=this.labels(l)[k0];
@@ -1035,14 +2340,20 @@ const UI={
       hint:msg.hint, action:msg.action, hold:msg.hold, items,
       sel:clamp(sel,0,Math.max(0,items.length-1)),
       value:msg.value, min:msg.min||0, max:msg.max||100,
-      step:msg.step||1, unit:String(msg.unit||"")};
-    if(prev===null) this.activity_at=nowS();
+      step:msg.step||1, unit:String(msg.unit||""),
+      // mtype:"obs" alanları
+      obsview:msg.obsview||"main", rec:!!msg.rec, live:!!msg.live,
+      mic:msg.mic||0, time:msg.time||"", scene:msg.scene||""};
+    // Menü ilk açıldığında kayıt noktası yanık başlasın: _blink_at sıfırda
+    // kalırsa ilk tick hemen söndürüyor.
+    if(prev===null){ this.activity_at=nowS(); this._blink_at=nowS(); this._blink_on=true; }
     this._draw_host_menu();
   },
   on_menu_result(msg){
     if(this.state!==S_CTX) return;
     const toast=msg.toast;
-    if(Array.isArray(toast)&&toast.length) this._toast(String(toast[0]),String(toast[1]||""),"");
+    // uygulama bir eylemi tamamladi -> onay ikonu
+    if(Array.isArray(toast)&&toast.length) this._toast(String(toast[0]),String(toast[1]||""),"",true);
     else this._enter_grid();
   },
   _draw_host_menu(){
@@ -1056,6 +2367,10 @@ const UI={
     } else if(mt==="slider"){
       const v=c.value||0, span=c.max-c.min;
       OLED.show_adjust(c.title, v+c.unit, span? (v-c.min)/span : 0, c.action||tr("save"));
+    } else if(mt==="obs"){
+      const o={rec:c.rec,live:c.live,mic:c.mic,time:c.time,scene:c.scene,
+               hint:c.hint,keyNo:c.key,blink:this._blink_on};
+      if(c.obsview==="rec") OLED.show_obsrec(o); else OLED.show_obs(o);
     } else {
       OLED.show_card(c.title,String(c.big||"").slice(0,12),c.l1||null,c.hint);
     }
@@ -1085,14 +2400,14 @@ const UI={
       if(d) log("consumer "+(d>0?c.up:c.down));
       if((press===K_PSH||press===K_CONFIRM)&&c.conf) log("consumer "+c.conf);
     }
-    if(press===null&&!d&&now-this.activity_at>this.idle_secs) this._enter_grid();
+    if(press===null&&!d&&now-this.activity_at>this.idle()) this._enter_grid();
   },
   _optlist_press(hold){
     const c=this.ctx, opt=c.opts[c.sel];
     if(hold){
       const res=(c.kind==="media")? this._write_media_macro(c.path,opt)
               :(c.kind==="menu")?  this._write_menu_macro(c.path,opt) : "error";
-      if(res==="ok"){ c.assigned=c.sel; this._toast(c.title,tr("assigned"),this._opt_label(c.kind,opt)); }
+      if(res==="ok"){ c.assigned=c.sel; this._toast(c.title,tr("assigned"),this._opt_label(c.kind,opt),true); }
       else if(res==="readonly") this._toast(c.title,tr("usb_on"),tr("read_only"));
       else this._toast(c.title,tr("save_fail"),"");
     } else if(c.kind==="media") log("consumer "+opt);
@@ -1116,11 +2431,16 @@ const UI={
       else if(d) APP_HOST.onMenuEv({ev:"value",v:d>0?1:-1});
       else if(press===K_BACK) this._close_host_menu();
     }
-    if(press===null&&!d&&now-this.activity_at>this.idle_secs) this._close_host_menu();
+    // OBS ekranındaki kayıt noktası yanıp sönüyor: ızgara bandındaki (R)/(L)
+    // ile aynı 0.6 sn'lik ritim.
+    if(mt==="obs"&&c.rec&&!d&&press===null&&now-this._blink_at>0.6){
+      this._blink_at=now; this._blink_on=!this._blink_on; this._draw_host_menu();
+    }
+    if(press===null&&!d&&now-this.activity_at>this.idle()) this._close_host_menu();
   },
-  _toast(title,line1,line2){
+  _toast(title,line1,line2,ok){
     this.state=S_TOAST; this.toast_at=nowS();
-    OLED.show_toast(title,line1,line2||"");
+    OLED.show_toast(title,line1,line2||"",!!ok);
   },
 
   /* --- özel slot atamaları --- */
@@ -1192,12 +2512,15 @@ const UI={
       case S_SELECT: this._st_select(now,d,press); break;
       case S_SPEED: this._st_speed(now,d,press); break;
       case S_CTX: this._st_ctx(now,d,press); break;
-      case S_SAVED: if(now-this.saved_at>SAVED_DWELL_S) this._enter_grid(); break;
-      case S_TOAST: if(press!==null||now-this.toast_at>TOAST_DWELL_S) this._enter_grid(); break;
+      // İki perdeli diyalog kendi bekleme süresini kullanıyor, idle()'ı değil;
+      // OTOMATİK DÖNÜŞ kapalıyken onlar da kapanmasın (toast tuşla kapanır).
+      case S_SAVED: if(AUTO_RETURN&&now-this.saved_at>SAVED_DWELL_S) this._enter_grid(); break;
+      case S_TOAST: if(press!==null||(AUTO_RETURN&&now-this.toast_at>TOAST_DWELL_S)) this._enter_grid(); break;
       case S_SET_MENU: this._st_set_menu(now,d,press); break;
       case S_TIMEOUT: this._st_timeout(now,d,press); break;
       case S_LANG: this._st_lang(now,d,press); break;
       case S_ABOUT: this._st_about(now,d,press); break;
+      case S_PIXELS: this._st_pixels(now,d,press); break;
     }
   },
   // Basılı tutma çözümü (firmware'de _resolve_hold / _resolve_nav'ın karşılığı)
@@ -1238,41 +2561,58 @@ const UI={
   },
 
   /* --- tuş testi (Ayarlar > Tuş testi) --- */
+  // Yeni tasarim alti tusu birden sayacla gosterdigi icin sayaclar burada
+  // tutuluyor; cihazin bugunku ekrani yalniz son basilani gosteriyor.
+  test:{cnt:[0,0,0,0,0,0],enc:0,nav:[0,0,0],lastKey:null,label:"",pin:""},
+  _draw_keytest(){ OLED.show_keytest({cnt:this.test.cnt, nav:this.test.nav,
+                                    enc:this.test.enc, last:this.test.lastKey}); },
   _enter_keytest(now){
     this.state=S_TEST; this.test_ui="self";
     DEV.test_mode=true; DEV.test_local=true;
     this._psh_down_at=null; this.activity_at=now;
-    OLED.show_toast(tr("keys_test"),tr("test_press"),tr("hold_exit"));
+    this.test={cnt:[0,0,0,0,0,0],enc:0,nav:[0,0,0],lastKey:null,
+               label:tr("test_press"),pin:""};
+    this._draw_keytest();
   },
   _leave_keytest(now,toMenu){
     DEV.test_mode=false; DEV.test_local=false; this.test_ui="wiring";
     this._psh_down_at=null;
     if(toMenu){
       this.state=S_SET_MENU; this.activity_at=now;
-      OLED.show_menu(tr("settings"),this._set_items(),this.set_menu_sel,null,null,null);
+      OLED.show_settings(tr("settings"),this._set_items(),this.set_menu_sel);
     } else this._enter_grid();
   },
-  _show_test_hit(label,pin){ OLED.show_card(tr("keys_test"),label,pin,tr("hold_exit")); },
   _test_input(now,d,press){
     this.activity_at=now;
-    if(d) this._show_test_hit(d>0?"CW":"CCW",ENC_PINS[0]+"/"+ENC_PINS[1]);
-    if(press!==null) this._show_test_hit(NAV_SLOT[press].toUpperCase(),NAV_PINS[press]);
+    const t=this.test;
+    if(d){
+      t.enc+=d; t.lastKey=null;
+      t.label=d>0?"CW":"CCW"; t.pin=ENC_PINS[0]+"/"+ENC_PINS[1];
+    }
+    if(press!==null){
+      t.nav[press]++; t.lastKey=null;
+      t.label=NAV_SLOT[press].toUpperCase(); t.pin=NAV_PINS[press];
+    }
+    this._draw_keytest();
   },
   on_test_key(keyNo,pin){
     if(this.state!==S_TEST) return;
     this.activity_at=nowS();
-    this._show_test_hit("K"+keyNo,pin);
+    const t=this.test;
+    t.cnt[keyNo-1]++; t.lastKey=keyNo-1;
+    t.label="K"+keyNo; t.pin=pin;
+    this._draw_keytest();
   },
   _tick_test(now){
     if(this.test_ui!=="self") return;
-    if(now-this.activity_at>Math.max(this.idle_secs,TEST_IDLE_MIN_S))
+    if(now-this.activity_at>Math.max(this.idle(),TEST_IDLE_MIN_S))
       this._leave_keytest(now,false);
   },
 
   /* --- ekran handler'ları --- */
   _st_home(now,d,press){
     this._custom_input(now,d,press,this.ctx_slots("home"),this._home_default.bind(this));
-    if(!d&&press===null&&now-this.activity_at>this.idle_secs) this._enter_grid();
+    if(!d&&press===null&&now-this.activity_at>this.idle()) this._enter_grid();
   },
   _home_default(now,d,press){
     const c=CFG.layer_count;
@@ -1287,23 +2627,36 @@ const UI={
   },
   _goto_settings(){
     this.set_menu_sel=0; this.state=S_SET_MENU; this.activity_at=nowS();
-    OLED.show_menu(tr("settings"),this._set_items(),0,null,null,null);
+    OLED.show_settings(tr("settings"),this._set_items(),0);
   },
   _jump_layer(step){ this._goto_layer((DEV.layer+step+CFG.layer_count)%CFG.layer_count); },
   _goto_layer(idx){ if(idx>=0&&idx<CFG.layer_count){ setLayer(idx); this._enter_grid(); } },
 
   _st_select(now,d,press){
     this._custom_input(now,d,press,this.slots(DEV.layer),this._select_default.bind(this));
-    if(!d&&press===null&&this.sel_mode&&now-this.activity_at>this.idle_secs){
+    if(!d&&press===null&&this.sel_mode&&now-this.activity_at>this.idle()){
       this.sel_mode=false; this._draw_grid();
     }
-    if(APP.connected&&(APP.rec||APP.live)&&(CFG.show_layer||CFG.show_profile)
-       &&!d&&press===null&&now-this._blink_at>0.6){
+    // Yalnız kayıt noktası yanıp sönüyor; YAYIN rozeti sabit duruyor.
+    // Bandın metni kapalı olsa da gösterge çizildiği için show_layer /
+    // show_profile koşulu artık aranmıyor.
+    if(APP.connected&&APP.rec&&!d&&press===null&&now-this._blink_at>0.6){
       this._blink_at=now; this._blink_on=!this._blink_on; this._draw_grid();
     }
   },
   _select_default(now,d,press){
-    if(d){ this.sel_key=clamp(this.sel_key+(d>0?1:-1),0,5); this._draw_grid(); }
+    if(d){
+      if(CFG.wheel_layers&&CFG.layer_count>1){
+        // Demonun sayfa sarması: 6. kutucuktan sonra sıradaki sayfanın
+        // ilkine geçiyor. Bizde sayfa = katman, yani teker aynı zamanda
+        // etkin katmanı değiştiriyor.
+        const total=CFG.layer_count*6;
+        const idx=((DEV.layer*6+this.sel_key)+(d>0?1:-1)+total)%total;
+        setLayer(Math.trunc(idx/6));    // on_layer() sel_key'i sıfırlıyor
+        this.sel_key=idx%6;
+      } else this.sel_key=clamp(this.sel_key+(d>0?1:-1),0,5);
+      this._draw_grid();
+    }
     if(press===K_PSH){
       if(this._grid_custom()) this._toggle_sel_mode();
       else this._enter_ctx();
@@ -1328,17 +2681,17 @@ const UI={
       else if(res==="readonly") this._toast(tr("speed").toUpperCase(),tr("usb_on"),tr("read_only"));
       else this._toast(tr("speed").toUpperCase(),tr("save_fail"),"");
     } else if(press===K_BACK) this._enter_grid();
-    else if(now-this.activity_at>this.idle_secs) this._enter_grid();
+    else if(now-this.activity_at>this.idle()) this._enter_grid();
   },
 
   _st_set_menu(now,d,press){
     this._custom_input(now,d,press,this.ctx_slots("menu"),this._set_menu_default.bind(this));
-    if(!d&&press===null&&now-this.activity_at>this.idle_secs) this._enter_grid();
+    if(!d&&press===null&&now-this.activity_at>this.idle()) this._enter_grid();
   },
   _set_menu_default(now,d,press){
     if(d){
       this.set_menu_sel=clamp(this.set_menu_sel+(d>0?1:-1),0,this._set_items().length-1);
-      OLED.show_menu(tr("settings"),this._set_items(),this.set_menu_sel,null,null,null);
+      OLED.show_settings(tr("settings"),this._set_items(),this.set_menu_sel);
     }
     if(press===K_PSH||press===K_CONFIRM){
       if(this.set_menu_sel===SET_TMO){
@@ -1347,35 +2700,57 @@ const UI={
       } else if(this.set_menu_sel===SET_LANG){
         this.lang_sel=LANGS.indexOf(getLang()); this.state=S_LANG;
         OLED.show_menu(tr("lang_title"),LANG_DESC,this.lang_sel,this.lang_sel,null,null);
-      } else if(this.set_menu_sel===SET_BAND_LAYER||this.set_menu_sel===SET_BAND_PROFILE){
-        const key=(this.set_menu_sel===SET_BAND_LAYER)?"show_layer":"show_profile";
+      } else if(this.set_menu_sel===SET_BAND_LAYER||this.set_menu_sel===SET_BAND_PROFILE
+                ||this.set_menu_sel===SET_WHEEL_LAYERS){
+        const key=this.set_menu_sel===SET_BAND_LAYER? "show_layer"
+                : this.set_menu_sel===SET_BAND_PROFILE? "show_profile" : "wheel_layers";
         const title=tr(key).toUpperCase();
         const upd={}; upd[key]=!CFG[key];
         const res=this.persist_cfg(upd);
-        if(res==="ok") OLED.show_menu(tr("settings"),this._set_items(),this.set_menu_sel,null,null,null);
+        if(res==="ok") OLED.show_settings(tr("settings"),this._set_items(),this.set_menu_sel);
         else if(res==="readonly") this._toast(title,tr("usb_on"),tr("read_only"));
         else this._toast(title,tr("save_fail"),"");
       } else if(this.set_menu_sel===SET_KEYTEST) this._enter_keytest(now);
+      else if(this.set_menu_sel===SET_PIXTEST){
+        // Ekranda okunacak hiçbir şey yok, o yüzden çıkış herhangi bir
+        // düğme. Açan basış hemen kapatmasın diye kuyruk boşaltılıyor.
+        this.state=S_PIXELS; this.activity_at=now;
+        this._drain_inputs(); OLED.show_pixels();
+      }
       else if(this.set_menu_sel===SET_ABOUT){
-        this.state=S_ABOUT; OLED.show_about(this._about_lines());
+        this.state=S_ABOUT; OLED.show_about(this._about_lines(),this._about_lines_v2());
       } else reboot();
     } else if(press===K_BACK){
       this.home_pos=CFG.layer_count; this.state=S_HOME; this._draw_home();
     }
   },
+  // Cihazın bugün gösterdiği üç satır (ui.py _about_lines ile aynı).
   _about_lines(){
     return [[tr("model"),CFG.model],[tr("firmware"),FW_VERSION],
             [tr("device_id"),UID.slice(0,12)]];
   },
+  // Yeni tasarımın beş satırı — ikisi de gerçek: MCU her iki modelde de
+  // RP2040, katman sayısı config.json'dan geliyor.
+  _about_lines_v2(){
+    return [[tr("model"),CFG.model],[tr("firmware"),FW_VERSION],
+            ["MCU","RP2040"],[tr("device_id"),UID.slice(0,12)],
+            [tr("layers_n"),String(CFG.layer_count)]];
+  },
   _st_about(now,d,press){
-    if(press!==null||now-this.activity_at>this.idle_secs){
-      this.state=S_SET_MENU;
-      OLED.show_menu(tr("settings"),this._set_items(),this.set_menu_sel,null,null,null);
-    }
+    if(press!==null||now-this.activity_at>this.idle()) this._back_to_settings();
+  },
+  /** Tüm panel yanık. Üstünde okunacak bir şey olmadığı için çıkış PSH / BACK /
+      CONFIRM'in üçü de; otomatik dönüş yine emniyet kemeri. */
+  _st_pixels(now,d,press){
+    if(press!==null||now-this.activity_at>this.idle()) this._back_to_settings();
+  },
+  _back_to_settings(){
+    this.state=S_SET_MENU;
+    OLED.show_settings(tr("settings"),this._set_items(),this.set_menu_sel);
   },
   _st_lang(now,d,press){
     this._custom_input(now,d,press,this.ctx_slots("menu"),this._lang_default.bind(this));
-    if(!d&&press===null&&now-this.activity_at>this.idle_secs) this._enter_grid();
+    if(!d&&press===null&&now-this.activity_at>this.idle()) this._enter_grid();
   },
   _lang_default(now,d,press){
     if(d){
@@ -1386,17 +2761,17 @@ const UI={
       const res=this.persist_lang(LANGS[this.lang_sel]);
       if(res==="ok"){
         this.state=S_SET_MENU;
-        OLED.show_menu(tr("settings"),this._set_items(),this.set_menu_sel,null,null,null);
+        OLED.show_settings(tr("settings"),this._set_items(),this.set_menu_sel);
       } else if(res==="readonly") this._toast(tr("language").toUpperCase(),tr("usb_on"),tr("read_only"));
       else this._toast(tr("language").toUpperCase(),tr("save_fail"),"");
     } else if(press===K_BACK){
       this.state=S_SET_MENU;
-      OLED.show_menu(tr("settings"),this._set_items(),this.set_menu_sel,null,null,null);
+      OLED.show_settings(tr("settings"),this._set_items(),this.set_menu_sel);
     }
   },
   _st_timeout(now,d,press){
     this._custom_input(now,d,press,this.ctx_slots("menu"),this._timeout_default.bind(this));
-    if(!d&&press===null&&now-this.activity_at>this.idle_secs) this._enter_grid();
+    if(!d&&press===null&&now-this.activity_at>this.idle()) this._enter_grid();
   },
   _timeout_default(now,d,press){
     if(d){
@@ -1409,10 +2784,10 @@ const UI={
       this.idle_secs=this.tmo_val;
       this.persist_cfg({timeout:this.idle_secs});
       this.state=S_SET_MENU;
-      OLED.show_menu(tr("settings"),this._set_items(),this.set_menu_sel,null,null,null);
+      OLED.show_settings(tr("settings"),this._set_items(),this.set_menu_sel);
     } else if(press===K_BACK){
       this.state=S_SET_MENU;
-      OLED.show_menu(tr("settings"),this._set_items(),this.set_menu_sel,null,null,null);
+      OLED.show_settings(tr("settings"),this._set_items(),this.set_menu_sel);
     }
   }
 };
@@ -1444,7 +2819,7 @@ function reboot(){
   DEV.booting=true; DEV.bootT=nowS(); DEV.updating=false;
   DEV.errorMsg=null; DEV.headless=false;
   UI.state=S_SELECT; UI.ctx=null; UI.sel_mode=false;
-  OLED.show_boot();
+  OLED.show_boot(0);
   log("reboot");
 }
 function startUpdate(){
@@ -1455,7 +2830,8 @@ function startUpdate(){
 function resetAll(){
   DEV.layer=0; DEV.mode="idle"; DEV.test_mode=false; DEV.test_local=false;
   DEV.playingUntil=0; DEV.errorMsg=null; DEV.headless=false;
-  Object.assign(CFG,{show_layer:true,show_profile:true,timeout:10,lang:"en",usb_drive:false});
+  Object.assign(CFG,{show_layer:true,show_profile:true,timeout:10,lang:"en",
+                     usb_drive:false,wheel_layers:false});
   setLang("en");
   MACROS[0]=[{name:"Copy",kind:"combo"},{name:"Paste",kind:"combo"},
     {name:"Play/Pause",kind:"media",sub:"play_pause"},{name:"Volume",kind:"volume"},
@@ -1466,8 +2842,10 @@ function resetAll(){
   MACROS[2]=[{name:"Zoom",kind:"scroll",sub:"v"},{name:"Signature",kind:"text",speed:14},
     {name:"Build",kind:"command"},{name:"Discord",kind:"launch"},
     {name:"Lights",kind:"webhook"},{name:"Home",kind:"menu",sub:"home"}];
+  MACROS[3]=[{name:"Screenshot",kind:"combo"},{name:"Focus",kind:"keystroke"}];
   Object.assign(APP,{connected:false,host_mode:false,rec:false,live:false,
-    sysvol:42,micgain:64,scene:0,label:"OBS · Scene 1",ctxKey:null});
+    sysvol:42,micgain:64,scene:0,label:"OBS · Scene 1",ctxKey:null,
+    keys:HOST_KEYS.slice()});
   SLOTS_ON=false;
   UI.idle_secs=10; UI.tmo_val=10; UI.sysvol=null; UI.sel_key=0; UI.set_menu_sel=0;
   LOGS=[];
@@ -1512,7 +2890,7 @@ function syncZoom(){
   });
 }
 function paint(){
-  const d=img.data, f=OLED.fb.bmp;
+  const d=img.data, f=OLED.fb.px;   // paketteki Fb'nin tampon alanı
   for(let i=0;i<8192;i++){
     const c=f[i]?INK:GLASS, o=i<<2;
     d[o]=c[0]; d[o+1]=c[1]; d[o+2]=c[2]; d[o+3]=255;
@@ -1552,16 +2930,19 @@ function tick(){
     else if(DEV.headless){ OLED.show_headless(); }
     else if(DEV.booting){
       const p=Math.min(1,(now-DEV.bootT)/1.6);
-      OLED.show_boot(); OLED.boot_progress(p);
+      OLED.show_boot(p);
       if(p>=1){ DEV.booting=false; UI.start(); }
     }
     else if(DEV.updating){
+      // update_begin yalnızca toplam baytı taşıyor (docs/serial-protocol.md),
+      // ekran da bu yüzden bayt sayacı gösteriyor — hedef sürüm değil.
+      const total=DEV.updateTotal;
       if(DEV.updateRestartT){
-        OLED.show_update(1,true);
+        OLED.show_update(1,true,total,total);
         if(now-DEV.updateRestartT>0.9) reboot();
       } else {
         const p=Math.min(1,(now-DEV.updateT)/3.5);
-        OLED.show_update(p,false);
+        OLED.show_update(p,false,Math.round(total*p),total);
         if(p>=1) DEV.updateRestartT=now;
       }
     }
@@ -1570,7 +2951,7 @@ function tick(){
       if(DEV.playingUntil&&now>=DEV.playingUntil){ DEV.playingUntil=0; UI.on_play_done(); }
       // canlı host menüsü (OBS REC sayacı) yeniden render edilir
       if(UI.state===S_CTX&&UI.ctx&&UI.ctx.mode==="host"&&APP.ctxKind==="obs"
-         &&APP.ctxSub==="record"&&APP.rec) APP_HOST.render();
+         &&APP.rec) APP_HOST.render();
       UI.tick(now);
     }
   }catch(e){ DEV.errorMsg=String(e&&e.message||e); }
@@ -1662,13 +3043,21 @@ const JUMPS=[
   ["grid","IZGARA (grid)"],["home","KATMAN SEÇİCİ (home)"],["settings","AYARLAR"],
   ["timeout","OTOMATİK DÖNÜŞ"],["language","DİL"],["about","HAKKINDA"],
   ["keytest","TUŞ TESTİ"],["speed","HIZ DÜZENLEYİCİ"],["saved","KAYDEDİLDİ"],
-  ["toast","BİLGİ (toast)"],["wheel_media","TEKER: MEDYA"],["wheel_menu","TEKER: KATMAN"],
-  ["wheel_key","TEKER: TUŞ KARTI"],["host","HOST MODU"],["boot","AÇILIŞ"],
+  ["toast","BİLGİ (toast)"],["wheel_media","TEKER: MEDYA LİSTESİ"],
+  ["wheel_menu","TEKER: KATMAN LİSTESİ"],["wheel_key","TEKER: TUŞ KARTI"],
+  ["wheel_scroll","TEKER: KAYDIRMA KARTI"],["wheel_fire","TEKER: DİZİ KARTI"],
+  ["wheel_vol","TEKER: SES KARTI (uygulamasız)"],["wheel_wait","TEKER: UYGULAMA BEKLENİYOR"],
+  ["host_list","HOST MENÜ: LİSTE"],["host_slider","HOST MENÜ: KAYDIRICI"],
+  ["host_card","HOST MENÜ: KART"],["obs_rec","HOST: OBS KAYIT"],
+  ["obs_main","HOST: OBS"],["host","HOST MODU (ızgara)"],
+  ["host_plain","HOST MODU (ad yokken)"],["boot","AÇILIŞ"],
   ["update","YAZILIM GÜNCELLEME"],["error","HATA EKRANI"],["headless","MENÜ YÜKLENEMEDİ"]
 ];
 const jump=document.getElementById("jump");
 for(const [v,t] of JUMPS){
-  const o=document.createElement("option"); o.value=v; o.textContent=t; jump.appendChild(o);
+  const o=document.createElement("option"); o.value=v;
+  o.textContent=t;
+  jump.appendChild(o);
 }
 jump.onchange=()=>{
   const v=jump.value; jump.value="";
@@ -1683,16 +3072,45 @@ jump.onchange=()=>{
       UI.tmo_val=UI.idle_secs; UI.state=S_TIMEOUT; OLED.show_timeout(UI.tmo_val,TMO_MIN,TMO_MAX); break;
     case "language": UI.lang_sel=LANGS.indexOf(getLang()); UI.state=S_LANG;
       OLED.show_menu(tr("lang_title"),LANG_DESC,UI.lang_sel,UI.lang_sel,null,null); break;
-    case "about": UI.state=S_ABOUT; UI.set_menu_sel=SET_ABOUT; OLED.show_about(UI._about_lines()); break;
+    case "about": UI.state=S_ABOUT; UI.set_menu_sel=SET_ABOUT;
+      OLED.show_about(UI._about_lines(),UI._about_lines_v2()); break;
     case "keytest": UI._enter_keytest(nowS()); break;
     case "speed": setLayer(0); UI.sel_key=4; UI._enter_speed(); break;
     case "saved": setLayer(0); UI.sel_key=4; UI.speed_t=15; UI.state=S_SAVED;
       UI.saved_at=nowS(); OLED.show_saved(LAYER_NAMES[0],5,15); break;
     case "toast": UI._toast(tr("wheel"),tr("app_needed"),tr("open_app")); break;
+    // Teker menüsünün her biçimi, onu açan gerçek tuşun üzerinden.
     case "wheel_media": setLayer(0); UI.sel_key=2; UI._enter_ctx(); break;
     case "wheel_menu": setLayer(0); UI.sel_key=5; UI._enter_ctx(); break;
     case "wheel_key": setLayer(0); UI.sel_key=0; UI._enter_ctx(); break;
+    case "wheel_scroll": setLayer(2); UI.sel_key=0; UI._enter_ctx(); break;
+    case "wheel_fire": setLayer(1); UI.sel_key=5; UI._enter_ctx(); break;
+    case "wheel_vol":  // uygulamasız ses tuşu -> yerel ayar kartı
+      if(APP.connected) toggleApp();
+      setLayer(0); UI.sel_key=3; UI._enter_ctx(); break;
+    case "wheel_wait": // uygulama menüyü henüz yollamadı
+      if(!APP.connected) toggleApp();
+      UI.sel_key=0; UI.ctx={mode:"wait",key:1,layer:"a",deadline:nowS()+9};
+      UI.state=S_CTX; OLED.show_card(tr("wheel"),"...",null,null); break;
+    // Host menüleri: uygulamanın gönderdiği liste / kaydırıcı / kart
+    case "host_list":   if(!APP.connected) toggleApp();
+      setLayer(1); UI.sel_key=0; UI._enter_ctx(); break;
+    case "host_slider": if(!APP.connected) toggleApp();
+      setLayer(1); UI.sel_key=3; UI._enter_ctx(); break;
+    // Genel kart: OBS'e ait olmayan bir host eylemi (komut)
+    case "host_card":   if(!APP.connected) toggleApp();
+      setLayer(2); UI.sel_key=2; UI._enter_ctx(); break;
+    case "obs_rec":     if(!APP.connected) toggleApp();
+      setLayer(1); UI.sel_key=1; UI._enter_ctx(); break;
+    // OBS ana ekranı: aynı tuş, ama uygulama "record" alt görünümü yerine
+    // genel OBS görünümünü gönderiyor (sub'ı olmayan obs eylemi).
+    case "obs_main":    if(!APP.connected) toggleApp();
+      setLayer(1); UI.sel_key=1; UI._enter_ctx();
+      APP.ctxSub=null; APP_HOST.render(); break;
     case "host": if(!APP.connected) toggleApp(); if(!APP.host_mode) toggleHost(); break;
+    case "host_plain": // uygulama tuş adı göndermemiş -> düz "bağlı" ekranı
+      if(!APP.connected) toggleApp(); if(!APP.host_mode) toggleHost();
+      APP.keys=null; UI._draw_host(); break;
     case "boot": reboot(); break;
     case "update": startUpdate(); break;
     case "error": DEV.errorMsg="MemoryError: memory allocation failed"; break;
@@ -1702,10 +3120,12 @@ jump.onchange=()=>{
   syncTools();
 };
 
+const HOST_KEYS=["Scene 1","Scene 2","Mute","Cam","Clip","REC"];
 function toggleApp(){
   APP.connected=!APP.connected;
   if(APP.connected){
     APP.menus=true;
+    APP.keys=HOST_KEYS.slice();   // "ad yokken" ekranından sonra geri gelsin
     UI.on_sysvol(APP.sysvol);
     UI.on_label();
     log("app connected");
@@ -1738,6 +3158,11 @@ function syncTools(){
   el("t-usb").classList.toggle("on",CFG.usb_drive);
   el("t-slots").classList.toggle("on",SLOTS_ON);
   el("fwv").textContent=FW_VERSION;
+  el("t-idle").textContent="OTOMATİK DÖNÜŞ: "+(AUTO_RETURN?"AÇIK":"KAPALI");
+  el("t-idle").classList.toggle("on",AUTO_RETURN);
+  el("idle-note").textContent=AUTO_RETURN
+    ? "cihazdaki gibi: "+UI.idle_secs+"s hareketsizlikte ızgaraya döner"
+    : "ekran karşılaştırması için dondurdu — cihazda böyle bir seçenek yok";
 }
 el("t-app").onclick=toggleApp;
 el("t-host").onclick=toggleHost;
@@ -1751,6 +3176,15 @@ el("t-slots").onclick=()=>{ SLOTS_ON=!SLOTS_ON; if(UI.state===S_SELECT)UI._draw_
 el("t-update").onclick=startUpdate;
 el("t-reset").onclick=resetAll;
 
+// Yalnızca simülatör: zaman aşımını dondurur. Açılırken sayaç sıfırlanmazsa
+// birikmiş hareketsizlik yüzünden ekran anında dönerdi.
+el("t-idle").onclick=()=>{
+  AUTO_RETURN=!AUTO_RETURN;
+  if(AUTO_RETURN) UI.activity_at=nowS();
+  syncTools();
+  log("auto_return="+AUTO_RETURN);
+};
+
 const zoomRow=el("zoom");
 for(const [v,label] of SCALES){
   const b=document.createElement("div");
@@ -1758,6 +3192,208 @@ for(const [v,label] of SCALES){
   b.onclick=()=>setScale(v);
   zoomRow.appendChild(b);
 }
+
+/* ═════════════════════════════════════════════════════════════════════
+   12. İKONLAR SEKMESİ
+   İkon ailesini kategori kategori gösterir. Bir ikona tıklamak onu
+   ızgarada seçili olan tuşa atar (makro dosyasındaki "icon" alanının
+   karşılığı) — böylece ekranda 1:1 nasıl durduğu hemen görülür.
+   Uygulamadaki seçici de aynı listeyi kullanacak.
+   ═════════════════════════════════════════════════════════════════════ */
+const ICO_PX=4;                       // önizleme büyütmesi
+function iconThumb(name){
+  const c=document.createElement("canvas");
+  c.width=8*ICO_PX; c.height=8*ICO_PX;
+  const g=c.getContext("2d");
+  g.fillStyle="#0a0c0f"; g.fillRect(0,0,c.width,c.height);
+  g.fillStyle="#cfe8ff";
+  const rows=ICONS[name];
+  if(rows) for(let y=0;y<8;y++) for(let x=0;x<8;x++)
+    if(rows[y]&(0x80>>x)) g.fillRect(x*ICO_PX,y*ICO_PX,ICO_PX,ICO_PX);
+  return c;
+}
+const ilist=el("ilist"), iq=el("iq");
+// Tıklanan ikonun DOM düğümleri: seçili işaretini güncellemek için
+const iNodes=new Map();
+function currentIconName(){
+  const m=(MACROS[DEV.layer]||[])[UI.sel_key];
+  return (m&&m.icon)||null;
+}
+function buildIconList(filter){
+  ilist.innerHTML="";
+  iNodes.clear();
+  const q=String(filter||"").trim().toLowerCase();
+  let shown=0;
+  for(const [cat,names] of ICON_CAT){
+    const list=names.filter(n=>!q||n.includes(q)||cat.toLowerCase().includes(q));
+    if(!list.length) continue;
+    const box=document.createElement("div"); box.className="icat";
+    const h=document.createElement("h3"); h.textContent=cat+" ("+list.length+")";
+    const g=document.createElement("div"); g.className="igrid";
+    for(const n of list){
+      const d=document.createElement("div"); d.className="ic"; d.title=n;
+      d.appendChild(iconThumb(n));
+      const s=document.createElement("span"); s.textContent=n;
+      d.appendChild(s);
+      d.onclick=()=>assignIcon(n);
+      g.appendChild(d); iNodes.set(n,d); shown++;
+    }
+    box.appendChild(h); box.appendChild(g); ilist.appendChild(box);
+  }
+  if(!shown){
+    const p=document.createElement("p"); p.className="note";
+    p.textContent="eşleşen ikon yok";
+    ilist.appendChild(p);
+  }
+  markIcon();
+  el("i-note").textContent=
+    ICON_NAMES.length+" ikon · "+ICON_CAT.length+" kategori · "+(ICON_NAMES.length*8)+
+    " bayt paketli. Tıkla: K"+(UI.sel_key+1)+" / katman "+
+    LAYER_NAMES[DEV.layer].toUpperCase()+" tuşuna atanır.";
+}
+function markIcon(){
+  const cur=currentIconName();
+  for(const [n,d] of iNodes) d.classList.toggle("on",n===cur);
+}
+function assignIcon(name){
+  const list=MACROS[DEV.layer];
+  if(!list||!list[UI.sel_key]){
+    log("K"+(UI.sel_key+1)+" boş — önce makro gerekir");
+    return;
+  }
+  // Aynı ikona ikinci kez tıklamak seçimi kaldırır: eylem ailesinin
+  // varsayılanına geri döner.
+  const m=list[UI.sel_key];
+  m.icon=(m.icon===name)? undefined : name;
+  if(UI.state===S_SELECT) UI._draw_grid();
+  markIcon();
+  log("K"+(UI.sel_key+1)+" ikon="+(m.icon||"(varsayılan)"));
+}
+iq.addEventListener("input",()=>buildIconList(iq.value));
+el("i-clear").onclick=()=>{ iq.value=""; buildIconList(""); };
+
+/* ═════════════════════════════════════════════════════════════════════
+   FONT SEKMESİ — eskiden docs/font.html'di.
+   O sayfa ekranların üçüncü bir kopyasını da çiziyordu; taşınmadı. Buraya
+   yalnızca fontun kendisine dair, başka yerde olmayan iki şey geldi:
+   istediğin metnin cihaz ölçeğinde nasıl çizildiği, ve her glifin piksel
+   bedeli. İkisi de paketteki fontla — yani cihazın flash'ladığı baytlarla.
+   ═════════════════════════════════════════════════════════════════════ */
+const FONT=oledFont();
+
+/** Bir Fb'yi verilen büyütmeyle canvas'a basar. */
+function fbToCanvas(cv,fb,zoom){
+  cv.width=fb.W*zoom; cv.height=fb.H*zoom;
+  const g=cv.getContext("2d");
+  g.fillStyle="#05070a"; g.fillRect(0,0,cv.width,cv.height);
+  g.fillStyle="#cfe8ff";
+  for(let y=0;y<fb.H;y++) for(let x=0;x<fb.W;x++)
+    if(fb.px[y*fb.W+x]) g.fillRect(x*zoom,y*zoom,zoom,zoom);
+}
+
+function drawSpecimens(){
+  const s=el("fq").value;
+  const Z=4;
+  // 1x düz
+  let fb=new Fb(128,16,FONT);
+  fb.text(s,2,4,0.0,false,false);
+  fbToCanvas(el("f-normal"),fb,Z);
+  // ters: dolu bir bar içinde oyulmuş — cihazın başlık şeridiyle aynı yol
+  fb=new Fb(128,16,FONT);
+  fb.rect(0,2,128,11,1);
+  fb.text(s,2,4,0.0,true,false);
+  fbToCanvas(el("f-invert"),fb,Z);
+  // 2x kahraman
+  fb=new Fb(128,20,FONT);
+  fb.big(s,2,3+7,2,0.0,1);
+  fbToCanvas(el("f-hero"),fb,Z);
+
+  const w=FONT.measure(s);
+  const cell=Math.trunc(128/3)-2;
+  el("f-fit").textContent=
+    w+" px · ekran genişliği 128 · ızgara kutucuğu "+cell+" px"+
+    (w>cell? " → kutucukta \""+FONT.fit(s,cell)+"\" + ikinci satır" : " → kutucuğa tek satır sığar");
+}
+
+/** Tek glifi büyütülmüş çizer. */
+function glyphCanvas(cp,zoom){
+  const c=document.createElement("canvas");
+  const i=FONT.index(String.fromCodePoint(cp));
+  c.width=FONT.boxW*zoom; c.height=FONT.boxH*zoom;
+  const g=c.getContext("2d");
+  g.fillStyle="#05070a"; g.fillRect(0,0,c.width,c.height);
+  g.fillStyle="#cfe8ff";
+  for(let y=0;y<FONT.boxH;y++) for(let x=0;x<FONT.boxW;x++)
+    if(FONT.atlas[y*FONT.atlasW+i*FONT.boxW+x]) g.fillRect(x*zoom,y*zoom,zoom,zoom);
+  return c;
+}
+
+let fSel=null;
+function inspectGlyph(cp){
+  fSel=cp;
+  for(const [c,node] of fNodes) node.classList.toggle("on",c===cp);
+  const zoom=24, i=FONT.index(String.fromCodePoint(cp));
+  const cv=el("f-zoom");
+  cv.width=FONT.boxW*zoom; cv.height=FONT.boxH*zoom;
+  const g=cv.getContext("2d");
+  g.fillStyle="#05070a"; g.fillRect(0,0,cv.width,cv.height);
+  for(let y=0;y<FONT.boxH;y++) for(let x=0;x<FONT.boxW;x++){
+    const lit=FONT.atlas[y*FONT.atlasW+i*FONT.boxW+x];
+    g.fillStyle=lit?"#cfe8ff":"#0d1219";
+    g.fillRect(x*zoom+1,y*zoom+1,zoom-2,zoom-2);
+  }
+  // 7. satır sadece alt uzantılar için: cap yüksekliğini işaretle
+  g.fillStyle="#2b6cb0";
+  g.fillRect(0,7*zoom-1,cv.width,1);
+  const ch=String.fromCodePoint(cp);
+  el("f-zoomnote").textContent=
+    "'"+ch+"'  U+"+cp.toString(16).toUpperCase().padStart(4,"0")+
+    "  ·  genişlik "+FONT.adv[i]+" px  ·  kutu "+FONT.boxW+"×"+FONT.boxH+
+    "  ·  mavi çizgi: cap yüksekliği (7)";
+}
+
+const fNodes=new Map();
+function buildGlyphs(){
+  const host=el("f-glyphs");
+  host.innerHTML=""; fNodes.clear();
+  for(const cp of FONT.chars()){
+    if(cp===32) continue;                    // boşluğun çizecek bir şeyi yok
+    const d=document.createElement("div");
+    d.className="fg"; d.title="U+"+cp.toString(16).toUpperCase();
+    d.appendChild(glyphCanvas(cp,4));
+    const s=document.createElement("span");
+    s.textContent=FONT.adv[FONT.index(String.fromCodePoint(cp))]+"px";
+    d.appendChild(s);
+    d.onclick=()=>inspectGlyph(cp);
+    host.appendChild(d); fNodes.set(cp,d);
+  }
+  const n=FONT.chars().length;
+  const lower="abcdefghijklmnopqrstuvwxyz";
+  let sum=0; for(const c of lower) sum+=FONT.adv[FONT.index(c)];
+  el("f-note").textContent=
+    n+" glif · kutu "+FONT.boxW+"×"+FONT.boxH+" · küçük harf ortalaması "+
+    (sum/26).toFixed(2)+" px · Türkçe'nin on iki harfi de çiziliyor, katlanmıyor";
+}
+
+el("fq").addEventListener("input",drawSpecimens);
+
+function showTab(which){
+  const ico=(which==="ico"), fnt=(which==="font"), sim=(which==="sim");
+  el("pane-ico").hidden=!ico;
+  el("pane-font").hidden=!fnt;
+  el("pane-sim").hidden=!sim;
+  el("tab-ico").classList.toggle("on",ico);
+  el("tab-font").classList.toggle("on",fnt);
+  el("tab-sim").classList.toggle("on",sim);
+  if(ico) buildIconList(iq.value);
+  if(fnt){
+    if(!fNodes.size){ buildGlyphs(); inspectGlyph("A".codePointAt(0)); }
+    drawSpecimens();
+  }
+}
+el("tab-sim").onclick=()=>showTab("sim");
+el("tab-ico").onclick=()=>showTab("ico");
+el("tab-font").onclick=()=>showTab("font");
 
 /* ═════════════════════════════════════════════════════════════════════ */
 fit();

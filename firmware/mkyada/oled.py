@@ -13,37 +13,42 @@
 # A broken or absent display must never brick the keypad: init retries a few
 # times, then the instance goes "headless" and every show_* is a no-op. A
 # missing/corrupt font file takes the same path — keys keep working.
+#
+# ── COORDINATES ───────────────────────────────────────────────────────────
+# Every y below is the TOP of the glyph box, which is how docs/simulator.html
+# (and the design source behind it) anchors text. Fb.text defaults to treating
+# y as the cap centre, so the two helpers _txt/_hero convert once and the
+# screens read exactly like the simulator, number for number. If a screen ever
+# looks a few pixels off, that conversion is the first thing to check.
 
 import time
 
 import displayio
 
 from mkyada.font import Fb, Font
-from mkyada.i18n import tr
+from mkyada.i18n import tr, upper
 
 FONT_PATH = "/fonts/mkyada.fnt"
 INIT_TRIES = 3
 
-# Layout, re-derived for the 5x8 font. The old numbers were sized around a 6px
-# built-in font plus Label padding; the glyph box is 8px tall with the caps in
-# rows 0..6, so the bars lost 2px each and the menu rows 2px — which is exactly
-# what buys the fourth visible menu row.
-BAR_H = 11        # inverted title strip
-BAR_Y = 5         # cap-centre of the title text
-BOT_SEP = 53      # hairline above the bottom bar
-BOT_Y = 58        # cap-centre of the bottom bar text
-HBAR_Y = 41      # value slider (same y the design viewer shows)
-HBAR_H = 5
-HERO_Y = 27          # cap-centre of the big value on the two editor screens
+BAR_H = 9          # inverted title strip (the design's bar(), not the old 11)
+ROW_H = 13         # list row pitch
+ROW_TOP = 12       # first list row
+VIS = 4            # list rows that fit
+SB_X = 125         # scrollbar column
+SB_Y = 11
+SB_H = 52
+# Boot and firmware-update share one progress bar: same size, same place, so
+# the two "the keypad is busy with itself" screens read as one thing.
+PBAR_Y = 43
+PBAR_H = 8
+PBAR_FOOT = 53
+# Grid tiles. Columns are 41px with a 2px gutter, which is what leaves the
+# dividers out of the picture entirely — a tile can clear its own box without
+# ever touching its neighbour or the chrome.
+TILE_X = (0, 43, 86)
+TILE_W = 41
 HERO_SCALE = 3
-# Top of the hero's glyph box — derived the same way Fb.big derives it, so the
-# band an incremental repaint clears cannot drift away from what it redraws.
-HERO_TOP = HERO_Y - (7 * HERO_SCALE) // 2
-ROW_H = 10        # menu row pitch
-# Cap-centre of the first menu row. Four rows of 10px start at y=11 (just under
-# the bar) and the last one ends at 50, two rows clear of the hairline — the
-# whole reason MENU_VIS could go from three rows to four.
-MENU_TOP = 15
 
 
 def fmt_speed(t):
@@ -55,20 +60,27 @@ def fmt_hero(t):
     return ("%d" % v) if v >= 10 else ("%.1f" % v)
 
 
+def fmt_bytes(done, total):
+    if total:
+        return "%.1f / %.1f KB" % (done / 1024.0, total / 1024.0)
+    return "%.1f KB" % (done / 1024.0)
+
+
 class Oled:
-    BAND_H = 10   # inverted status strip over the grid (show_layer/show_profile)
-    MENU_VIS = 4  # rows that fit between the top and bottom bars
+    MENU_VIS = VIS   # ui.py reads this to page its lists
+    # Shown on the boot splash. app.py fills it in from /VERSION before the
+    # first frame; a class attribute so a harness that builds an Oled without
+    # running __init__ (tests/oled_render_test.py) still finds it.
+    fw = ""
 
     def __init__(self, cfg):
         self.display = None
         self.fb = None
         self.font = None
-        self._bar = None   # (x, y, w, h) of the boot/update progress bar
-        self._last = None  # key of the screen currently on the glass
-        self._cells = None # per-cell (line1, line2, inverted) cache
-        self._menu = None  # (chrome, rows) cache, same idea for the menu
-        self._val = None   # (chrome, (hero, frac)) for the two value editors
-        self._band_txt = None
+        self._last = None   # key of the screen currently on the glass
+        self._cells = None  # per-tile cache for the grid
+        self._menu = None   # (chrome, rows) cache for the lists
+        self._chrome = None # grid chrome signature (band/page/state)
         for _ in range(INIT_TRIES):
             try:
                 import board
@@ -113,6 +125,34 @@ class Oled:
     def ok(self):
         return self.display is not None
 
+    # --- coordinate helpers ------------------------------------------------
+    def _txt(self, s, x, y, anchor=0.5, invert=False):
+        """Text with y = TOP of the glyph box."""
+        self.fb.text(s, x, y, anchor, invert, False)
+
+    def _hero(self, s, x, y, scale=2, anchor=0.5, c=1, fit=None):
+        """Scaled text with y = TOP of the glyph box.
+
+        `fit` is the room the hero has, in SCREEN pixels. It is applied here
+        rather than at the call sites because it has to be measured against the
+        SCALED advance: four screens passed the full 124 to font.fit() and then
+        drew the result at 2x or 3x, so a long macro name ran off both edges of
+        the glass instead of being cut."""
+        if fit is not None:
+            s = self.font.fit(str(s), fit // scale)
+        self.fb.big(s, x, y + (7 * scale) // 2, scale, anchor, c)
+
+    def _dots(self, y, n, sel):
+        """Position dots. The selected one is a 3x3 square, the rest single
+        pixels — three rects for the whole row instead of n circle objects."""
+        x0 = self.CX - (n * 8 - 8) // 2 - 1
+        for i in range(n):
+            x = x0 + i * 8
+            if i == sel:
+                self.fb.rect(x, y, 3, 3)
+            else:
+                self.fb.rect(x + 1, y + 1, 1, 1)
+
     def split_name(self, name, cols=3):
         """Break a macro name into the (line1, line2) a grid cell shows.
 
@@ -138,44 +178,47 @@ class Oled:
             return (name[:cut], f.fit(name[cut + 1:], cell))
         return (head, f.fit(name[len(head):], cell))
 
-    # --- chrome ---
-    def _top_bar(self, title, hint=None):
-        """Inverted title strip. `hint` rides at its right edge — that's where
-        the third gesture ("hold: assign") lives, because three labels in the
-        bottom bar ran together into one unreadable smear (issue #36). Up here
-        the title is left-aligned instead of centred, so the two never
-        collide."""
+    # --- chrome ------------------------------------------------------------
+    def _bar9(self, left, right=None):
+        """The design's bar(): 9px inverted strip, title left, optional label
+        right."""
         fb = self.fb
         fb.rect(0, 0, self.W, BAR_H)
+        self._txt(left, 2, 1, 0.0, True)
+        if right:
+            self._txt(right, self.W - 2, 1, 1.0, True)
+
+    def _hdr9(self, title, hint=None):
+        """The design's hdr(): back chevron, title, hairline at y=9. The old
+        bottom bar is gone in this design, so the action / "hold" hint moved up
+        here — which is what buys the list its fourth row back at 13px pitch."""
+        from mkyada import icons
+        fb = self.fb
+        fb.icon(1, 1, icons.get("chevron-left"))
+        rw = 0
         if hint:
-            fb.text(title, 2, BAR_Y, anchor=0.0, invert=True)
-            fb.text(hint, self.W - 2, BAR_Y, anchor=1.0, invert=True)
-        else:
-            fb.text(title, self.CX, BAR_Y, invert=True)
+            s = self.font.fit(str(hint), 52)
+            rw = self.font.measure(s) + 3
+            self._txt(s, self.W - 2, 1, 1.0)
+        self._txt(self.font.fit(str(title), 115 - rw), 11, 1, 0.0)
+        fb.hline(0, 9, self.W)
 
-    def _bottom_bar(self, action=None, back=True):
-        """Two slots only: BACK on the left, the confirming action on the
-        right. Anything else belongs in the top bar's hint (issue #36)."""
-        self.fb.hline(0, BOT_SEP, self.W)
-        if back:
-            self.fb.text(tr("back"), 2, BOT_Y, anchor=0.0)
-        if action:
-            self.fb.text(action, self.W - 2, BOT_Y, anchor=1.0)
+    def _badge(self, s):
+        """The corner badge on the editors: a carved box with lit text. Width
+        follows the text — the design's was a fixed 29px because it always said
+        "EDIT", and ours says SEC / SN / SPEED."""
+        t = self.font.fit(str(s), 44)
+        w = self.font.measure(t) + 6
+        x = self.W - 2 - w
+        self.fb.rfill(x, 1, w, 7, 0, 1)
+        self._txt(t, x + 3, 1, 0.0)
 
-    def _hbar(self, frac):
-        bx, bw = 8, self.W - 16
-        self.fb.hline(bx, HBAR_Y + HBAR_H // 2, bw)          # thin track
-        self.fb.rect(bx, HBAR_Y, int(frac * bw), HBAR_H)
-
-    def _dot(self, cx, cy, big):
-        """Position dot on the layer picker. The 5x5 'big' form is three rects
-        rather than a circle primitive — vectorio.Circle cost an object per
-        paint and there are up to nine of them."""
-        if big:
-            self.fb.rect(cx - 1, cy - 2, 3, 5)
-            self.fb.rect(cx - 2, cy - 1, 5, 3)
-        else:
-            self.fb.rect(cx, cy, 1, 1)
+    def _pbar(self, frac, c):
+        """The progress bar boot and update share. c is 0 on boot (an inverted
+        field, so it is carved) and 1 on update."""
+        p = min(1.0, max(0.0, frac))
+        self.fb.frame(4, PBAR_Y, 120, PBAR_H, c)
+        self.fb.rect(6, PBAR_Y + 2, int(116 * p), PBAR_H - 4, c)
 
     def paint(self, key=None):
         """Push the framebuffer. `key` names the screen so the next call knows
@@ -195,324 +238,576 @@ class Oled:
             return False
         if key != "grid":
             self._cells = None
-            self._band_txt = None
+            self._chrome = None
         if key != "menu":
             self._menu = None
-        if key not in ("speed", "adjust"):
-            self._val = None
         self.fb.clear()
         return True
 
-    # --- screens ---
-    def show_boot(self):
-        """Branded loading screen; up before the heavy imports run."""
-        if not self._begin("boot"):
+    # --- screens -----------------------------------------------------------
+    def show_boot(self, frac=0.0):
+        """Inverted splash: the whole panel lights and everything is carved out
+        of it. Up before the heavy imports run, and the phase line under the
+        wordmark says which third of the boot we are in."""
+        if not self.display:
             return
-        self.fb.big("MKYADA", self.CX, 24, scale=2)
-        self.fb.text(tr("loading"), self.CX, 56)
-        bw = self.W - 24
-        self._bar = ((self.W - bw) // 2, 42, bw, 5)
-        self.fb.rect(self._bar[0], self._bar[1], bw, 5, 0)
+        self._cells = None
+        self._menu = None
+        p = min(1.0, max(0.0, frac))
+        fb = self.fb
+        fb.fill(1)
+        self._hero("MKYADA", self.CX, 11, 2, 0.5, 0)
+        fb.hline(29, 29, 70, 0)
+        phase = tr("boot_disp") if p < 0.33 else (
+            tr("boot_cfg") if p < 0.66 else tr("boot_hid"))
+        self._txt(phase, self.CX, 34, 0.5, True)
+        self._pbar(p, 0)
+        self._txt("RP2040", 4, PBAR_FOOT, 0.0, True)
+        if self.fw:
+            self._txt(self.fw, self.W - 4, PBAR_FOOT, 1.0, True)
         self.paint("boot")
 
     def boot_progress(self, frac):
-        if not self.display or self._bar is None:
+        """Redraw just the bar and the phase line while the boot advances."""
+        if not self.display or self._last != "boot":
             return
-        x, y, w, h = self._bar
-        self.fb.rect(x, y, int(min(1.0, max(0.0, frac)) * w), h)
-        self.paint(self._last)
+        self.show_boot(frac)
 
-    def show_update(self, frac, restarting=False):
-        """Locked firmware-update screen: brand, progress bar, percentage.
-        Deliberately styled like the boot screen — same visual language for
-        'the keypad is busy with itself, hands off'."""
+    def show_update(self, frac, restarting=False, done=0, total=0):
+        """Locked firmware-update screen. Where the design source showed
+        '1.3.0 > 1.4.0' we show a byte counter instead: update_begin carries
+        the total size and nothing else, so a version line would be invented."""
         if not self._begin("update"):
             return
-        self.fb.big("MKYADA", self.CX, 13, scale=2)
-        # "updating - do not unplug" on one line ran off both edges (issue
-        # #35), so the warning gets its own second line.
-        if restarting:
-            self.fb.text(tr("restarting"), self.CX, 33)
-        else:
-            self.fb.text(tr("updating"), self.CX, 29)
-            self.fb.text(tr("updating2"), self.CX, 40)
-        bw = self.W - 24
-        x0 = (self.W - bw) // 2
-        self.fb.rect(x0, 50, int(min(1.0, max(0.0, frac)) * bw), 5)
-        self.fb.text("%d%%" % int(frac * 100), self.CX, 59)
+        p = min(1.0, max(0.0, frac))
+        fb = self.fb
+        self._bar9(tr("update_title"))
+        fb.rect(0, 12, self.W, 11)
+        self._txt(tr("updating2"), self.CX, 14, 0.5, True)
+        self._txt(tr("restarting") if restarting else fmt_bytes(done, total),
+                  self.CX, 29)
+        self._pbar(p, 1)
+        self._txt(tr("updating"), 4, PBAR_FOOT, 0.0)
+        self._txt("%d%%" % int(p * 100), self.W - 4, PBAR_FOOT, 1.0)
         self.paint("update")
 
-    def show_home(self, pos, layer_count, layer_names):
-        """Layer letters + SETTINGS. pos == layer_count means SETTINGS."""
-        if not self._begin("home"):
-            return
-        n = layer_count + 1
-        if pos < layer_count:
-            self.fb.big(layer_names[pos].upper(), self.CX, 26, scale=5)
-        else:
-            self.fb.big(tr("settings"), self.CX, 26, scale=2)
-        gap = 14 if n <= 8 else 12
-        x0 = self.CX - (n - 1) * gap // 2
-        for i in range(n):
-            self._dot(x0 + i * gap, 54, i == pos)
-        self.paint("home")
-
-    def show_grid(self, labels, active, invert=True, band=None):
-        """3x2 macro grid; labels = [(line1, line2)] * 6. The active cell
-        renders inverted while invert is True (selection / playing).
-        band = optional status text (active layer / profile label) drawn as an
-        inverted strip across the top.
-
-        Only the cells whose content actually changed are redrawn, and only
-        their rectangles are cleared — so moving the selection one cell to the
-        right touches two cells and displayio pushes just those rows (3ms on
-        the board, against 79ms for a full screen)."""
+    def show_settings(self, title, items, sel):
+        """Settings list. items = [(label, kind, value)] where kind is
+        "text" | "toggle" | "none" — the state used to be baked into the label
+        ("Layer band: on"); it is a column of its own now."""
         if not self.display:
             return
-        banded = bool(band)
-        top = self.BAND_H if banded else 0
-        cw = self.W // 3
-        ch = (self.H - top) // 2
-        fresh = self._last != "grid" or self._cells is None or \
-            self._cells[6] != banded
-        if fresh:
-            self.fb.clear()
-            self._cells = [None] * 6 + [banded]
-            self._band_txt = None
-            self.fb.vline(cw, top, self.H - top)
-            self.fb.vline(2 * cw, top, self.H - top)
-            self.fb.hline(0, top + ch, self.W)
-        if banded:
-            self._paint_band(band)
-        for k in range(6):
-            t1, t2 = labels[k] if k < len(labels) else ("", "")
-            on = k == active and invert
-            want = (t1 or "", t2 or "", on)
-            if self._cells[k] == want:
-                continue
-            self._cells[k] = want
-            col = k % 3
-            row = k // 3
-            # The cell's INTERIOR — the dividers sit at x=cw, x=2*cw and
-            # y=top+ch, and a cell that cleared its own bounding box erased
-            # them. Chrome is drawn once; cells must stay inside it.
-            x0 = col * cw + (1 if col else 0)
-            x1 = self.W if col == 2 else (col + 1) * cw
-            y0 = top + (row * ch) + (1 if row else 0)
-            y1 = self.H if row else top + ch
-            self.fb.rect(x0, y0, x1 - x0, y1 - y0, 1 if on else 0)
-            cx = (x0 + x1) // 2
-            cy = (y0 + y1) // 2
-            if want[1]:
-                self.fb.text(want[0], cx, cy - 4, invert=on)
-                self.fb.text(want[1], cx, cy + 4, invert=on)
-            else:
-                self.fb.text(want[0], cx, cy, invert=on)
-        self.paint("grid")
-
-    def _paint_band(self, band):
-        b = (band or "")[:24]
-        if b == self._band_txt:
-            return
-        self._band_txt = b
-        self.fb.rect(0, 0, self.W, self.BAND_H)
-        self.fb.text(b, self.CX, self.BAND_H // 2, invert=True)
-
-    def update_band(self, band):
-        """Repaint ONLY the band strip on the live grid, leaving the six cells
-        untouched. The blink markers change twice a second and the OBS scene
-        changes on every switch; driving those through a full show_grid()
-        used to allocate a whole label set each time — in the same size class
-        as an incoming serial chunk. Returns False if the caller must fall
-        back to a full paint."""
-        if not self.display or self._last != "grid" or self._cells is None:
-            return False
-        if not self._cells[6]:
-            return False
-        self._paint_band(band)
-        self.paint("grid")
-        return True
-
-    def _value_screen(self, key, title, hero, frac, action):
-        """Title bar, big number, slider, bottom bar — the shape both encoder
-        value editors share.
-
-        Only the number and the slider move as the encoder turns, and they sit
-        in one horizontal band, so a detent repaints that band alone. The bars
-        above and below are chrome: drawn once, then left alone, which is what
-        keeps displayio's dirty box (and the I2C push behind it) small."""
-        if not self.display:
-            return
-        chrome = (title, action)
-        fresh = self._last != key or self._val is None or self._val[0] != chrome
-        if fresh:
-            self._begin(key)
-            self._top_bar(title)
-            self._bottom_bar(action=action)
-        elif self._val[1] == (hero, frac):
-            self.paint(key)
-            return
-        else:
-            self.fb.rect(0, HERO_TOP, self.W, HBAR_Y + HBAR_H - HERO_TOP, 0)
-        self.fb.big(hero, self.CX, HERO_Y, scale=HERO_SCALE)
-        self._hbar(frac)
-        self._val = (chrome, (hero, frac))
-        self.paint(key)
-
-    def show_speed(self, layer_name, key_no, t):
-        self._value_screen(
-            "speed",
-            "%s > K%d  %s" % (layer_name.upper(), key_no, tr("speed")),
-            fmt_hero(t), (t - 1) / 99.0, tr("save"))
-
-    def show_card(self, title, big, line=None, hint=None):
-        """Generic action card for the context-aware wheel menu: a title bar,
-        a bold hero line (the key's action), an optional status line, and a
-        bottom bar whose right-hand label is `hint` (what CONFIRM does)."""
-        if not self._begin("card"):
-            return
-        self._top_bar(title)
-        # ui.py caps the hero at 12 characters, but 12 WIDE ones are 168px at
-        # scale 2 and a centred overflow gets cut off at BOTH ends. Fit to the
-        # glass instead, so what survives is the start of the name.
-        self.fb.big(self.font.fit(big, self.W // 2), self.CX, 27, scale=2)
-        if line:
-            self.fb.text(line, self.CX, 44)
-        self._bottom_bar(action=hint)
-        self.paint("card")
-
-    def show_adjust(self, title, hero, frac, action=None):
-        """Generic value slider (host-backed volume, brightness): title bar,
-        big value, progress bar, bottom action."""
-        self._value_screen("adjust", title, hero,
-                           max(0.0, min(1.0, frac)), action)
-
-    def show_saved(self, layer_name, key_no, t):
-        if not self._begin("saved"):
-            return
-        self._top_bar("%s > K%d" % (layer_name.upper(), key_no))
-        # The tick used to be two hand-plotted lines in a throwaway Bitmap.
-        # It is a font glyph now (U+2713), so it costs one blit.
-        self.fb.big("✓", self.CX, 30, scale=3)
-        self.fb.big(fmt_speed(t), self.CX, 54, scale=2)
-        self.paint("saved")
-
-    def show_toast(self, title, line1, line2=""):
-        """Short informational screen (read-only drive, missing macro...)."""
-        if not self._begin("toast"):
-            return
-        self._top_bar(title)
-        self.fb.text(line1, self.CX, 30)
-        if line2:
-            self.fb.text(line2, self.CX, 42)
-        self.paint("toast")
-
-    def show_about(self, rows):
-        """Device info screen: a title bar over left-aligned label: value
-        rows (model, firmware, device id)."""
-        if not self._begin("about"):
-            return
-        self._top_bar(tr("about_title"))
-        y = 19
-        for label_s, value_s in rows:
-            self.fb.text("%s:" % label_s, 4, y, anchor=0.0)
-            self.fb.text(value_s, self.W - 4, y, anchor=1.0)
-            y += 11
-        self._bottom_bar(action=None)
-        self.paint("about")
-
-    def show_menu(self, title, items, sel, marked=None, action=None, hold=None):
-        """Generic list menu (Settings, wheel menu). marked = index tagged
-        with >. Longer lists scroll: the selection stays visible and small
-        arrows on the right show there are items above/below.
-
-        This is the screen issue #39 was about — every detent rebuilt five
-        Labels, and a build that hit MemoryError left the PREVIOUS screen on
-        the glass, so the wheel looked stuck at the row it opened on while the
-        selection moved invisibly underneath. There is nothing left to
-        allocate here, so there is nothing left to fail."""
-        if not self.display:
-            return
+        fb = self.fb
         n = len(items)
-        top = sel - self.MENU_VIS + 1 if sel >= self.MENU_VIS else 0
-        # keep the arrow strip clear of the selection rectangle
-        rw = self.W - 8 if n > self.MENU_VIS else self.W
-        act = action or tr("select")
-        # Everything that isn't a row. Any change here means a full repaint;
-        # scrolling counts, because `top` moving renumbers every row.
-        chrome = (title, hold, act, top, n, rw)
+        top = min(sel - VIS + 1, max(0, n - VIS)) if sel >= VIS else 0
+        chrome = (title, top, n)
         want = []
-        for row in range(min(self.MENU_VIS, n)):
-            i = top + row
-            text = items[i] if marked is None else (
-                "%s %s" % (">" if i == marked else " ", items[i]))
-            want.append((self.font.fit(str(text), rw - 4), i == sel))
-
-        # A detent changes exactly two rows, so redraw two rows — not the
-        # screen. Drawing the whole thing was 26ms, but the real cost was
-        # displayio then pushing all 64 rows over I2C at 78ms; two rows push in
-        # about 9. This is the wheel from issue #39, the one interaction whose
-        # latency anyone actually feels.
+        for i in range(VIS):
+            idx = top + i
+            if idx >= n:
+                break
+            label, kind, value = items[idx]
+            want.append((self.font.fit(label, 95), kind, value, idx == sel))
         fresh = self._last != "menu" or self._menu is None or \
             self._menu[0] != chrome
         if fresh:
             self._begin("menu")
-            self._top_bar(title, hint=hold)
-            if top > 0:
-                self.fb.tri(self.W - 7, BAR_H + 2, 7, 4, down=False)
-            if top + self.MENU_VIS < n:
-                self.fb.tri(self.W - 7, BOT_SEP - 6, 7, 4, down=True)
-            self._bottom_bar(action=act)
+            self._hdr9(title)
+            th = max(8, (SB_H * VIS + n // 2) // n) if n else SB_H
+            ty = SB_Y + ((SB_H - th) * top) // max(1, n - VIS)
+            fb.sbarv(SB_X, SB_Y, SB_H, ty, th)
             was = None
         else:
             was = self._menu[1]
-        for row in range(len(want)):
-            w = want[row]
-            if was is not None and was[row] == w:
+        for i in range(len(want)):
+            w = want[i]
+            if was is not None and i < len(was) and was[i] == w:
                 continue
-            y = MENU_TOP + row * ROW_H
-            # Clear only up to rw: past it live the scroll arrows, which are
-            # chrome and are drawn once.
-            self.fb.rect(0, y - 4, rw, ROW_H, 1 if w[1] else 0)
-            self.fb.text(w[0], self.CX, y, invert=w[1])
+            y = ROW_TOP + i * ROW_H
+            on = w[3]
+            fb.rect(0, y, 124, 12, 1 if on else 0)
+            self._txt(w[0], 4, y + 3, 0.0, on)
+            if w[1] == "toggle":
+                fb.sw(103, y + 2, w[2], 0 if on else 1)
+            elif w[1] == "text":
+                self._txt(str(w[2]), 120, y + 3, 1.0, on)
         self._menu = (chrome, want)
         self.paint("menu")
 
+    def show_menu(self, title, items, sel, marked=None, action=None, hold=None):
+        """Generic list — language, wheel menus, host lists. Same frame as the
+        settings list. The device's old ">" marker for the assigned option is a
+        tick icon on the right now, so the label stays left-aligned."""
+        if not self.display:
+            return
+        from mkyada import icons
+        fb = self.fb
+        n = len(items)
+        top = min(sel - VIS + 1, max(0, n - VIS)) if sel >= VIS else 0
+        hint = hold or action or None
+        chrome = (title, hint, top, n, marked)
+        wide = 115 if marked is None else 95
+        want = []
+        for i in range(VIS):
+            idx = top + i
+            if idx >= n:
+                break
+            want.append((self.font.fit(str(items[idx]), wide),
+                         idx == sel, idx == marked))
+        fresh = self._last != "menu" or self._menu is None or \
+            self._menu[0] != chrome
+        if fresh:
+            self._begin("menu")
+            self._hdr9(title, hint)
+            if n > VIS:
+                th = max(8, (SB_H * VIS + n // 2) // n)
+                ty = SB_Y + ((SB_H - th) * top) // max(1, n - VIS)
+                fb.sbarv(SB_X, SB_Y, SB_H, ty, th)
+            was = None
+        else:
+            was = self._menu[1]
+        tick = icons.get("check")
+        for i in range(len(want)):
+            w = want[i]
+            if was is not None and i < len(was) and was[i] == w:
+                continue
+            y = ROW_TOP + i * ROW_H
+            on = w[1]
+            fb.rect(0, y, 124, 12, 1 if on else 0)
+            self._txt(w[0], 4, y + 3, 0.0, on)
+            if w[2]:
+                fb.icon(112, y + 2, tick, 0 if on else 1)
+        self._menu = (chrome, want)
+        self.paint("menu")
+
+    def show_speed(self, layer_name, key_no, t, lo=1, hi=100):
+        """Speed editor: badged title, hero number, 15 segments, the range at
+        the bottom."""
+        from mkyada import icons
+        if not self._begin("speed"):
+            return
+        fb = self.fb
+        fb.rect(0, 0, self.W, BAR_H)
+        fb.icon(1, 1, icons.get("chevron-left"), 0)
+        self._txt("%s > K%d" % (upper(layer_name), key_no), 11, 1, 0.0, True)
+        self._badge(upper(tr("speed")))
+        self._hero(fmt_hero(t), self.CX, 13, HERO_SCALE)
+        fb.segbar(4, 38, 120, 10, 15, max(1, (t * 15 + hi // 2) // hi))
+        self._txt(fmt_hero(lo), 4, 52, 0.0)
+        self._txt(tr("save"), self.CX, 52)
+        self._txt(fmt_hero(hi), self.W - 4, 52, 1.0)
+        self.paint("speed")
+
     def show_timeout(self, sec, lo, hi):
+        """Auto-return editor: hero + unit, a centre sight, and a notched ruler
+        that slides with the value."""
+        from mkyada import icons
         if not self._begin("timeout"):
             return
-        self._top_bar(tr("auto_return_title"))
-        self.fb.big("%ds" % sec, self.CX, 27, scale=3)
-        self._hbar((sec - lo) / float(hi - lo))
-        self._bottom_bar(action=tr("save"))
+        fb = self.fb
+        f = self.font
+        fb.rect(0, 0, self.W, BAR_H)
+        fb.icon(1, 1, icons.get("chevron-left"), 0)
+        self._txt(tr("auto_return_title"), 11, 1, 0.0, True)
+        unit = tr("sec_unit")
+        self._badge(unit)
+        bv = str(sec)
+        bw = f.measure(bv) * HERO_SCALE
+        gx = (self.W - (bw + 4 + f.measure(unit))) // 2
+        self._hero(bv, gx, 13, HERO_SCALE, 0)
+        self._txt(unit, gx + bw + 4, 27, 0.0)
+        fb.rect(64, 39, 1, 1)
+        fb.rect(63, 40, 3, 1)
+        fb.rect(62, 41, 5, 1)
+        off = (sec * 2) % 18
+        major = (sec * 2 // 18) * 3
+        for i in range(-1, 24):
+            x = 4 + i * 6 - off
+            if x < 1 or x > 126:
+                continue
+            maj = (i + major) % 3 == 0
+            fb.vline(x, 44 if maj else 48, 8 if maj else 4)
+        fb.hline(0, 52, self.W)
+        self._txt(tr("save"), self.CX, 55)
         self.paint("timeout")
 
-    def show_host(self):
-        if not self._begin("host"):
+    def _grid_bar(self, band, page, st):
+        """The grid's band. The design source hangs its indicators off the
+        right edge, so ours do too: page position, then the LIVE chip, then the
+        blinking record dot with a steady REC beside it. The layer/profile text
+        takes whatever is left. Recording used to be "(R)" inside that text —
+        the dot reads at a glance, the text did not."""
+        fb = self.fb
+        f = self.font
+        fb.rect(0, 0, self.W, BAR_H)
+        rx = self.W - 2
+        if page:
+            s = "%d/%d" % (page[0] + 1, page[1])
+            self._txt(s, rx, 1, 1.0, True)
+            rx -= f.measure(s) + 4
+        if st and st[1]:
+            lab = upper(tr("live_t"))
+            w = f.measure(lab) + 6
+            x = rx - w + 1
+            fb.rfill(x, 1, w, 7, 0, 1)
+            self._txt(lab, x + 3, 1, 0.0)
+            rx = x - 3
+        if st and st[0]:
+            lab = upper(tr("rec_t"))
+            self._txt(lab, rx, 1, 1.0, True)
+            rx -= f.measure(lab) + 3
+            if st[2]:
+                fb.rect(rx - 4, 3, 4, 4, 0)
+            rx -= 7
+        if band:
+            self._txt(f.fit(str(band), max(0, rx - 3)), 2, 1, 0.0, True)
+
+    def show_grid(self, labels, active, invert=True, band=None, icons_=None,
+                  page=None, st=None):
+        """3x2 macro grid. Rounded tiles with a 2px gutter, the selected one
+        filled; the action icon sits above the name.
+
+        page = (sel, n) turns on wheel paging: the band gets a position, a dot
+        row appears at y=60 and the tiles are the design's 23px. Without it the
+        dot row's 5px go back to the tiles (25px each).
+
+        Only the tiles whose content changed are redrawn, and a tile clears
+        just its own box — the gutter means it can never eat a neighbour or the
+        chrome, so moving the selection pushes two tiles instead of 64 rows."""
+        if not self.display:
             return
-        self._top_bar("MKYADA")
-        self.fb.text(tr("host"), self.CX, 34)
-        self.paint("host")
+        fb = self.fb
+        f = self.font
+        has_st = bool(st and (st[0] or st[1]))
+        # The bar follows the BAND, not the paging. With the layer band off
+        # there is nothing worth spending a 9px strip on, and the page counter
+        # goes with it — the dot row already says which page you are on. The
+        # tiles take the space instead, which is the whole point of turning the
+        # band off. A live REC/LIVE marker still earns the strip on its own.
+        bar = bool(band) or has_st
+        top = 11 if bar else 2
+        bot = 59 if page else 62   # the dot row owns 59..63
+        h = (bot - top - 1) // 2
+        block = 2 * h + 1
+        ytop = top + (bot - top - block) // 2
+        pad = (h - 23) // 2
+        chrome = (bar, h, ytop, band, page, st)
+        fresh = self._last != "grid" or self._cells is None or \
+            self._chrome != chrome
+        if fresh:
+            fb.clear()
+            self._cells = [None] * 6
+            self._chrome = chrome
+            if bar:
+                self._grid_bar(band, page if band else None, st)
+            if page:
+                self._dots(60, page[1], page[0])
+        for k in range(6):
+            pair = labels[k] if k < len(labels) else ("", "")
+            art = icons_[k] if icons_ and k < len(icons_) else None
+            on = k == active and invert
+            want = (pair[0] or "", pair[1] or "", art, on)
+            if self._cells[k] == want:
+                continue
+            self._cells[k] = want
+            x = TILE_X[k % 3]
+            y = ytop + (k // 3) * (h + 1)
+            # Clear the tile's own box only. Everything outside it — gutter,
+            # band, dot row — is chrome drawn once.
+            fb.rect(x, y, TILE_W, h, 0)
+            if on:
+                fb.rfill(x, y, TILE_W, h, 1, 0)
+            else:
+                fb.rframe(x, y, TILE_W, h, 1)
+            mid = x + 20
+            if want[1]:
+                # The design's tiles hold one-line constants; ours hold user
+                # macro names. An icon plus two lines does not fit in 23px, so
+                # a name that needs two lines drops the icon and stays whole —
+                # the other way round would cut the name.
+                self._txt(f.fit(want[0], 37), mid, y + 4 + pad, 0.5, on)
+                self._txt(f.fit(want[1], 37), mid, y + 12 + pad, 0.5, on)
+            elif art:
+                fb.icon(x + 17, y + 4 + pad, art, 0 if on else 1)
+                self._txt(f.fit(want[0], 37), mid, y + 14 + pad, 0.5, on)
+            else:
+                self._txt(f.fit(want[0], 37), mid, y + 8 + pad, 0.5, on)
+        self.paint("grid")
+
+    def update_band(self, band, page=None, st=None):
+        """Repaint ONLY the band on the live grid. The record dot blinks twice
+        a second and the OBS scene changes on every switch; driving those
+        through a full show_grid used to allocate a label set each time.
+        Returns False when the caller has to fall back to a full paint."""
+        if not self.display or self._last != "grid" or self._chrome is None:
+            return False
+        if not self._chrome[0]:
+            return False
+        page = page if band else None   # the counter rides with the band
+        self._grid_bar(band, page, st)
+        self._chrome = self._chrome[:3] + (band, page, st)
+        self.paint("grid")
+        return True
+
+    def show_home(self, pos, layer_count, layer_names, nick=None, active=False):
+        """Layer picker: arrows either side, a 2x letter, the layer's name
+        under it when it has one, position dots at the bottom.
+
+        The design source puts a 2x icon above the letter; it is dropped here
+        because on this device the letter IS the layer — the icon added no
+        information. The hero sits at the same y on every page so neither it
+        nor the arrows jump as the wheel moves through them."""
+        from mkyada import icons
+        if not self._begin("home"):
+            return
+        fb = self.fb
+        n = layer_count + 1
+        self._bar9(tr("menu_t"), "%d/%d" % (pos + 1, n))
+        is_set = pos >= layer_count
+        hero = tr("settings") if is_set else upper(layer_names[pos])
+        sub = "" if is_set else (nick or (upper(tr("on")) if active else ""))
+        if pos > 0:
+            fb.icon(1, 26, icons.get("chevron-left"))
+        if not is_set:
+            fb.icon(self.W - 9, 26, icons.get("chevron-right"))
+        # The arrows own the outer 11px on each side; the hero gets the rest.
+        self._hero(hero, self.CX, 23, 2, fit=106)
+        if sub:
+            self._txt(sub, self.CX, 42)
+        self._dots(57, n, pos)
+        self.paint("home")
+
+    def show_keytest(self, s):
+        """All six keys at once with a press counter each, wheel and module
+        buttons underneath. The old screen showed one control at a time, so
+        finding the silent key meant pressing them in turn."""
+        if not self._begin("keytest"):
+            return
+        fb = self.fb
+        self._bar9(tr("keys_test"), tr("hold_exit"))
+        for k in range(6):
+            x = TILE_X[k % 3]
+            y = 11 + (k // 3) * 16
+            on = s["last"] == k
+            if on:
+                fb.rfill(x, y, TILE_W, 15, 1, 0)
+            else:
+                fb.rframe(x, y, TILE_W, 15, 1)
+            self._txt("K%d" % (k + 1), x + 3, y + 4, 0.0, on)
+            self._txt(str(s["cnt"][k]), x + 38, y + 4, 1.0, on)
+        fb.hline(0, 44, self.W)
+        enc = s["enc"]
+        self._txt("ENC %s%d" % ("+" if enc >= 0 else "", enc), 3, 46, 0.0)
+        self._txt("PSH %d" % s["nav"][0], self.W - 2, 46, 1.0)
+        self._txt("BACK %d" % s["nav"][1], 3, 55, 0.0)
+        self._txt("CONFIRM %d" % s["nav"][2], self.W - 2, 55, 1.0)
+        self.paint("keytest")
+
+    def show_pixels(self):
+        """Every pixel lit. A dead column or a stuck row is invisible on a
+        normal screen — most of it is dark anyway — but obvious against a solid
+        field. Any button leaves, so there is no way to get stuck here."""
+        if not self._begin("pixels"):
+            return
+        self.fb.fill(1)
+        self.paint("pixels")
+
+    def show_about(self, rows):
+        """Device info: a 9px title over label/value rows at 10px pitch."""
+        if not self._begin("about"):
+            return
+        for i in range(min(len(rows), 5)):
+            y = 11 + i * 10
+            self._txt(rows[i][0], 3, y + 2, 0.0)
+            self._txt(self.font.fit(str(rows[i][1]), 86), self.W - 2, y + 2, 1.0)
+        self._bar9(tr("about_title"))
+        self.paint("about")
+
+    # The overlay box. It was 34px at y=16, which is where the toast's third
+    # line ended one pixel off the bottom border — the letters read as sitting
+    # ON the frame — while 14 rows of screen went unused underneath. 44px
+    # centred gives every line room and leaves an even margin top and bottom.
+    # The icon lands at y=24 either way, so it did not move.
+    DLG_Y = 10
+    DLG_H = 44
+
+    def _dialog(self, art, ok=True):
+        """The dithered backdrop plus the rounded box both overlays sit in."""
+        fb = self.fb
+        y, h = self.DLG_Y, self.DLG_H
+        fb.dither()
+        fb.rfill(8, y, 112, h, 0)
+        fb.rframe(8, y, 112, h, 1)
+        fb.icon2(14, y + (h - 16) // 2, art)
+
+    def show_saved(self, layer_name, key_no, t):
+        if not self.display:
+            return
+        from mkyada import icons
+        self._cells = None
+        self._menu = None
+        self._dialog(icons.get("check"))
+        self._hero(upper(tr("save")), 34, 19, 2, 0.0, fit=90)
+        self._txt(self.font.fit(
+            "%s > K%d  %s" % (upper(layer_name), key_no, fmt_speed(t)), 84),
+            34, 36, 0.0)
+        self.paint("saved")
+
+    def show_toast(self, title, line1="", line2="", ok=False):
+        """Same box, but a toast has three pieces and our glyph box is a row
+        taller than the design's — a 2x title plus two lines does not fit in
+        34px, so all three are one scale."""
+        if not self.display:
+            return
+        from mkyada import icons
+        self._cells = None
+        self._menu = None
+        self._dialog(icons.get("check") if ok else icons.get("warning"))
+        f = self.font
+        # 11px pitch, so three lines sit evenly instead of the old 22/32/41
+        # bunching them toward the frame.
+        self._txt(f.fit(title, 84), 34, 18, 0.0)
+        if line1:
+            self._txt(f.fit(line1, 84), 34, 29, 0.0)
+        if line2:
+            self._txt(f.fit(line2, 84), 34, 40, 0.0)
+        self.paint("toast")
+
+    def show_card(self, title, big, line=None, hint=None):
+        """Action card for the wheel menu: 9px bar, a 2x hero, an optional
+        status line, and the design's plain hint row instead of a filled bar."""
+        if not self._begin("card"):
+            return
+        f = self.font
+        self._bar9(title)
+        hy = 20 if line else 25
+        self._hero(str(big or ""), self.CX, hy, 2, fit=124)
+        if line:
+            self._txt(f.fit(str(line), 124), self.CX, 38)
+        if hint:
+            self._txt(f.fit(str(hint), 124), self.CX, 56)
+        self.paint("card")
+
+    def show_adjust(self, title, hero, frac, action=None):
+        """Host-driven slider — the speed editor's frame. No min/max labels:
+        the protocol does not carry them for a slider."""
+        from mkyada import icons
+        if not self._begin("adjust"):
+            return
+        fb = self.fb
+        f = self.font
+        p = max(0.0, min(1.0, frac))
+        fb.rect(0, 0, self.W, BAR_H)
+        fb.icon(1, 1, icons.get("chevron-left"), 0)
+        self._txt(f.fit(str(title), 80), 11, 1, 0.0, True)
+        if action:
+            self._badge(upper(action))
+        self._hero(str(hero), self.CX, 13, HERO_SCALE, fit=124)
+        fb.segbar(4, 38, 120, 10, 15, max(1, int(p * 15 + 0.5)))
+        self._txt(tr("back"), 4, 52, 0.0)
+        self._txt("%d%%" % int(p * 100 + 0.5), self.W - 4, 52, 1.0)
+        self.paint("adjust")
+
+    def show_obsrec(self, o):
+        """OBS record card. The bar is the design's recorder strip: a blinking
+        dot with a steady REC beside it on the left, the key on the right."""
+        if not self._begin("obsrec"):
+            return
+        fb = self.fb
+        f = self.font
+        fb.rect(0, 0, self.W, BAR_H)
+        if o.get("rec"):
+            if o.get("blink"):
+                fb.rect(3, 3, 4, 4, 0)
+            self._txt(upper(tr("rec_t")), 10, 1, 0.0, True)
+        else:
+            self._txt(upper(tr("idle_t")), 3, 1, 0.0, True)
+        if o.get("key"):
+            self._txt("%s %d" % (upper(tr("key_t")), o["key"]),
+                      self.W - 2, 1, 1.0, True)
+        self._hero(str(o.get("time") or "00:00"), self.CX, 16, 2, fit=124)
+        if o.get("scene"):
+            self._txt(f.fit(str(o["scene"]), 124), self.CX, 36)
+        if o.get("hint"):
+            self._txt(f.fit(str(o["hint"]), 124), self.CX, 56)
+        self.paint("obsrec")
+
+    def show_obs(self, o):
+        """OBS status screen: a state chip top right, the elapsed time, the
+        scene as a pill and the mic level as segments. The design source ends
+        with a CPU / DROP / FPS row; we do not have those numbers, so that row
+        carries the action hint instead."""
+        if not self._begin("obs"):
+            return
+        fb = self.fb
+        f = self.font
+        fb.rect(0, 0, self.W, BAR_H)
+        self._txt("OBS", 2, 1, 0.0, True)
+        rec = bool(o.get("rec"))
+        lab = upper(tr("rec_t")) if rec else (
+            upper(tr("live_t")) if o.get("live") else upper(tr("idle_t")))
+        dot = 5 if rec else 0
+        bw = f.measure(lab) + 6 + dot
+        bx = self.W - 2 - bw
+        fb.rfill(bx, 1, bw, 7, 0, 1)
+        if rec and o.get("blink"):
+            fb.rect(bx + 3, 3, 3, 3)
+        self._txt(lab, bx + 3 + dot, 1, 0.0)
+        self._hero(str(o.get("time") or "00:00"), self.CX, 12, 2, fit=124)
+        # Turkish labels are wider, so the pill and the segment bar start after
+        # the label instead of at the design's fixed x.
+        sl = upper(tr("scene_t"))
+        sx = max(38, 2 + f.measure(sl) + 4)
+        self._txt(sl, 2, 30, 0.0)
+        sn = f.fit(str(o.get("scene") or ""), self.W - sx - 6)
+        fb.rfill(sx, 29, f.measure(sn) + 6, 9, 1)
+        self._txt(sn, sx + 3, 30, 0.0, True)
+        ml = upper(tr("mic_t"))
+        mx = max(24, 2 + f.measure(ml) + 4)
+        self._txt(ml, 2, 42, 0.0)
+        fb.segbar(mx, 42, self.W - 6 - mx, 7, 14,
+                  max(0, int(o.get("mic", 0) * 14 / 100 + 0.5)))
+        fb.hline(0, 51, self.W)
+        if o.get("hint"):
+            self._txt(f.fit(str(o["hint"]), 124), self.CX, 54)
+        self.paint("obs")
+
+    def _alert(self, key, title, l1, l2=None, art=None):
+        """The design's fault screen: a 2x warning icon with two lines beside
+        it. Theirs sits high because an error code and a retry line follow; we
+        have neither, so the block is centred between bar and bottom."""
+        from mkyada import icons
+        if not self._begin(key):
+            return False
+        fb = self.fb
+        self._bar9(title)
+        fb.icon2(6, 27, art or icons.get("warning"))
+        self._txt(self.font.fit(str(l1 or ""), 96), 28, 29, 0.0)
+        if l2:
+            self._txt(self.font.fit(str(l2), 96), 28, 39, 0.0)
+        return True
 
     def show_headless(self):
         """The menu module could not load (import/compile/MemoryError). Keys
-        and serial still work; show why instead of leaving the boot 'loading'
-        splash frozen, which reads as a brick."""
-        if not self._begin("headless"):
-            return
-        self._top_bar("MKYADA")
-        self.fb.text(tr("menu_fail"), self.CX, 30)
-        self.fb.text(tr("menu_fail_hint"), self.CX, 44)
-        self.paint("headless")
+        and serial still work; show why instead of leaving the boot splash
+        frozen, which reads as a brick."""
+        if self._alert("headless", "MKYADA", tr("menu_fail"),
+                       tr("menu_fail_hint")):
+            self.paint("headless")
 
     def show_error(self, msg):
-        if not self._begin("error"):
+        s = str(msg)
+        head = self.font.fit(s, 96)
+        if self._alert("error", upper(tr("err_title")), head,
+                       s[len(head):] or None):
+            self.paint("error")
+
+    def show_host(self):
+        """Host mode with no key names yet: the app drives the menu but has not
+        said what the keys are."""
+        if not self._begin("host"):
             return
-        self._top_bar("MKYADA")
-        self.fb.text(tr("err_title"), self.CX, 26)
-        msg = str(msg)
-        self.fb.text(self.font.fit(msg, self.W - 4), self.CX, 40)
-        rest = msg[len(self.font.fit(msg, self.W - 4)):]
-        if rest:
-            self.fb.text(self.font.fit(rest, self.W - 4), self.CX, 50)
-        self.paint("error")
+        self._bar9("MKYADA")
+        self._hero("HOST", self.CX, 22, 2)
+        self._txt(self.font.fit(tr("host"), 124), self.CX, 44)
+        self.paint("host")

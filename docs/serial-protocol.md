@@ -1,4 +1,24 @@
-# MKYADA serial protocol (v9)
+# MKYADA serial protocol (v11)
+
+v11 (firmware 0.23.0) is the **new menu** release. Two additions:
+
+- **Macro `icon`** — a macro file may carry a top-level `"icon":"<name>"` naming
+  one of the 270 icons in `icons/src/icons.txt`. The Vision 6 grid draws it
+  above the key's name. Absent means "the action kind's default"
+  (`KIND_ICON` in `firmware/mkyada/ui.py`), which is what every existing file
+  gets. Icons are addressed **by name, never by index**, so extending or
+  reordering the family cannot repoint an existing macro at a different
+  picture; an unknown name falls back to the default rather than blanking the
+  cell. Old firmware ignores the field entirely.
+- **`mtype:"obs"`** — a fourth wheel-menu shape (see `menu` below): a live OBS
+  status screen rather than a chooser.
+
+Both are **additive**. An old app never sends either and a new device behaves
+exactly as v10; a new app talking to old firmware gets the unknown `mtype`
+drawn as a card and the unknown `icon` field skipped.
+
+v10 (firmware 0.20.0) removed `font` from `hello` and from `config.json`: one
+font ships with the firmware and the device no longer takes a choice.
 
 v9 (firmware 0.18.0) adds the **context-aware wheel menu** on the Vision 6.
 Pressing the wheel (CONFIRM) on a selected key no longer always opens the speed
@@ -155,6 +175,7 @@ STANDALONE ──(host_enter)──► HOST ──(host_leave | CDC disconnect |
 | `{"t":"hostinfo","menus":1}` | v9, Vision 6. The app advertises wheel-menu support. Send once per `hello`. Enables the context-aware wheel menu for host-kind keys; without it they show the "app required" toast. No reply. Cleared on disconnect |
 | `{"t":"sysvol","percent":40}` | v9, Vision 6. The live system output volume (0–100); the device can't read it, so the app pushes it (on change) while connected. Volume-kind grid cells show the `%`. No reply. Cleared on disconnect |
 | `{"t":"menu","mtype":"list","key":3,"layer":"a","title":"SCENE","items":[["Intro","Intro",1],["Game","Game",0]],"sel":0,"action":"Pick"}` | v9, Vision 6. Render/update the open wheel menu. `mtype`: `card` (title + `big` hero line + optional `l1`/`l2` status + `hint` action), `slider` (`value`/`min`/`max`/`step`/`unit` + `action`), `list` (`items` = `[id,label,mark]`, `sel` cursor, `action`). Re-send to live-update; the device keeps the cursor and idle timer. Ignored unless a menu is open for `key` |
+| `{"t":"menu","mtype":"obs","key":2,"obsview":"rec","rec":true,"live":false,"mic":60,"time":"00:12","scene":"Intro","hint":"stop"}` | v11, Vision 6. A live OBS status screen instead of a chooser. `obsview`: `rec` (recorder card — one large timer) or `main` (full status: state chip, timer, scene pill, mic segments). `rec`/`live` drive the state chip, `mic` is 0–100, `time` is the elapsed string, `scene` the active scene. Push it as often as you like — there is no cursor to lose, so a re-render is pure data. The **blinking record dot is the device's own**, on a 0.6 s clock, so it keeps its rhythm when a push is late. CONFIRM sends `menu_ev ev:"fire"`, a wheel step sends `ev:"value"` with `v: ±1` |
 | `{"t":"menu_result","ok":true,"toast":["SCENE","Saved"],"changed":"/macros/key3-a.json"}` | v9, Vision 6. Close the open menu. `toast` (optional `[title,line]`) shows briefly; `changed` (optional path) invalidates that macro's cached label so the grid updates without a `reload`. `ok:false` shows the toast as an error |
 
 ## Device → Host

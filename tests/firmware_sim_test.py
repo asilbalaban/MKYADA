@@ -644,7 +644,7 @@ app.proto.send = _orig_send
 app.proto.ser = None
 
 # --- serial "led" op (proto v2): app feedback override --------------------
-check("hello reports proto v10", app.hello()["proto"] == 10, str(app.hello()["proto"]))
+check("hello reports proto v11", app.hello()["proto"] == 11, str(app.hello()["proto"]))
 check("hello reports usb_drive", app.hello()["usb_drive"] == app.config["usb_drive"], str(app.hello()))
 
 # profile path resolution (issue #23): a profile is a full independent config —
@@ -1081,6 +1081,75 @@ ui.inject("right")  # ignored while app owns the screen
 check("inject ignored in host mode", ui.state == uimod.S_HOST)
 ui.state = prev_state
 
+# --- wheel paging across layers -------------------------------------------
+# With wheel_layers on, a detent past the sixth tile lands on the next layer's
+# first. The bug this guards: every detent called set_layer_idx, whose
+# on_layer callback reset the selection to tile 0 AND repainted, so the grid
+# visibly bounced through the first tile on its way ("2 -> 1 -> 3"). A detent
+# must produce exactly one paint, showing the tile it is actually landing on.
+_grid_calls = []
+_orig_show_grid = ui.oled.show_grid
+
+
+def _cap_show_grid(labels, active, *a, **k):
+    _grid_calls.append(active)
+    return _orig_show_grid(labels, active, *a, **k)
+
+
+ui.oled.show_grid = _cap_show_grid
+vapp.config["wheel_layers"] = True
+vapp.config["layer_count"] = 3
+ui.state = uimod.S_SELECT
+vapp.set_layer_idx(0)
+# This grid has a custom encoder slot, so navigation needs select mode on —
+# and it must survive a layer crossing, or the next detent plays the macro.
+ui.sel_mode = True
+
+ui.sel_key = 1
+_grid_calls.clear()
+ui.enc.position += 1
+ui.tick(_t2.monotonic())
+check("a detent inside a layer paints once, on the new tile",
+      _grid_calls == [2], "sel=%d paints=%s" % (ui.sel_key, _grid_calls))
+check("a detent inside a layer does not change layer", vapp.layer == 0,
+      "layer=%d" % vapp.layer)
+
+ui.sel_key = 5
+_grid_calls.clear()
+ui.enc.position += 1
+ui.tick(_t2.monotonic())
+check("a detent past the last tile crosses into the next layer",
+      vapp.layer == 1 and ui.sel_key == 0,
+      "layer=%d sel=%d" % (vapp.layer, ui.sel_key))
+check("crossing a layer still paints once, never the first tile twice",
+      _grid_calls == [0], "paints=%s" % _grid_calls)
+check("select mode survives a layer crossing", ui.sel_mode is True)
+
+ui.sel_key = 0
+_grid_calls.clear()
+ui.enc.position -= 1
+ui.tick(_t2.monotonic())
+check("a detent before the first tile wraps back to the previous layer's last",
+      vapp.layer == 0 and ui.sel_key == 5,
+      "layer=%d sel=%d" % (vapp.layer, ui.sel_key))
+check("wrapping backwards paints once", _grid_calls == [5],
+      "paints=%s" % _grid_calls)
+
+# The layer key / serial set_layer path must STILL reset to the first tile —
+# only the wheel is exempt, and only while it is mid-detent.
+ui.sel_key = 4
+_grid_calls.clear()
+vapp.set_layer_idx(2)
+check("an outside layer change still resets the selection",
+      ui.sel_key == 0 and _grid_calls == [0],
+      "sel=%d paints=%s" % (ui.sel_key, _grid_calls))
+check("_wheel_move does not leak past the detent", ui._wheel_move is False)
+
+ui.oled.show_grid = _orig_show_grid
+vapp.config["wheel_layers"] = False
+vapp.set_layer_idx(0)
+ui.sel_key = 0
+
 voutbox.clear()
 vapp.handle_msg({"t": "host_enter"})
 check("host mode shows host screen", ui.state == uimod.S_HOST)
@@ -1418,6 +1487,32 @@ _fire = next((m for m in voutbox if m.get("t") == "menu_ev"), None)
 check("ctx: card CONFIRM fires", _fire is not None and _fire.get("ev") == "fire",
       str(_fire))
 
+# mtype "obs" (proto v11): a live status screen rather than a chooser. The app
+# re-pushes it while the recorder runs; the device owns the blink so the dot
+# keeps its rhythm even when a push is late.
+_obs = {"t": "menu", "mtype": "obs", "key": 1, "title": "OBS", "obsview": "rec",
+        "rec": True, "live": False, "mic": 60, "time": "00:12", "scene": "Intro",
+        "hint": "stop"}
+ui.on_menu(dict(_obs))
+check("ctx: obs menu renders", ui.ctx["mtype"] == "obs" and ui.ctx["rec"],
+      str(ui.ctx.get("mtype")))
+check("ctx: obs record dot starts lit", ui._blink_on is True)
+check("ctx: obs carries the view", ui.ctx["obsview"] == "rec")
+_ob = _t2.monotonic()
+ui.tick(_ob + 0.7)   # no input: only the blink moves
+check("ctx: obs blinks on the device's own clock", ui._blink_on is False)
+check("ctx: obs blink does not close the menu", ui.state == uimod.S_CTX)
+voutbox.clear()
+ui.nav.events.queue.append(FakeKeyEvent(uimod.K_CONFIRM, True))
+ui.tick(_t2.monotonic())
+_fire = next((m for m in voutbox if m.get("t") == "menu_ev"), None)
+check("ctx: obs CONFIRM fires the action",
+      _fire is not None and _fire.get("ev") == "fire", str(_fire))
+# "main" is the full status screen, "rec" the recorder card — both must draw
+ui.on_menu(dict(_obs, obsview="main", rec=False, live=True))
+check("ctx: obs main view renders",
+      ui.ctx["obsview"] == "main" and ui.ctx["live"] and not ui.ctx["rec"])
+
 # the app going away abandons an open host menu
 ui.on_menu({"t": "menu", "mtype": "card", "key": 1, "title": "RECORD", "big": "REC"})
 ui.on_host_gone()
@@ -1553,21 +1648,81 @@ _missing = sorted({ch for tbl in i18nmod.STRINGS.values() for v in tbl.values()
                   | {ch for d in i18nmod.LANG_DESC for ch in d
                      if not (_f.first <= ord(ch) <= _f.last or ord(ch) in _f.extra)})
 check("every UI string is drawable by the shipped font", not _missing, str(_missing))
+# str.upper() is locale-blind, so the device drew "SERI" where Turkish spells
+# it "SERİ". i18n.upper() handles the dotted/dotless pair; every screen that
+# uppercases goes through it.
+i18nmod.set_lang("tr")
+check("tr upper dots the i", i18nmod.upper("seri") == "SERİ",
+      i18nmod.upper("seri"))
+check("tr upper leaves the dotless one alone", i18nmod.upper("hız") == "HIZ",
+      i18nmod.upper("hız"))
+check("tr upper on a real string", i18nmod.upper(i18nmod.tr("language")) == "DİL",
+      i18nmod.upper(i18nmod.tr("language")))
+i18nmod.set_lang("en")
+check("en upper is unchanged", i18nmod.upper("serial") == "SERIAL",
+      i18nmod.upper("serial"))
+# Uppercasing must never introduce a character the font cannot draw.
+_upper_missing = sorted({ch for lang in i18nmod.LANGS
+                         for _ in [i18nmod.set_lang(lang)]
+                         for v in i18nmod.STRINGS[lang].values()
+                         for ch in i18nmod.upper(v)
+                         if not (_f.first <= ord(ch) <= _f.last or ord(ch) in _f.extra)})
+check("every uppercased UI string is drawable too", not _upper_missing,
+      str(_upper_missing))
 i18nmod.set_lang("en")
 check("i18n back to en", i18nmod.tr("settings") == "SETTINGS")
 check("i18n unknown key echoes", i18nmod.tr("nope-key") == "nope-key")
 
 # settings menu: localized items incl. Language and the band toggles
-check("set menu has language", ui._set_items()[uimod.SET_LANG] == "Language")
-check("set menu band toggles show state",
-      ui._set_items()[uimod.SET_BAND_LAYER] == "Layer band: off"
-      and ui._set_items()[uimod.SET_BAND_PROFILE] == "Profile band: off",
-      str(ui._set_items()))
-check("set menu has key test", ui._set_items()[uimod.SET_KEYTEST] == "Key test")
+# Rows are (label, kind, value) now: the redesigned screen has a value
+# column, so a toggle's state is a switch instead of ": on" glued to the label,
+# and Language finally shows which language is selected.
+_items = ui._set_items()
+check("set menu has language", _items[uimod.SET_LANG][0] == "Language")
+check("set menu language shows the value",
+      _items[uimod.SET_LANG][1] == "text" and _items[uimod.SET_LANG][2] in
+      i18nmod.LANG_DESC, str(_items[uimod.SET_LANG]))
+check("set menu band toggles carry state, not label text",
+      _items[uimod.SET_BAND_LAYER] == ("Layer band", "toggle", False)
+      and _items[uimod.SET_BAND_PROFILE] == ("Profile band", "toggle", False),
+      str(_items))
+check("set menu has wheel layers",
+      _items[uimod.SET_WHEEL_LAYERS] == ("Wheel layers", "toggle", False),
+      str(_items[uimod.SET_WHEEL_LAYERS]))
+check("set menu has key test", _items[uimod.SET_KEYTEST][0] == "Key test")
 
 # Settings > Key test: the Setup wiring check, run from the device with no app
 # attached. Confirming the entry suppresses playback and takes over the screen;
 # PSH held TEST_EXIT_HOLD_S goes back to Settings, Auto-return goes to the grid.
+# Settings > Pixel test: the whole panel lights so a dead column or a stuck row
+# shows up. Nothing on it is readable, so EVERY button has to be a way out —
+# that is the invariant worth locking down.
+_px = 4000.0
+ui.state = uimod.S_SET_MENU
+ui.set_menu_sel = uimod.SET_PIXTEST
+ui._set_menu_default(_px, 0, uimod.K_CONFIRM)
+check("pixel test entry opens the pixel screen", ui.state == uimod.S_PIXELS,
+      "state=%d" % ui.state)
+# (that it actually lights every pixel is checked in tests/oled_render_test.py —
+# the display is headless here, so there is nothing to count)
+# the press that opened it must not immediately close it again
+ui.tick(_px + 0.01)
+check("pixel test survives the press that opened it", ui.state == uimod.S_PIXELS)
+for _btn, _name in ((uimod.K_PSH, "PSH"), (uimod.K_BACK, "BACK"),
+                    (uimod.K_CONFIRM, "CONFIRM")):
+    ui.set_menu_sel = uimod.SET_PIXTEST
+    ui._set_menu_default(_px, 0, uimod.K_CONFIRM)
+    ui.nav.events.queue.append(FakeKeyEvent(_btn, True))
+    ui.tick(_px + 1)
+    check("pixel test %s returns to settings" % _name,
+          ui.state == uimod.S_SET_MENU, "state=%d" % ui.state)
+# and Auto-return is still a backstop if nothing is pressed at all
+ui.set_menu_sel = uimod.SET_PIXTEST
+ui._set_menu_default(_px, 0, uimod.K_CONFIRM)
+ui.tick(_px + ui.idle_secs + 1)
+check("pixel test idles back to settings", ui.state == uimod.S_SET_MENU)
+ui._drain_inputs()
+
 _kt = 5000.0
 ui.state = uimod.S_SET_MENU
 ui.set_menu_sel = uimod.SET_KEYTEST
@@ -1586,6 +1741,33 @@ check("key test wheel keeps the screen", ui.state == uimod.S_TEST)
 ui.nav.events.queue.append(FakeKeyEvent(uimod.K_BACK, True))
 ui.tick(_kt + 2)
 check("key test BACK reports instead of leaving", ui.state == uimod.S_TEST)
+# Settings > Key test is device-owned, so its wheel and nav events must NOT be
+# mirrored to a connected app. They used to be: the app answered the traffic
+# with test_enter, which reset test_ui to "wiring", and a single detent turned
+# the user's own key test into the app's setup test under them.
+_kt_ser = vapp.proto.ser
+vapp.proto.ser = FakeSerial([])   # "connected" — Proto.connected reads the port
+voutbox.clear()
+ui.enc.position += 1
+ui.tick(_kt + 2.1)
+ui.nav.events.queue.append(FakeKeyEvent(uimod.K_CONFIRM, True))
+ui.tick(_kt + 2.2)
+check("key test does not stream the wheel to the app",
+      not any(m.get("t") == "enc" for m in voutbox), str(voutbox))
+check("key test does not stream the nav buttons to the app",
+      not any(m.get("t") == "btn" and "slot" in m for m in voutbox), str(voutbox))
+check("key test stays the key test with an app connected",
+      ui.state == uimod.S_TEST and ui.test_ui == "self", "ui=%s" % ui.test_ui)
+# The app-driven wiring test still streams — that IS its whole purpose.
+ui.test_ui = "wiring"
+voutbox.clear()
+ui.enc.position += 1
+ui.tick(_kt + 2.3)
+check("the app-driven wiring test still streams the wheel",
+      any(m.get("t") == "enc" for m in voutbox), str(voutbox))
+ui.test_ui = "self"
+vapp.proto.ser = _kt_ser
+ui._drain_inputs()
 # PSH: a press alone reports like any other button...
 ui.nav.events.queue.append(FakeKeyEvent(uimod.K_PSH, True))
 ui.tick(_kt + 3)
@@ -1627,20 +1809,28 @@ vapp.host_label = None
 check("band nickname without label", ui._band() == "(B) studyo", str(ui._band()))
 vapp.host_label = "Photoshop"
 vapp.config["layer_names"] = None
-# blinking OBS markers: (R) recording, (L) live — swapped for same-width
-# spaces on the off phase so the band text doesn't shift
+# Recording/live are drawn as a chip and a blinking dot at the band's right
+# end now, so they are no longer spliced into the text — the band string is the
+# layer and the label, and _band_state() carries the rest.
 vapp.host_rec = True
 ui._blink_on = True
-check("band rec marker", ui._band() == "(B) (R) Photoshop", str(ui._band()))
+check("band text has no state markers", ui._band() == "(B) Photoshop",
+      str(ui._band()))
+check("band state reports recording", ui._band_state() == (True, False, True),
+      str(ui._band_state()))
 vapp.host_live = True
-check("band rec+live markers", ui._band() == "(B) (R)(L) Photoshop", str(ui._band()))
+check("band state reports rec+live", ui._band_state() == (True, True, True),
+      str(ui._band_state()))
 ui._blink_on = False
-check("band markers blink off keeps width",
-      ui._band() == "(B) " + " " * 6 + " Photoshop", str(ui._band()))
+check("band state carries the blink phase",
+      ui._band_state() == (True, True, False), str(ui._band_state()))
 ui._blink_on = True
 vapp.host_rec = False
 vapp.host_live = False
-check("band markers gone when idle", ui._band() == "(B) Photoshop", str(ui._band()))
+check("band state idle", ui._band_state() == (False, False, True),
+      str(ui._band_state()))
+check("band text unchanged when idle", ui._band() == "(B) Photoshop",
+      str(ui._band()))
 
 # hello advertises the biggest fs_write chunk this board's heap can hold in
 # one contiguous block, so the app never has to discover it by failing

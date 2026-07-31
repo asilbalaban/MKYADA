@@ -172,6 +172,9 @@ export interface MacroFile {
   format: "mkyada-macro" | "asil-macro";
   version: number;
   name?: string;
+  /** Grid icon by name (firmware/mkyada/icons.py). Absent = the firmware picks
+   * the action kind's default. Older firmware ignores the field entirely. */
+  icon?: string;
   created?: string;
   kind?:
     | "keystroke"
@@ -387,6 +390,11 @@ export type Assignment = (
   /** User-chosen display name overriding the auto-generated one — shown in
    * the app and on the Vision 6 screen (stored as the macro file's `name`). */
   label?: string;
+  /** User-chosen grid icon, by NAME from the generated family
+   * (app/src/lib/oled-icons.ts). Unset means the action kind's own default.
+   * Names are permanent, so extending the family cannot repoint this at a
+   * different picture; an unknown name simply falls back to the default. */
+  icon?: string;
 };
 
 /** One step of a sequence; `delayMs` is an extra pause AFTER the step. */

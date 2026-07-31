@@ -39,8 +39,7 @@ using MKYADA's own bitmap font, instead of building `displayio` Labels over
 BDF fonts per screen. Measured on the board, ten full repaints now allocate
 48 bytes in total; the font and text libraries the bundle used to carry went
 from 248 KB to 716 bytes, and Turkish letters are drawn rather than folded to
-ASCII. Free heap on a running board went from a median 14 KB to 56 KB. See
-[the font and screen reference](font.html).
+ASCII. Free heap on a running board went from a median 14 KB to 56 KB. See the FONT tab of [the demo page](simulator.html).
 
 **0.21.0** made the repaints incremental: a menu detent or a turn of the speed
 editor redraws only the rows that changed, so displayio's push shrinks with
@@ -53,11 +52,14 @@ flash.
 ## Screens & controls
 
 **Try the menu in a browser: [simulator.html](simulator.html).** It is not a
-mockup either — `firmware/mkyada/oled.py` and `firmware/mkyada/ui.py` are ported
-to JavaScript in that one file, with the shipped `mkyada.fnt` embedded, so the
-whole menu (wheel menus, host menus, key test, bands, update/error screens)
-runs and can be changed without flashing a board. See
-[Working on the menu](#working-on-the-menu) below.
+mockup, and not a port either: the page runs the desktop app's own drawing
+modules, bundled in by `scripts/build-demo.mjs`, so the browser, the app's
+editor preview and the keypad cannot show three different menus. The whole menu
+(wheel menus, host menus, key test, bands, update/error screens) runs and can be
+changed without flashing a board. Two more tabs: **İKONLAR**, the 270-icon
+family a macro can pick from, clickable straight onto a grid key so you see it
+at 1:1; and **FONT**, which draws any text you type at device scale and shows
+every glyph's pixel cost.
 
 Real renders of the 128×64 OLED (layer A, nicknamed "Stream" — the nickname
 shows in the grid's band; the layer picker always shows the plain letter) —
@@ -94,7 +96,13 @@ device's pixels rather than a drawing of them.
   If the USB drive is visible (recovery boot) the filesystem is host-owned
   and the editor explains instead of saving.
 - **SETTINGS** — auto-return timeout (3–60 s), language, the Layer/Profile
-  band toggles, key test, restart. Timeout is stored on the board (NVM); language and
+  band toggles, wheel paging, key test, pixel test, restart.
+  **Key test** shows all six keys at once with a press counter each, plus the
+  wheel and the module buttons, so a silent key stands out instead of having to
+  be found one press at a time; hold PSH to leave. **Pixel test** lights the
+  whole panel so a dead column or a stuck row shows against a solid field —
+  nothing on it is readable, so PSH, BACK and CONFIRM all leave.
+  Timeout is stored on the board (NVM); language and
   the band toggles live in `config.json` (rewritten on-device, like the app
   does) so the app always shows the same values. All survive power cycles
   and firmware updates.
@@ -111,24 +119,66 @@ device's pixels rather than a drawing of them.
 
 ## Working on the menu
 
-[`docs/simulator.html`](simulator.html) is where menu changes get tried before
-they reach a board. Open the file — no server, no build, no dependencies — and
-the whole Vision 6 UI runs in the page: six macro keys, the wheel with push,
-BACK and CONFIRM, plus a panel that simulates the desktop app (connect, host
-mode, OBS record/stream, the read-only USB drive, a firmware update) so the
-host-fed wheel menus and the band markers are reachable too. Screen scale is
-1× (the SH1106's real 128×64) through 7×.
+### One drawing, two places it has to look right
 
-It is a **hand-maintained port**, not generated: sections 1–7 of the file map
-one-to-one onto `fonts/mkyada.fnt`, `font.py`, `i18n.py`, `oled.py` and
-`ui.py`, layout constants included. Changing a menu means changing both sides —
-the simulator first, the firmware after. Two things keep it honest:
+The Vision 6's screens exist twice on purpose and nowhere else:
 
-- `node scripts/embed-sim-font.mjs` re-embeds `mkyada.fnt` when the font
-  changes (`--check` verifies without writing).
-- `tests/golden/*.txt` are ASCII renders of the real firmware screens, produced
-  by `tests/oled_render_test.py` through the software displayio — the reference
-  to diff a suspicious simulator screen against.
+| Where | What it is |
+|---|---|
+| `firmware/mkyada/oled.py` | the Python that runs on the board |
+| `app/src/lib/oled-screens.ts` | the JavaScript the desktop app and the demo page both use |
+
+That second one used to be three separate implementations — one in the app, one
+inside `simulator.html`, one inside the font viewer. They drifted, which is the
+failure that matters: a demo page that quietly stops matching the keypad is
+worse than no demo page, because people trust it. They are now one module, and
+the demo page carries a generated bundle of it rather than a copy.
+
+The two survivors are held to each other rather than trusted:
+
+- `tests/oled_render_test.py` renders every screen from the **firmware** into a
+  real 128×64 buffer, checks the structural invariants, and writes
+  `tests/golden/*.txt`.
+- `app/src/lib/oled-draw.test.ts` renders the same inputs through the
+  **JavaScript** and demands the same pixels — all 28 screens, both languages.
+
+So a layout change that reaches one side and not the other fails CI. Regenerate
+the goldens deliberately with `python3 tests/oled_render_test.py --bless`.
+
+Everything else the screens need is generated from a single source too, each
+with a `--check` mode CI runs:
+
+| Source | Generator | Goes to |
+|---|---|---|
+| `fonts/src/mkyada.txt` | `build-font.mjs` | `firmware/fonts/mkyada.fnt`, `app/src/lib/oled-font.ts` |
+| `icons/src/icons.txt` | `build-icons.mjs` | `firmware/mkyada/icons.py`, `app/src/lib/oled-icons.ts` |
+| `firmware/mkyada/i18n.py` | `build-oled-i18n.mjs` | `app/src/lib/oled-i18n.ts` |
+| `app/src/lib/oled-bundle.ts` | `build-demo.mjs` | the bundle inside `docs/simulator.html` |
+
+The icon source is 270 icons in 21 categories, drawn as ASCII, one 8×8 block
+each, packed one byte per row (bit 7 = leftmost pixel) — 2160 bytes, and that
+packing *is* the flash layout, so the firmware reads the same bytes without
+conversion. A macro picks one by **name** (`"icon": "rocket"` in its JSON),
+never by index: names are permanent, so reordering or extending the set can
+never repoint a user's macro at a different picture. An unknown name falls back
+to the action family's default. Icons live under `icons/`, not `fonts/` — they
+are their own asset, not glyphs, and `build-font.mjs` compiles every `.txt` it
+finds beside the font source.
+
+### Working on the menu, in practice
+
+`docs/simulator.html` is still where a menu change gets tried first — open the
+file, no server, no build, and the whole UI runs: six macro keys, the wheel with
+push, BACK and CONFIRM, plus a panel that simulates the desktop app (connect,
+host mode, OBS record/stream, the read-only USB drive, a firmware update) so the
+host-fed wheel menus and the band markers are reachable too.
+
+What is hand-maintained in that file is now only the **state machine** — which
+control leads to which screen, the port of `firmware/mkyada/ui.py` — and the
+fake desktop app. The drawing underneath it is generated. After changing a
+screen: edit `app/src/lib/oled-screens.ts` and `firmware/mkyada/oled.py`
+together, run `node scripts/build-demo.mjs`, then
+`python3 tests/oled_render_test.py --bless` and the app's `npx vitest run`.
 
 ## Custom wheel / button assignments
 

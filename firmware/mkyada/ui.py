@@ -42,7 +42,7 @@ except Exception:
     NVM = None
 
 from mkyada import i18n
-from mkyada.i18n import tr
+from mkyada.i18n import tr, upper
 from mkyada.models import MODELS, UI_SLOTS
 from mkyada.oled import fmt_speed
 
@@ -77,7 +77,8 @@ TEST_IDLE_MIN_S = 15
 CTX_WAIT_S = 1.5
 
 (S_HOME, S_SELECT, S_SPEED, S_SAVED, S_SET_MENU, S_TIMEOUT,
- S_PLAYING, S_HOST, S_TOAST, S_LANG, S_TEST, S_ABOUT, S_CTX) = range(13)
+ S_PLAYING, S_HOST, S_TOAST, S_LANG, S_TEST, S_ABOUT, S_CTX,
+ S_PIXELS) = range(14)
 
 # media usages the wheel treats as a "turn to adjust" knob rather than a
 # single transport key (see _enter_ctx). Volume rotates up/down, CONFIRM mutes.
@@ -108,8 +109,17 @@ MENU_LABEL = {"layer_next": "Next layer", "layer_prev": "Prev layer",
 # "do it once"). Matches the key-logic hold default.
 MENU_HOLD_S = 0.4
 
-(SET_TMO, SET_LANG, SET_BAND_LAYER, SET_BAND_PROFILE,
- SET_KEYTEST, SET_ABOUT, SET_REBOOT) = range(7)
+# Action family -> icon name, for macros that don't name one themselves. The
+# names are the ones in icons/src/icons.txt; kinds are docs/actions.md.
+KIND_ICON = {"keystroke": "keyboard", "combo": "keyboard", "text": "text",
+             "recorded": "record", "media": "play", "volume": "volume",
+             "scroll": "scroll-v", "menu": "layers", "sequence": "sequence",
+             "launch": "rocket", "command": "terminal", "sound": "music",
+             "mic": "mic", "mic_level": "mic", "webhook": "webhook",
+             "obs": "camera"}
+
+(SET_TMO, SET_LANG, SET_BAND_LAYER, SET_BAND_PROFILE, SET_WHEEL_LAYERS,
+ SET_KEYTEST, SET_PIXTEST, SET_ABOUT, SET_REBOOT) = range(9)
 
 SAVED_DWELL_S = 1.1
 TOAST_DWELL_S = 1.6
@@ -149,10 +159,17 @@ class Ui:
         self.state = S_HOME
         self.prev_state = S_HOME  # where to return after host mode / toast
         self.test_ui = "wiring"  # S_TEST flavour: app "wiring"/"keys", or "self"
+        # Settings > Key test counters. The old screen named one control
+        # at a time, so the silent key was found by pressing them in turn;
+        # this holds all of them so it stands out on its own.
+        self._kt = None
         self._psh_down_at = None  # PSH press time, for the key test's hold-exit
         self.home_pos = 0
         self.sel_key = 0
         self.sel_mode = False  # temporary default-nav mode on a custom grid
+        # Set while a wheel detent is carrying the selection across a layer
+        # boundary, so on_layer knows the tile has already been chosen.
+        self._wheel_move = False
         self.speed_t = SPEED_DEF_T
         self.set_menu_sel = 0
         self.tmo_val = self.idle_secs
@@ -171,6 +188,7 @@ class Ui:
         self._labels = {}  # layer -> [(l1, l2)] * 6
         self._speeds = {}  # (layer, key0) -> tenths
         self._kinds = {}   # (layer, key0) -> (kind, sub) for the wheel menu
+        self._icons = {}   # (layer, key0) -> the macro's own icon name, if any
         self._slots = {}   # layer -> {slot: meta dict or None} (grid context)
         self._ctx_slots = {}  # "home" / "menu" -> {slot: meta dict or None}
         self._injecting = 0  # >0 while a macro key drives the menu (inject)
@@ -204,7 +222,7 @@ class Ui:
         try:
             size = os.stat(path)[6]
         except OSError:
-            return None, SPEED_DEF_T, None, None
+            return None, SPEED_DEF_T, None, None, None
         data = None
         try:
             with open(path, "rb") as f:
@@ -217,7 +235,7 @@ class Ui:
         except (OSError, ValueError, MemoryError):
             data = None
         if not isinstance(data, dict):
-            return None, SPEED_DEF_T, None, None
+            return None, SPEED_DEF_T, None, None, None
         name = data.get("name")
         speed = (data.get("settings") or {}).get("speed", 1.0)
         try:
@@ -238,7 +256,13 @@ class Ui:
             sub = sc.get("dir") if isinstance(sc, dict) else None
         elif kind == "menu":
             sub = data.get("menu")
-        return (name if isinstance(name, str) and name else None), t, kind, sub
+        # The icon a macro picks for itself, by name. Validated in oled/
+        # icons.get(): an unknown one is simply not found and the caller falls
+        # back to the action family default.
+        icon = data.get("icon")
+        if not isinstance(icon, str) or not icon:
+            icon = None
+        return (name if isinstance(name, str) and name else None), t, kind, sub, icon
 
     def _node(self, d):
         """Classify what an assignment (macro dict) does when it fires:
@@ -283,15 +307,21 @@ class Ui:
                 "double_s": (s.get("double_ms") or 250) / 1000.0}
 
     def _set_items(self):
+        """(label, kind, value) per row. The state used to be baked into the
+        label ("Layer band: on") because the old list had nowhere else to put
+        it; the redesigned screen has a value column, so a toggle draws as a
+        switch and Language finally shows which language is selected."""
         cfg = self.app.config
-        return (tr("auto_return"), tr("language"),
-                "%s: %s" % (tr("show_layer"),
-                            tr("on") if cfg["show_layer"] else tr("off")),
-                "%s: %s" % (tr("show_profile"),
-                            tr("on") if cfg["show_profile"] else tr("off")),
-                tr("key_test"),
-                tr("about"),
-                tr("restart"))
+        return ((tr("auto_return"), "text", "%ds" % self.idle_secs),
+                (tr("language"), "text", i18n.LANG_DESC[
+                    i18n.LANGS.index(i18n.get_lang())]),
+                (tr("show_layer"), "toggle", cfg["show_layer"]),
+                (tr("show_profile"), "toggle", cfg["show_profile"]),
+                (tr("wheel_layers"), "toggle", cfg["wheel_layers"]),
+                (tr("key_test"), "none", None),
+                (tr("pixel_test"), "none", None),
+                (tr("about"), "none", None),
+                (tr("restart"), "none", None))
 
     def _split_name(self, name):
         return self.oled.split_name(name)
@@ -307,9 +337,11 @@ class Ui:
         labels = []
         chars = set()
         for k in range(1, 7):
-            name, t, kind, sub = self._read_meta(self.app.macro_path_for(k, l))
+            name, t, kind, sub, icon = self._read_meta(
+                self.app.macro_path_for(k, l))
             self._speeds[(l, k - 1)] = t
             self._kinds[(l, k - 1)] = (kind, sub)
+            self._icons[(l, k - 1)] = icon
             pair = self._split_name(name or ("K%d" % k))
             labels.append(pair)
         self._labels[l] = labels
@@ -399,6 +431,7 @@ class Ui:
             for k in range(6):
                 self._speeds.pop((l, k), None)
                 self._kinds.pop((l, k), None)
+                self._icons.pop((l, k), None)
         if self.state == S_SELECT and self.app.layer in set(layers):
             self._draw_grid()
 
@@ -529,7 +562,8 @@ class Ui:
     def _band_repaint(self):
         """Update just the band strip (blink markers, live OBS scene). Falls
         back to a full grid paint when there's no persistent group to poke."""
-        if not self.oled.update_band(self._band()):
+        if not self.oled.update_band(self._band(), self._grid_page(),
+                                     self._band_state()):
             self._draw_grid()
 
     def on_profile(self):
@@ -539,6 +573,7 @@ class Ui:
         self._labels.clear()
         self._speeds.clear()
         self._kinds.clear()
+        self._icons.clear()
         self._slots.clear()
         if self.state in (S_SELECT, S_CTX):
             self._enter_grid()
@@ -558,17 +593,27 @@ class Ui:
             name = keys[i] if i < len(keys) and keys[i] else "K%d" % (i + 1)
             pair = self._split_name(name)
             labels.append(pair)
-        self.oled.show_grid(labels, None, False, band=self._band())
+        self.oled.show_grid(labels, None, False, self._band(), None,
+                            self._grid_page(), self._band_state())
 
     def on_layer(self):
-        if self.state in (S_HOME, S_SELECT):
-            self.sel_key = 0
-            self.sel_mode = False
-            if self.state == S_SELECT:
-                self._draw_grid()
-            else:
-                self.home_pos = self.app.layer
-                self._draw_home()
+        if self.state not in (S_HOME, S_SELECT):
+            return
+        if self._wheel_move:
+            # The wheel is mid-detent: it has already worked out which tile of
+            # the new layer it is landing on and repaints once itself. Resetting
+            # the selection and painting here as well is what made every detent
+            # flash the first tile on its way past ("2 -> 1 -> 3"). Select mode
+            # has to survive too — dropping it here would make the next detent
+            # fire the custom encoder macro instead of paging on.
+            return
+        self.sel_key = 0
+        self.sel_mode = False
+        if self.state == S_SELECT:
+            self._draw_grid()
+        else:
+            self.home_pos = self.app.layer
+            self._draw_home()
 
     def on_reload(self):
         i18n.set_lang(self.app.config.get("lang"))
@@ -581,6 +626,7 @@ class Ui:
         self._labels.clear()
         self._speeds.clear()
         self._kinds.clear()
+        self._icons.clear()
         self._slots.clear()
         self._ctx_slots.clear()
         self.sel_key = 0
@@ -615,8 +661,10 @@ class Ui:
         key_no = self.app.config["key_map"][trigger]
         self.playing_cell = key_no - 1
         self.state = S_PLAYING
-        self.oled.show_grid(self.labels(self.app.layer), self.playing_cell, True,
-                            band=self._band())
+        self.oled.show_grid(self.labels(self.app.layer), self.playing_cell,
+                            True, self._band(),
+                            self._grid_icons(self.app.layer),
+                            self._grid_page(), self._band_state())
 
     def on_play_done(self):
         self._drain_inputs()  # inputs queued during playback are stale
@@ -747,7 +795,10 @@ class Ui:
     # --- drawing shortcuts ---
     def _draw_home(self):
         c = self.app.config["layer_count"]
-        self.oled.show_home(self.home_pos, c, LAYER_NAMES[:c])
+        names = self.app.config.get("layer_names")
+        p = self.home_pos
+        nick = names[p] if names and p < len(names) else None
+        self.oled.show_home(p, c, LAYER_NAMES[:c], nick, p == self.app.layer)
         if self.home_pos < c:
             self.app.led.set(layer=self.home_pos)  # preview color
         else:
@@ -760,7 +811,6 @@ class Ui:
         (config "layer_names") replaces the plain "Layer A" with "(A) NAME"."""
         cfg = self.app.config
         label = self.app.host_label if cfg["show_profile"] else None
-        marks = self._band_marks()
         if cfg["show_layer"]:
             idx = self.app.layer
             letter = LAYER_NAMES[idx].upper()
@@ -769,28 +819,43 @@ class Ui:
             # The app-pushed label (live OBS scene / profile name) wins over
             # the stored nickname: it's the dynamic status the user watches.
             if label:
-                return "(%s) %s%s" % (letter, marks, label)
+                return "(%s) %s" % (letter, label)
             if nick:
-                return "(%s) %s%s" % (letter, marks, nick)
-            # marks belong here too: a layer with no nickname and no pushed
-            # label still has to be able to show (R)/(L)
-            return marks + (tr("layer_band") % letter)
-        return (marks + label) if label else label
+                return "(%s) %s" % (letter, nick)
+            return tr("layer_band") % letter
+        return label
 
-    def _band_marks(self):
-        """Blinking OBS state markers before the band text: (R) while
-        recording, (L) while live-streaming. The blink phase swaps them for
-        same-width spaces so the rest of the band doesn't shift."""
-        m = ""
-        if self.app.host_rec:
-            m += "(R)"
-        if self.app.host_live:
-            m += "(L)"
-        if not m:
-            return ""
-        if not self._blink_on:
-            m = " " * len(m)
-        return m + " "
+    def _band_state(self):
+        """(recording, live, blink phase) for the band's right-hand end.
+
+        These used to be "(R)"/"(L)" spliced into the band text, which meant
+        the eye had to read a word to learn the keypad was recording. They are
+        a chip and a blinking dot now, drawn by oled.py — and only the dot
+        blinks, so REC stays readable through both phases."""
+        return (bool(self.app.host_rec), bool(self.app.host_live),
+                self._blink_on)
+
+    def _grid_page(self):
+        """(layer, layer_count) when the wheel walks layers, else None. The
+        band then carries a position and a dot row appears under the tiles."""
+        if not self.app.config["wheel_layers"]:
+            return None
+        return (self.app.layer, self.app.config["layer_count"])
+
+    def _grid_icons(self, l):
+        """The six action icons. A macro's own "icon" name wins; without one
+        the action family's default is used. An unknown name also falls back —
+        an icon retired from the set must never blank a tile."""
+        from mkyada import icons
+        out = []
+        for k in range(6):
+            name = self._icons.get((l, k))
+            art = icons.get(name) if name else None
+            if art is None:
+                kind = self._kinds.get((l, k), (None, None))[0]
+                art = icons.get(KIND_ICON.get(kind)) if kind else None
+            out.append(art)
+        return out
 
     def on_sysvol(self, percent):
         """The app pushed the live system volume (the device can't read it).
@@ -828,7 +893,8 @@ class Ui:
         l = self.app.layer
         invert = self.sel_mode or not self._enc_custom()
         self.oled.show_grid(self._grid_labels(l), self.sel_key, invert,
-                            band=self._band())
+                            self._band(), self._grid_icons(l),
+                            self._grid_page(), self._band_state())
 
     def _enc_custom(self):
         """Wheel rotation is customized — the selection highlight rests."""
@@ -1089,9 +1155,23 @@ class Ui:
                     "min": int(msg.get("min") or 0),
                     "max": int(msg.get("max") or 100),
                     "step": int(msg.get("step") or 1),
-                    "unit": str(msg.get("unit") or "")}
+                    "unit": str(msg.get("unit") or ""),
+                    # mtype "obs" (proto v11): a live OBS status screen. These
+                    # carry no cursor, so a re-render is pure data — which is
+                    # the point, the app pushes one twice a second while the
+                    # recorder runs.
+                    "obsview": str(msg.get("obsview") or "main"),
+                    "rec": bool(msg.get("rec")),
+                    "live": bool(msg.get("live")),
+                    "mic": int(msg.get("mic") or 0),
+                    "time": str(msg.get("time") or ""),
+                    "scene": str(msg.get("scene") or "")}
         if prev is None:
             self.activity_at = time.monotonic()
+            # Start the record dot lit: leaving _blink_at at zero makes the
+            # first tick extinguish it immediately.
+            self._blink_at = self.activity_at
+            self._blink_on = True
         self._draw_host_menu()
 
     def on_menu_result(self, msg):
@@ -1146,6 +1226,18 @@ class Ui:
             frac = (v - c["min"]) / float(span) if span else 0.0
             self.oled.show_adjust(c["title"], "%d%s" % (v, c["unit"]), frac,
                                   c.get("action") or tr("save"))
+        elif mt == "obs":
+            o = {"rec": c["rec"], "live": c["live"], "mic": c["mic"],
+                 "time": c["time"] or "00:00", "scene": c["scene"],
+                 "blink": self._blink_on, "key": c.get("key"),
+                 "hint": c.get("hint")}
+            # "rec" is the recorder card (one big timer); "main" is the full
+            # status screen. The app picks per action, so a Record key gets the
+            # timer and a scene key gets the overview.
+            if c["obsview"] == "rec":
+                self.oled.show_obsrec(o)
+            else:
+                self.oled.show_obs(o)
         else:  # card
             self.oled.show_card(c["title"], (c["big"] or "")[:12],
                                 c["l1"] or None, c.get("hint"))
@@ -1257,6 +1349,23 @@ class Ui:
                 self._enter_grid()
             elif press == K_BACK:
                 self._close_host_menu()
+        elif mt == "obs":
+            # A status screen, not a chooser: CONFIRM fires the key's action
+            # (start/stop the recorder), the wheel reports a step so the app can
+            # ride the mic level with it.
+            if press in (K_PSH, K_CONFIRM):
+                send({"t": "menu_ev", "ev": "fire"})
+            elif d:
+                send({"t": "menu_ev", "ev": "value", "v": 1 if d > 0 else -1})
+            elif press == K_BACK:
+                self._close_host_menu()
+            elif c["rec"] and now - self._blink_at > 0.6:
+                # The record dot blinks on the device's own clock: the app
+                # pushes a fresh time twice a second, but the dot must keep
+                # its rhythm even if a push is late.
+                self._blink_at = now
+                self._blink_on = not self._blink_on
+                self._draw_host_menu()
         else:  # card
             if press in (K_PSH, K_CONFIRM):
                 send({"t": "menu_ev", "ev": "fire"})
@@ -1357,6 +1466,8 @@ class Ui:
             self._st_lang(now, d, press)
         elif self.state == S_ABOUT:
             self._st_about(now, d, press)
+        elif self.state == S_PIXELS:
+            self._st_pixels(now, d, press)
 
     def _tick_host(self):
         """Forward encoder/nav to the app; it performs the assigned actions
@@ -1384,14 +1495,18 @@ class Ui:
         local = self.test_ui == "self"
         d = self._enc_delta()
         if d:
-            if self.app.proto.connected:
+            # Settings > Key test is device-owned: the wheel and the nav buttons
+            # below must NOT be mirrored to the app. A connected app watching
+            # those events answers with test_enter, which overwrites test_ui
+            # with "wiring" — so one detent turned the user's own key test into
+            # the app's setup test under them.
+            if self.app.proto.connected and not local:
                 self.app.proto.send({"t": "enc", "d": 1 if d > 0 else -1,
                                      "n": abs(d)})
             ea, eb = MODELS[self.app.model]["encoder"]
             if local:
                 self.activity_at = now
-                self._show_test_hit("CW" if d > 0 else "CCW",
-                                    "%s/%s" % (ea, eb))
+                self._kt_enc(1 if d > 0 else -1)
             else:
                 self.oled.show_toast(tr("setup_test"),
                                      "Wheel " + ("CW" if d > 0 else "CCW"),
@@ -1400,7 +1515,7 @@ class Ui:
             ev = self.nav.events.get()
             if not ev:
                 break
-            if self.app.proto.connected:
+            if self.app.proto.connected and not local:
                 self.app.proto.send({"t": "btn",
                                      "slot": NAV_SLOT[ev.key_number],
                                      "down": bool(ev.pressed)})
@@ -1419,7 +1534,7 @@ class Ui:
             if ev.key_number == K_PSH:
                 self._psh_down_at = now if ev.pressed else None
             if ev.pressed:
-                self._show_test_hit(NAV_SLOT[ev.key_number].upper(), pin)
+                self._kt_nav(ev.key_number)
         if not local:
             return
         if (self._psh_down_at is not None
@@ -1428,9 +1543,40 @@ class Ui:
         elif now - self.activity_at > max(self.idle_secs, TEST_IDLE_MIN_S):
             self._leave_keytest(now, False)
 
+    def _kt_reset(self):
+        self._kt = {"cnt": [0, 0, 0, 0, 0, 0], "nav": [0, 0, 0],
+                    "enc": 0, "last": -1}
+
+    def _kt_paint(self):
+        if self._kt is None:
+            self._kt_reset()
+        self.oled.show_keytest(self._kt)
+
+    def _kt_key(self, key0):
+        if self._kt is None:
+            self._kt_reset()
+        if 0 <= key0 < 6:
+            self._kt["cnt"][key0] += 1
+            self._kt["last"] = key0
+        self._kt_paint()
+
+    def _kt_nav(self, slot0):
+        if self._kt is None:
+            self._kt_reset()
+        if 0 <= slot0 < 3:
+            self._kt["nav"][slot0] += 1
+        self._kt_paint()
+
+    def _kt_enc(self, d):
+        if self._kt is None:
+            self._kt_reset()
+        self._kt["enc"] += d
+        self._kt_paint()
+
     def _show_test_hit(self, label, pin):
-        """One control just reported itself: what it is in big type, the GPIO
-        it arrived on underneath, and the way out still on the bottom bar."""
+        """The app-driven Setup wiring check still names one control at a
+        time — it is showing which GPIO answered, which is per-press by
+        definition."""
         self.oled.show_card(tr("keys_test"), label, pin, tr("hold_exit"))
 
     def _enter_keytest(self, now):
@@ -1449,8 +1595,8 @@ class Ui:
         self._drain_inputs()
         self._psh_down_at = None
         self.activity_at = now
-        self.oled.show_toast(tr("keys_test"), tr("test_press"),
-                             tr("hold_exit"))
+        self._kt_reset()
+        self._kt_paint()
 
     def _leave_keytest(self, now, to_menu):
         """End the on-device key test: back to Settings when the user held PSH
@@ -1463,7 +1609,7 @@ class Ui:
         if to_menu:
             self.state = S_SET_MENU
             self.activity_at = now
-            self.oled.show_menu(tr("settings"), self._set_items(),
+            self.oled.show_settings(tr("settings"), self._set_items(),
                                 self.set_menu_sel)
         else:
             self._enter_grid()
@@ -1490,7 +1636,7 @@ class Ui:
             # came in on. What's being checked here is the wiring, not which
             # macro sits on the key.
             self.activity_at = time.monotonic()
-            self._show_test_hit("K%d" % key_no, pin)
+            self._kt_key(key_no - 1)
             return
         if self.test_ui == "keys":
             # Keys tab: the static "macros paused" warning is already up, so
@@ -1555,7 +1701,7 @@ class Ui:
         self.set_menu_sel = 0
         self.state = S_SET_MENU
         self.activity_at = time.monotonic()
-        self.oled.show_menu(tr("settings"), self._set_items(), 0)
+        self.oled.show_settings(tr("settings"), self._set_items(), 0)
 
     def _jump_layer(self, step):
         """Switch the active layer by a relative step (menu action "layer_next"
@@ -1583,10 +1729,7 @@ class Ui:
             self._draw_grid()
         # Blink the (R)/(L) OBS markers in the band. Cheap since the grid
         # group is persistent: this repaint only swaps the band label text.
-        cfg = self.app.config
-        if ((self.app.host_rec or self.app.host_live)
-                and (cfg["show_layer"] or cfg["show_profile"])
-                and not d and press is None
+        if (self.app.host_rec and not d and press is None
                 and now - self._blink_at > 0.6):
             self._blink_at = now
             self._blink_on = not self._blink_on
@@ -1594,7 +1737,31 @@ class Ui:
 
     def _select_default(self, now, d, press):
         if d:
-            self.sel_key = clamp(self.sel_key + (1 if d > 0 else -1), 0, 5)
+            cfg = self.app.config
+            n = cfg["layer_count"]
+            if cfg["wheel_layers"] and n > 1:
+                # Wrap past the sixth tile into the next layer's first, the
+                # way the design source pages its menu. Here a page IS a
+                # layer, so the wheel also switches which macros are live —
+                # app.set_layer does the LED and the label cache.
+                total = n * 6
+                idx = (self.app.layer * 6 + self.sel_key
+                       + (1 if d > 0 else -1)) % total
+                self.sel_key = idx % 6
+                target = idx // 6
+                if target != self.app.layer:
+                    # Only when the detent actually crosses a boundary.
+                    # set_layer_idx drives the LED and announces the layer over
+                    # serial, and five detents in six stay inside the layer they
+                    # started in — calling it every time was both a wasted
+                    # announce and a second full grid paint.
+                    self._wheel_move = True
+                    try:
+                        self.app.set_layer_idx(target)
+                    finally:
+                        self._wheel_move = False
+            else:
+                self.sel_key = clamp(self.sel_key + (1 if d > 0 else -1), 0, 5)
             self._draw_grid()
         if press == K_PSH:
             if self._grid_custom():
@@ -1625,11 +1792,11 @@ class Ui:
                 self.oled.show_saved(LAYER_NAMES[self.app.layer],
                                      self.sel_key + 1, self.speed_t)
             elif res == "missing":
-                self._toast(tr("speed").upper(), tr("no_macro"), tr("assign_app"))
+                self._toast(upper(tr("speed")), tr("no_macro"), tr("assign_app"))
             elif res == "readonly":
-                self._toast(tr("speed").upper(), tr("usb_on"), tr("read_only"))
+                self._toast(upper(tr("speed")), tr("usb_on"), tr("read_only"))
             else:
-                self._toast(tr("speed").upper(), tr("save_fail"), "")
+                self._toast(upper(tr("speed")), tr("save_fail"), "")
         elif press == K_BACK:
             self._enter_grid()
         elif now - self.activity_at > self.idle_secs:
@@ -1645,7 +1812,7 @@ class Ui:
         if d:
             self.set_menu_sel = clamp(self.set_menu_sel + (1 if d > 0 else -1),
                                       0, len(self._set_items()) - 1)
-            self.oled.show_menu(tr("settings"), self._set_items(), self.set_menu_sel)
+            self.oled.show_settings(tr("settings"), self._set_items(), self.set_menu_sel)
         if press in (K_PSH, K_CONFIRM):
             if self.set_menu_sel == SET_TMO:
                 self.tmo_val = self.idle_secs
@@ -1657,13 +1824,16 @@ class Ui:
                 self.state = S_LANG
                 self.oled.show_menu(tr("lang_title"), i18n.LANG_DESC,
                                     self.lang_sel, marked=self.lang_sel)
-            elif self.set_menu_sel in (SET_BAND_LAYER, SET_BAND_PROFILE):
+            elif self.set_menu_sel in (SET_BAND_LAYER, SET_BAND_PROFILE,
+                                       SET_WHEEL_LAYERS):
                 key = ("show_layer" if self.set_menu_sel == SET_BAND_LAYER
-                       else "show_profile")
-                title = tr(key).upper()
+                       else "show_profile"
+                       if self.set_menu_sel == SET_BAND_PROFILE
+                       else "wheel_layers")
+                title = upper(tr(key))
                 res = self.persist_cfg({key: not self.app.config[key]})
                 if res == "ok":
-                    self.oled.show_menu(tr("settings"), self._set_items(),
+                    self.oled.show_settings(tr("settings"), self._set_items(),
                                         self.set_menu_sel)
                 elif res == "readonly":
                     self._toast(title, tr("usb_on"), tr("read_only"))
@@ -1671,6 +1841,11 @@ class Ui:
                     self._toast(title, tr("save_fail"), "")
             elif self.set_menu_sel == SET_KEYTEST:
                 self._enter_keytest(now)
+            elif self.set_menu_sel == SET_PIXTEST:
+                self.state = S_PIXELS
+                self.activity_at = now
+                self._drain_inputs()   # the press that opened it must not close it
+                self.oled.show_pixels()
             elif self.set_menu_sel == SET_ABOUT:
                 self.state = S_ABOUT
                 self.oled.show_about(self._about_lines())
@@ -1692,8 +1867,18 @@ class Ui:
     def _st_about(self, now, d, press):
         # read-only info screen; any nav (or BACK) returns to the menu
         if press is not None or now - self.activity_at > self.idle_secs:
-            self.state = S_SET_MENU
-            self.oled.show_menu(tr("settings"), self._set_items(),
+            self._back_to_settings()
+
+    def _st_pixels(self, now, d, press):
+        """All-white panel check. PSH / BACK / CONFIRM all return — the point of
+        the screen is that nothing is readable on it, so the way out must not
+        depend on reading anything. Auto-return still applies as a backstop."""
+        if press is not None or now - self.activity_at > self.idle_secs:
+            self._back_to_settings()
+
+    def _back_to_settings(self):
+        self.state = S_SET_MENU
+        self.oled.show_settings(tr("settings"), self._set_items(),
                                 self.set_menu_sel)
 
     def persist_cfg(self, updates):
@@ -1751,14 +1936,14 @@ class Ui:
             res = self.persist_lang(i18n.LANGS[self.lang_sel])
             if res == "ok":
                 self.state = S_SET_MENU
-                self.oled.show_menu(tr("settings"), self._set_items(), self.set_menu_sel)
+                self.oled.show_settings(tr("settings"), self._set_items(), self.set_menu_sel)
             elif res == "readonly":
-                self._toast(tr("language").upper(), tr("usb_on"), tr("read_only"))
+                self._toast(upper(tr("language")), tr("usb_on"), tr("read_only"))
             else:
-                self._toast(tr("language").upper(), tr("save_fail"), "")
+                self._toast(upper(tr("language")), tr("save_fail"), "")
         elif press == K_BACK:
             self.state = S_SET_MENU
-            self.oled.show_menu(tr("settings"), self._set_items(), self.set_menu_sel)
+            self.oled.show_settings(tr("settings"), self._set_items(), self.set_menu_sel)
 
     def _st_timeout(self, now, d, press):
         self._custom_input(now, d, press, self.ctx_slots("menu"),
@@ -1778,7 +1963,7 @@ class Ui:
             self._nvm_save()
             self.persist_cfg({"timeout": self.idle_secs})  # app-facing mirror
             self.state = S_SET_MENU
-            self.oled.show_menu(tr("settings"), self._set_items(), self.set_menu_sel)
+            self.oled.show_settings(tr("settings"), self._set_items(), self.set_menu_sel)
         elif press == K_BACK:
             self.state = S_SET_MENU
-            self.oled.show_menu(tr("settings"), self._set_items(), self.set_menu_sel)
+            self.oled.show_settings(tr("settings"), self._set_items(), self.set_menu_sel)

@@ -7,6 +7,7 @@
 import type { Assignment } from "../lib/types";
 import { assignmentComplete, compileAssignment } from "../lib/macro-model";
 import { AssignmentEditor } from "./AssignmentEditor";
+import { IconPicker } from "./IconPicker";
 import { Button, Input } from "./ui";
 
 export function AssignmentPanel({
@@ -64,6 +65,17 @@ export function AssignmentPanel({
           />
           <span className="text-[11px] text-fg-faint">Leave empty to use the automatic name.</span>
         </label>
+      )}
+      {/* The icon belongs with the name, not with the machinery: on the glass
+        * the two are one thing — the picture sits directly above the label in
+        * the same grid cell. Only on models with a screen. */}
+      {showLabel && labelOnScreen && (
+        <IconPicker
+          value={value.icon}
+          onChange={(icon) => onChange({ ...value, icon })}
+          assignment={value}
+          name={value.label?.trim() || compileAssignment({ ...value, label: undefined })?.name || "Key"}
+        />
       )}
       <AssignmentEditor
         value={value}

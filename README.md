@@ -83,7 +83,11 @@ The Vision 6's own OLED screens. These are not mockups: `scripts/render-oled.py`
 runs the firmware's drawing code over the font the device flashes, so every lit
 pixel here is a pixel the SH1106 lights. The whole menu also runs in a browser —
 open [`docs/simulator.html`](docs/simulator.html) to drive the keys, wheel and
-buttons without a board.
+buttons without a board, browse the 270-icon family, and inspect the font. That
+page draws with the app's own modules (`app/src/lib/oled-*.ts`, bundled in by
+`scripts/build-demo.mjs`), and those are held to the firmware's pixels by
+`tests/golden/*.txt` — so the browser, the desktop app and the keypad cannot
+show three different menus.
 
 <p align="center">
   <img src="docs/images/oled/home.png" alt="Vision 6 Home" width="170">

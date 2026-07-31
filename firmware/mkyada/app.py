@@ -64,7 +64,15 @@ if MODELS[MODEL]["display"]:
     try:
         from mkyada.oled import Oled
         OLED = Oled(MODELS[MODEL]["display"])
-        OLED.show_boot()
+        # The splash prints the firmware version, and /VERSION is a cheap read
+        # that has to happen anyway — do it here rather than leave the first
+        # frame's corner blank until App.__init__ runs.
+        try:
+            with open("/VERSION") as _vf:
+                OLED.fw = _vf.read().strip()
+        except Exception:
+            pass
+        OLED.show_boot(0.0)
     except Exception as e:  # display stack missing/broken: run headless
         print("oled init failed:", e)
         OLED = None
@@ -95,7 +103,13 @@ gc.collect()  # the display stack litters the heap; start the app compacted
 
 DEBOUNCE_S = 0.02
 PING_TIMEOUT_S = 5.0
-PROTO_VERSION = 10 # v10: "font" is gone from hello and config.json. One font
+PROTO_VERSION = 11 # v11: macro files may carry a top-level "icon" naming one of
+                   # the icons in icons/src/icons.txt — the grid draws it above
+                   # the key's name; absent falls back to the action kind's
+                   # default (KIND_ICON in ui.py). Plus mtype:"obs", a live OBS
+                   # status shape for the wheel menu. Both additive: old apps
+                   # send neither and old firmware skips both;
+                   # v10: "font" is gone from hello and config.json. One font
                    # ships now, so the setting had nothing left to choose; an
                    # older app reading hello sees the field missing and simply
                    # reports the keypad as pre-0.14.0 for prefs, which is a
@@ -179,6 +193,12 @@ DEFAULT_CONFIG = {
                          # debugging — a paused debugger trips it)
     "show_layer": False,    # vision6: band over the grid with the active layer
     "show_profile": False,  # vision6: band shows the app-pushed profile label
+    "wheel_layers": False,  # vision6: the wheel walks layers as well as keys —
+                            # past the sixth tile it wraps into the next
+                            # layer's first, and the grid grows a dot row.
+                            # Off by default: it changes what the wheel does,
+                            # and an existing keypad should not have its wheel
+                            # behaviour move under it on an update.
     "timeout": None,     # vision6: auto-return idle seconds (mirror of the
                          # on-device Settings > Auto-return); null = NVM value
     "nav": None,         # vision6: PSH/BACK/CONFIRM pin order override, e.g.
@@ -821,7 +841,7 @@ class App:
             return
         self.update_last_frac = frac
         try:
-            OLED.show_update(frac)
+            OLED.show_update(frac, False, self.update_done, self.update_total)
         except Exception:
             gc.collect()
 

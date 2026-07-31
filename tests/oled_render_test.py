@@ -8,11 +8,21 @@ labels smeared into one in the bottom bar) were bugs a picture would have
 caught immediately and an object tree could not.
 
 Now that drawing is plain pixels, this file runs the firmware's own oled.py
-against the firmware's own font and asserts two things:
+against the firmware's own font and asserts three things:
 
-  1. structural invariants — nothing outside the screen, no text crossing the
-     bars, the selected menu row actually inverted, and so on;
-  2. golden images — tests/golden/*.txt, one ASCII picture per screen, which
+  1. that the drawing primitives behave — including that a colour argument is
+     actually a colour. font.py's big() once let its `c` parameter be shadowed
+     by a character code, which drew fine against a permissive fake and threw
+     "out of range of target" on the board. Since the boot splash is the first
+     thing drawn, the whole display fell back to headless and the keypad came
+     up with a dead screen. tests/fakedisplayio.py now range-checks like
+     CircuitPython does, and the primitive tests below exercise every colour
+     path on purpose;
+  2. structural invariants — nothing outside the screen, tiles that never cross
+     their gutter, the selected row actually inverted, and the incremental
+     repaint producing the same pixels as a fresh draw no matter what route you
+     took to get there;
+  3. golden images — tests/golden/*.txt, one ASCII picture per screen, which
      makes an unintended layout change show up as a readable diff.
 
 Regenerate the goldens after an intentional change:  python3 tests/oled_render_test.py --bless
@@ -30,7 +40,7 @@ import fakedisplayio  # noqa: E402
 
 fakedisplayio.install()
 
-from mkyada import i18n, oled as oledmod  # noqa: E402
+from mkyada import i18n, icons, oled as oledmod  # noqa: E402
 
 GOLDEN = os.path.join(REPO, "tests", "golden")
 BLESS = "--bless" in sys.argv
@@ -67,11 +77,11 @@ def make_oled():
     the device and handed the fake."""
     o = oledmod.Oled.__new__(oledmod.Oled)
     o.display = FakeDisplay()
-    o._bar = None
     o._last = None
     o._cells = None
     o._menu = None
-    o._band_txt = None
+    o._chrome = None
+    o.fw = "0.0.0"
     o.W, o.H, o.CX = 128, 64, 64
     o.font = oledmod.Font(os.path.join(REPO, "firmware", "fonts", "mkyada.fnt"))
     o.fb = oledmod.Fb(128, 64, o.font)
@@ -94,7 +104,10 @@ def golden(name, o):
     got = "\n".join(rows(o)) + "\n"
     if BLESS:
         os.makedirs(GOLDEN, exist_ok=True)
-        with open(path, "w") as f:
+        # newline="" so Windows does not turn these into CRLF: the goldens are
+        # read back by app/src/lib/oled-draw.test.ts, which splits on "\n" and
+        # would carry a stray "\r" into every comparison.
+        with open(path, "w", newline="") as f:
             f.write(got)
         return
     if not os.path.exists(path):
@@ -131,6 +144,19 @@ check("fit keeps what fits", f.fit("ok", 128) == "ok")
 avg = sum(f.adv[f.index(c)] for c in "abcdefghijklmnopqrstuvwxyz") / 26.0
 check("lowercase averages under the old 4px cell", avg <= 4.0, "%.2f px" % avg)
 
+# ---------- the icon table ----------
+# Icons are addressed by NAME so that reordering the source can never repoint a
+# user's macro at a different picture.
+check("icon resolves by name", icons.get("rocket") is not None)
+check("unknown icon is None, not a crash", icons.get("no-such-icon") is None)
+check("icon is 8 bytes", len(icons.get("ghost")) == 8)
+check("chrome icons exist", all(icons.get(n) is not None for n in
+                                ("chevron-left", "chevron-right", "check",
+                                 "warning")))
+check("names are unique", len(set(icons.IDX)) == len(icons.IDX))
+check("every index addresses 8 packed bytes",
+      all(len(icons.PIX[i * 8:i * 8 + 8]) == 8 for i in icons.IDX.values()))
+
 # ---------- the framebuffer primitives ----------
 o = make_oled()
 o.fb.clear()
@@ -141,108 +167,207 @@ o.fb.clear()
 o.fb.text("MKYADA", 200, 30)  # entirely off the right edge
 check("off-screen text draws nothing", band_of(o, 0, 64) == 0)
 o.fb.clear()
-o.fb.rect(0, 0, 128, 11)
-before = band_of(o, 0, 11)
+o.fb.rect(0, 0, 128, 9)
+before = band_of(o, 0, 9)
 o.fb.text("ABC", 64, 5, invert=True)
-check("inverted text cuts holes in a filled bar", band_of(o, 0, 11) < before)
+check("inverted text cuts holes in a filled bar", band_of(o, 0, 9) < before)
 o.fb.clear()
 right = o.fb.text("hi", 0, 30, anchor=0.0)
 check("text returns the pen position", right == f.measure("hi"))
 
-# ---------- every screen ----------
+# The v2 vocabulary. Each is built on rect(), so what matters is that it lands
+# where it says and honours its colour argument.
+o.fb.fill(1)
+check("fill lights the whole screen", band_of(o, 0, 64) == 128 * 64)
+o.fb.fill(0)
+check("fill(0) is clear", band_of(o, 0, 64) == 0)
+o.fb.frame(10, 10, 20, 10)
+check("frame is an outline, not a block", band_of(o, 10, 20) == 2 * 20 + 2 * 8)
+o.fb.clear()
+o.fb.rfill(10, 10, 20, 10)
+check("rfill knocks out four corners", band_of(o, 10, 20) == 20 * 10 - 4)
+o.fb.clear()
+o.fb.sw(10, 10, True)
+on_px = band_of(o, 10, 18)
+o.fb.clear()
+o.fb.sw(10, 10, False)
+check("switch reads differently on and off", band_of(o, 10, 18) != on_px)
+o.fb.clear()
+o.fb.segbar(4, 20, 120, 10, 15, 5)
+check("segbar fills only the first segments",
+      0 < band_of(o, 20, 29) < 120 * 9)
+o.fb.clear()
+o.fb.icon(10, 10, icons.get("rocket"))
+check("icon draws inside its 8x8 box",
+      band_of(o, 10, 18) > 0 and band_of(o, 0, 10) == 0
+      and band_of(o, 18, 64) == 0)
+o.fb.clear()
+o.fb.dither()
+check("dither is half the pixels", band_of(o, 0, 64) == 128 * 64 // 2)
+
+# The regression that shipped a dead screen: every one of these draws with the
+# carved colour (0) on a lit field, which is the path big() got wrong. A
+# character code leaking into the colour argument fails the range check in
+# fakedisplayio and this test stops dead.
+o.fb.fill(1)
+o.fb.big("MKYADA", 64, 20, 2, 0.5, 0)
+check("big carves out of a lit field", 0 < band_of(o, 0, 64) < 128 * 64)
+o.fb.clear()
+o.fb.big("88", 64, 20, 3, 0.5, 1)
+check("big draws lit on a dark field", band_of(o, 0, 64) > 0)
+o.fb.clear()
+o.fb.icon(10, 10, icons.get("rocket"), 0)
+check("icon accepts the carved colour", band_of(o, 0, 64) == 0)
+
+# ---------- every screen, in both languages ----------
+LABELS = [("Copy", ""), ("Paste", ""), ("Play/", "Pause"),
+          ("Volume", ""), ("Intro", "Type"), ("Layer B", "")]
+ART = [icons.get("keyboard"), icons.get("paste"), None,
+       icons.get("volume"), icons.get("record"), icons.get("layers")]
+SET_ITEMS = [("Auto return", "text", "10s"), ("Language", "text", "English"),
+             ("Layer band", "toggle", True), ("Profile band", "toggle", False),
+             ("Wheel layers", "toggle", True), ("Key test", "none", None),
+             ("About", "none", None), ("Restart", "none", None)]
+
 for lang in ("en", "tr"):
     i18n.set_lang(lang)
     o = make_oled()
+    tag = "[%s]" % lang
 
-    o.show_boot()
-    check("[%s] boot draws" % lang, band_of(o, 0, 64) > 0)
+    o.show_boot(0.0)
+    check(tag + " boot draws", band_of(o, 0, 64) > 0)
+    # The splash is an inverted field: the margin under the footer text must be
+    # solid, which is also how "did fill(1) actually run" is observable.
+    check(tag + " boot is an inverted field",
+          band_of(o, 61, 64) == 3 * 128)
     o.boot_progress(0.5)
-    check("[%s] boot bar fills half" % lang,
-          band_of(o, 42, 47) > 0 and band_of(o, 42, 47) < 5 * 104)
+    check(tag + " boot bar fills part-way",
+          0 < band_of(o, oledmod.PBAR_Y + 2,
+                      oledmod.PBAR_Y + oledmod.PBAR_H - 2) < 4 * 116)
+    o.boot_progress(1.0)
 
-    o.show_update(0.42)
-    check("[%s] update text stays on screen" % lang,
-          all(not r.startswith("#") or "MKYADA" for r in rows(o)[28:46]))
-    # issue #35: the warning has to be two lines, and both inside the glass
-    check("[%s] update has two text lines" % lang,
-          band_of(o, 28, 36) > 0 and band_of(o, 36, 46) > 0)
+    o.show_update(0.42, False, 26000, 62914)
+    check(tag + " update draws", band_of(o, 0, 64) > 0)
+    # issue #35: the warning has to be inside the glass on both edges
+    check(tag + " update warning stays on the glass",
+          all(r[0] == "#" and r[127] == "#" for r in rows(o)[13:22]))
     # The percentage sat at y=61, which put its glyph box two rows past the
     # bottom of the screen and clipped the digits.
-    check("[%s] update percentage is not clipped" % lang,
-          band_of(o, 56, 63) > 0 and band_of(o, 63, 64) == 0)
+    check(tag + " update percentage is not clipped",
+          band_of(o, 53, 61) > 0 and band_of(o, 61, 64) == 0)
 
-    o.show_home(0, 3, ["A", "B", "C"])
-    check("[%s] home draws the layer letter big" % lang, band_of(o, 10, 45) > 100)
-    check("[%s] home draws 4 dots" % lang, band_of(o, 50, 58) > 0)
+    o.show_settings("SETTINGS", SET_ITEMS, 0)
+    check(tag + " settings draws four rows",
+          all(band_of(o, oledmod.ROW_TOP + i * oledmod.ROW_H,
+                      oledmod.ROW_TOP + 12 + i * oledmod.ROW_H) > 0
+              for i in range(oledmod.VIS)))
+    check(tag + " settings selection is a filled row",
+          rows(o)[oledmod.ROW_TOP + 1].count("#") > 100)
+    # The switch on the selected row is carved, not drawn — it used to vanish
+    # into the inverted block entirely.
+    sel_row = rows(o)[oledmod.ROW_TOP + 1]
+    o.show_settings("SETTINGS", SET_ITEMS, 2)   # a toggle row selected
+    check(tag + " a selected toggle stays visible",
+          "." in rows(o)[oledmod.ROW_TOP + 2 * oledmod.ROW_H + 4][103:120])
+    o.show_settings("SETTINGS", SET_ITEMS, 7)   # scrolled to the end
+    check(tag + " settings scrollbar moves with the list",
+          band_of(o, oledmod.SB_Y, oledmod.SB_Y + oledmod.SB_H) > 0)
+    check(tag + " list rows keep clear of the scrollbar",
+          all(r[oledmod.SB_X - 1] == "." for r in
+              rows(o)[oledmod.ROW_TOP:oledmod.ROW_TOP + 12]))
 
-    o.show_menu("SETTINGS", ["Auto return", "Language", "Layer band",
-                             "Profile band", "About", "Restart"], 0)
-    check("[%s] menu shows four rows" % lang,
-          all(band_of(o, oledmod.MENU_TOP - 4 + i * oledmod.ROW_H,
-                      oledmod.MENU_TOP + 4 + i * oledmod.ROW_H) > 0
-              for i in range(4)))
-    check("[%s] menu selection is a filled row" % lang,
-          rows(o)[oledmod.MENU_TOP - 4].count("#") > 100)
-    # issue #36 was three labels smearing together; the structural version of
-    # that check is "the last menu row stops before the bottom bar".
-    check("[%s] menu bottom bar is clear of the rows" % lang,
-          band_of(o, oledmod.BOT_SEP - 2, oledmod.BOT_SEP) == 0)
-    # Arrows live in the right-hand 8px strip that `rw` keeps clear of the
-    # selection rectangle, so probing that strip at the arrows' own rows says
-    # whether the list is advertising more items.
-    def strip(d, y0, y1):
-        return sum(r[121:].count("#") for r in rows(d)[y0:y1])
-
-    check("[%s] scrolled-to-top menu shows only the down arrow" % lang,
-          strip(o, oledmod.BAR_H + 2, oledmod.BAR_H + 6) == 0
-          and strip(o, oledmod.BOT_SEP - 6, oledmod.BOT_SEP - 2) > 0)
-
-    o.show_menu("SETTINGS", ["Auto return", "Language", "Layer band",
-                             "Profile band", "About", "Restart"], 5)
-    check("[%s] scrolled-to-bottom menu shows the up arrow" % lang,
-          strip(o, oledmod.BAR_H + 2, oledmod.BAR_H + 6) > 0)
-
-    # sel=1 keeps the (full-width, because the list fits) selection rectangle
-    # out of both arrow bands.
-    o.show_menu("SETTINGS", ["one", "two"], 1)
-    check("[%s] short menu draws no arrows" % lang,
-          strip(o, oledmod.BAR_H + 2, oledmod.BAR_H + 6) == 0
-          and strip(o, oledmod.BOT_SEP - 6, oledmod.BOT_SEP - 2) == 0)
+    o.show_menu("LANGUAGE", ["English", "Türkçe"], 0, marked=1)
+    check(tag + " menu draws", band_of(o, 0, 64) > 0)
+    check(tag + " a short menu draws no scrollbar",
+          sum(r[oledmod.SB_X:].count("#") for r in
+              rows(o)[oledmod.SB_Y:oledmod.SB_Y + oledmod.SB_H]) == 0)
+    o.show_menu("MEDIA", ["Play/Pause", "Next", "Prev", "Stop", "Mute"], 4,
+                marked=0, action="run", hold="hold: assign")
+    check(tag + " a long menu draws a scrollbar",
+          sum(r[oledmod.SB_X:].count("#") for r in
+              rows(o)[oledmod.SB_Y:oledmod.SB_Y + oledmod.SB_H]) > 0)
 
     o.show_speed("A", 3, 15)
-    check("[%s] speed hero is large" % lang, band_of(o, 16, 38) > 60)
-    check("[%s] speed slider drawn" % lang, band_of(o, oledmod.HBAR_Y,
-                                                    oledmod.HBAR_Y + 5) > 0)
+    check(tag + " speed hero is large", band_of(o, 13, 35) > 60)
+    check(tag + " speed segbar drawn", band_of(o, 38, 48) > 0)
+    o.show_timeout(24, 3, 60)
+    check(tag + " timeout draws its ruler", band_of(o, 44, 52) > 0)
 
-    o.show_adjust("SES", "44%", 0.44, action="ok")
-    check("[%s] adjust slider is partial" % lang,
-          0 < band_of(o, oledmod.HBAR_Y, oledmod.HBAR_Y + 5) < 5 * 112)
+    o.show_grid(LABELS, 0, True, "(A) Main", ART, None, (False, False, True))
+    check(tag + " grid draws", band_of(o, 0, 64) > 0)
+    check(tag + " grid band is inverted", rows(o)[3].count("#") > 60)
+    check(tag + " band-less bottom margin is clear", band_of(o, 62, 64) == 0)
+    o.show_grid(LABELS, 2, True, "(A) Main", ART, (0, 4), (True, True, True))
+    check(tag + " paged grid draws its dot row", band_of(o, 59, 63) > 0)
+    # Band off: no 9px strip at all, and the tiles grow into the space it used
+    # to take. The page counter goes with the band — the dot row says the same
+    # thing at the bottom.
+    o.show_grid(LABELS, 1, True, None, ART, None, None)
+    check(tag + " band-less grid draws", band_of(o, 0, 64) > 0)
+    check(tag + " band-less grid has no top strip", band_of(o, 0, 2) == 0)
+    check(tag + " band-less tiles start above the old bar",
+          band_of(o, 2, 11) > 0)
+    o.show_grid(LABELS, 1, True, None, ART, (0, 3), None)
+    check(tag + " a paged band-less grid still has no top strip",
+          band_of(o, 0, 2) == 0)
+    check(tag + " a paged band-less grid keeps its dot row",
+          band_of(o, 59, 63) > 0)
+
+    o.show_home(0, 3, ["A", "B", "C"], "Main", True)
+    check(tag + " home draws the layer letter big",
+          band_of(o, 23, 38) > 50, "%d px" % band_of(o, 23, 38))
+    o.show_home(3, 3, ["A", "B", "C"])
+    check(tag + " home settings page draws", band_of(o, 0, 64) > 0)
+
+    o.show_keytest({"cnt": [1, 0, 3, 0, 0, 2], "nav": [1, 0, 4], "enc": -3,
+                    "last": 2})
+    check(tag + " keytest draws six keys", band_of(o, 0, 64) > 0)
+
+    # Settings > Pixel test: the whole panel, so a dead column or a stuck row
+    # shows against a solid field instead of hiding in the dark.
+    o.show_pixels()
+    check(tag + " pixel test lights every pixel",
+          band_of(o, 0, 64) == 128 * 64, "%d px" % band_of(o, 0, 64))
+
+    o.show_about([("Model", "vision6"), ("Firmware", "0.23.1"),
+                  ("MCU", "RP2040"), ("Device ID", "5035586072865A1F"),
+                  ("Layers", "3")])
+    check(tag + " about stays on the glass", band_of(o, 63, 64) == 0)
 
     o.show_saved("A", 1, 15)
-    check("[%s] saved draws the tick" % lang, band_of(o, 18, 44) > 30)
-
+    check(tag + " saved draws the tick", band_of(o, 18, 44) > 30)
     o.show_toast("USB", "USB drive is on", "read-only")
-    check("[%s] toast draws both lines" % lang,
+    check(tag + " toast draws both lines",
           band_of(o, 26, 35) > 0 and band_of(o, 38, 47) > 0)
-
-    o.show_about((("Model", "vision6"), ("Firmware", "0.20.0"),
-                  ("Device ID", "5035586072b9")))
-    check("[%s] about rows stay above the bottom bar" % lang,
-          band_of(o, oledmod.BOT_SEP - 3, oledmod.BOT_SEP) == 0)
+    o.show_toast("SAVED", "done", "", True)
 
     o.show_card("WHEEL", "Next layer", None, "run")
-    check("[%s] card hero drawn" % lang, band_of(o, 18, 38) > 30)
+    check(tag + " card hero drawn", band_of(o, 18, 38) > 30)
     # 12 wide characters at scale 2 are 168px; a centred overflow would be cut
     # off at both ends instead of just the tail.
     o.show_card("WHEEL", "WWWWWWWWWWWW", None, "run")
-    check("[%s] wide card hero stays on the glass" % lang,
+    check(tag + " wide card hero stays on the glass",
           all(r[0] == "." and r[127] == "." for r in rows(o)[16:40]))
 
-    o.show_timeout(30, 3, 60)
-    o.show_host()
+    o.show_adjust("SES", "44%", 0.44, action="ok")
+    check(tag + " adjust draws", band_of(o, 0, 64) > 0)
+
+    o.show_obsrec({"rec": True, "blink": True, "key": 2, "time": "01:35",
+                   "scene": "Intro", "hint": "stop"})
+    check(tag + " obs record card draws", band_of(o, 0, 64) > 0)
+    o.show_obsrec({"rec": False, "key": 2, "time": "00:00", "hint": "start"})
+    o.show_obs({"rec": True, "blink": True, "live": False, "mic": 64,
+                "time": "01:35", "scene": "Intro", "hint": "stop"})
+    check(tag + " obs screen draws", band_of(o, 0, 64) > 0)
+    o.show_obs({"rec": False, "live": True, "mic": 20, "time": "00:00",
+                "scene": "Game", "hint": "stop"})
+
     o.show_headless()
+    check(tag + " headless draws", band_of(o, 0, 64) > 0)
+    o.show_host()
+    check(tag + " host draws", band_of(o, 0, 64) > 0)
     o.show_error("something went wrong on the device for a long while")
-    check("[%s] long error wraps to two lines" % lang,
+    check(tag + " long error wraps to two lines",
           band_of(o, 36, 45) > 0 and band_of(o, 46, 55) > 0)
 
 # ---------- the grid, and its incremental repaint ----------
@@ -251,10 +376,7 @@ o = make_oled()
 L = [("Kamera", ""), ("Masaüstü", ""), ("Masaüstü ve", "Kamera"),
      ("Kayıt", ""), ("Yayın", ""), ("Next layer", "")]
 o.show_grid(L, 0, True, band="Katman A")
-check("grid draws its dividers", all(rows(o)[40][42] == "#" for _ in (0,)))
-check("grid band is inverted", rows(o)[3].count("#") > 60)
-check("selected cell is a filled block",
-      rows(o)[20][2:40].count("#") > 30)
+check("selected cell is a filled block", rows(o)[20][2:40].count("#") > 30)
 golden("grid_banded", o)
 
 n0 = o.display.refreshes
@@ -263,18 +385,17 @@ check("identical grid repaint costs one refresh", o.display.refreshes == n0 + 1)
 snapshot = rows(o)
 o.show_grid(L, 1, True, band="Katman A")
 changed = sum(1 for a, b in zip(snapshot, rows(o)) if a != b)
-check("moving the selection touches only the top row band",
+# The 2px gutter is what makes this possible: a tile can clear its own box
+# without ever touching its neighbour or the chrome.
+check("moving the selection touches only the tile band",
       changed <= 27, "%d rows changed" % changed)
 
 o2 = make_oled()
 o2.show_grid(L, None, False, band=None)
-# Nothing but the two dividers up here: no band means the cells own row 0.
-check("band-less grid has no band strip", rows(o2)[1].count("#") == 2,
-      rows(o2)[1])
 check("update_band refuses a band-less grid", o2.update_band("x") is False)
 check("update_band works on a banded grid", o.update_band("Katman B") is True)
 
-# A name too long for a cell must be cut, not spill over its divider.
+# A name too long for a cell must be cut, not spill over its gutter.
 o3 = make_oled()
 long_pair = o3.split_name("Sound kahkaha.mp3")
 check("long name splits on the space", long_pair[0] == "Sound", str(long_pair))
@@ -284,64 +405,73 @@ check("both halves fit the cell",
 check("unbroken name is cut, not dropped",
       o3.split_name("abcdefghijklmnopqrstuvwxyz")[1] != "")
 o3.show_grid([long_pair] * 6, 0, True, band=None)
-for k in range(3):
-    col = 42 * (k + 1)
-    if col < 128:
-        check("cell %d never crosses its divider" % k,
-              all(r[col] in "#." for r in rows(o3)))
+for k, gx in enumerate((oledmod.TILE_X[0] + oledmod.TILE_W,
+                        oledmod.TILE_X[1] + oledmod.TILE_W)):
+    check("gutter %d stays empty" % k, all(r[gx] == "." for r in rows(o3)),
+          "column %d" % gx)
 
-# ---------- the menu's incremental repaint ----------
+# ---------- the settings list's incremental repaint ----------
 # An incremental screen can be right once and drift as you walk it. The check
 # that matters is not "does one repaint look correct" but "does any route to a
 # state produce the same pixels as drawing that state from scratch".
 i18n.set_lang("en")
-ITEMS = ["Auto return", "Language", "Layer band", "Profile band",
-         "About", "Restart"]
 
 
-def fresh_menu(sel, **kw):
+def fresh_settings(sel):
     d = make_oled()
-    d.show_menu("SETTINGS", ITEMS, sel, **kw)
+    d.show_settings("SETTINGS", SET_ITEMS, sel)
     return rows(d)
 
 
 m = make_oled()
-m.show_menu("SETTINGS", ITEMS, 0)
+m.show_settings("SETTINGS", SET_ITEMS, 0)
 before = rows(m)
-m.show_menu("SETTINGS", ITEMS, 1)
+m.show_settings("SETTINGS", SET_ITEMS, 1)
 changed = sum(1 for a, b in zip(before, rows(m)) if a != b)
-check("a detent repaints two rows, not the screen", changed <= 20,
+check("a detent repaints two rows, not the screen", changed <= 26,
       "%d rows changed" % changed)
 
 # walk down past the scroll point, back up, and around again
-for sel in (1, 2, 3, 4, 5, 4, 3, 2, 1, 0, 5, 0):
-    m.show_menu("SETTINGS", ITEMS, sel)
-    check("menu sel=%d matches a fresh draw" % sel, rows(m) == fresh_menu(sel),
-          "incremental repaint drifted")
+for sel in (1, 2, 3, 4, 5, 6, 7, 6, 5, 4, 3, 2, 1, 0, 7, 0):
+    m.show_settings("SETTINGS", SET_ITEMS, sel)
+    check("settings sel=%d matches a fresh draw" % sel,
+          rows(m) == fresh_settings(sel), "incremental repaint drifted")
 
 # chrome changes must force the full redraw, not leave the old one behind
-m.show_menu("SETTINGS", ITEMS, 1)
-m.show_menu("OTHER", ITEMS, 1)
+m.show_settings("SETTINGS", SET_ITEMS, 1)
+m.show_settings("OTHER", SET_ITEMS, 1)
 mt = make_oled()
-mt.show_menu("OTHER", ITEMS, 1)
+mt.show_settings("OTHER", SET_ITEMS, 1)
 check("a new title matches a fresh draw", rows(m) == rows(mt))
-m2 = make_oled()
-m2.show_menu("SETTINGS", ITEMS, 1)
-m2.show_menu("SETTINGS", ITEMS, 1, action="ok")
-m3 = make_oled()
-m3.show_menu("SETTINGS", ITEMS, 1, action="ok")
-check("a new action label matches a fresh draw", rows(m2) == rows(m3))
-m2.show_menu("SETTINGS", ITEMS, 1, marked=1)
-m3 = make_oled()
-m3.show_menu("SETTINGS", ITEMS, 1, marked=1)
-check("a new marked item matches a fresh draw", rows(m2) == rows(m3))
-# leaving the menu and coming back must not reuse the stale row cache
-m2.show_speed("A", 3, 15)
-m2.show_menu("SETTINGS", ITEMS, 1)
+# leaving the list and coming back must not reuse the stale row cache
+m.show_speed("A", 3, 15)
+m.show_settings("SETTINGS", SET_ITEMS, 1)
 check("returning from another screen matches a fresh draw",
-      rows(m2) == fresh_menu(1))
+      rows(m) == fresh_settings(1))
 
-# ---------- the value editors' incremental repaint ----------
+# ---------- the generic menu's incremental repaint ----------
+ITEMS = ["Play/Pause", "Next", "Prev", "Stop", "Mute", "Rewind"]
+
+
+def fresh_menu(sel, **kw):
+    d = make_oled()
+    d.show_menu("MEDIA", ITEMS, sel, **kw)
+    return rows(d)
+
+
+mm = make_oled()
+for sel in (0, 1, 2, 3, 4, 5, 4, 0, 5):
+    mm.show_menu("MEDIA", ITEMS, sel)
+    check("menu sel=%d matches a fresh draw" % sel, rows(mm) == fresh_menu(sel),
+          "incremental repaint drifted")
+mm.show_menu("MEDIA", ITEMS, 1, marked=1)
+check("a new marked item matches a fresh draw",
+      rows(mm) == fresh_menu(1, marked=1))
+mm.show_menu("MEDIA", ITEMS, 1, action="run")
+check("a new action label matches a fresh draw",
+      rows(mm) == fresh_menu(1, action="run"))
+
+# ---------- the value editors' repaint ----------
 def fresh_speed(t):
     d = make_oled()
     d.show_speed("A", 3, t)
@@ -349,56 +479,47 @@ def fresh_speed(t):
 
 
 v = make_oled()
-v.show_speed("A", 3, 15)
-before = rows(v)
-v.show_speed("A", 3, 16)
-changed = sum(1 for a, b in zip(before, rows(v)) if a != b)
-check("a speed detent repaints the hero band only", changed <= 30,
-      "%d rows changed" % changed)
 for t in (16, 17, 30, 99, 100, 1, 15, 55):
     v.show_speed("A", 3, t)
     check("speed t=%d matches a fresh draw" % t, rows(v) == fresh_speed(t),
-          "incremental repaint drifted")
+          "repaint drifted")
 # the widest hero must not survive under a narrower one
 v.show_speed("A", 3, 100)
 v.show_speed("A", 3, 10)
 check("a shorter hero leaves no ghost", rows(v) == fresh_speed(10))
-# a different key means different chrome, so a full redraw
-v.show_speed("B", 5, 10)
-w = make_oled()
-w.show_speed("B", 5, 10)
-check("a new title matches a fresh draw", rows(v) == rows(w))
-# and leaving the screen must drop the cache
-v.show_menu("SETTINGS", ITEMS, 0)
-v.show_speed("A", 3, 10)
-check("returning to the editor matches a fresh draw", rows(v) == fresh_speed(10))
-# show_adjust shares the helper; its clamp must still hold
-a1 = make_oled()
-a1.show_adjust("SES", "44%", 0.44, action="ok")
+
 a2 = make_oled()
 a2.show_adjust("SES", "44%", 5.0, action="ok")
 a3 = make_oled()
 a3.show_adjust("SES", "44%", 1.0, action="ok")
 check("adjust clamps frac over 1.0", rows(a2) == rows(a3))
-check("adjust still draws its slider",
-      band_of(a1, oledmod.HBAR_Y, oledmod.HBAR_Y + oledmod.HBAR_H) > 0)
 
 # ---------- goldens for the rest ----------
 i18n.set_lang("en")
 for name, fn in (
     ("boot", lambda d: d.show_boot()),
-    ("update", lambda d: d.show_update(0.42)),
-    ("home", lambda d: d.show_home(0, 3, ["A", "B", "C"])),
-    ("menu", lambda d: d.show_menu("SETTINGS", ["Auto return", "Language",
-                                                "Layer band", "Profile band",
-                                                "About", "Restart"], 1)),
+    ("update", lambda d: d.show_update(0.42, False, 26000, 62914)),
+    ("home", lambda d: d.show_home(0, 3, ["A", "B", "C"], "Main", True)),
+    ("settings", lambda d: d.show_settings("SETTINGS", SET_ITEMS, 1)),
+    ("menu", lambda d: d.show_menu("MEDIA", ITEMS, 1, marked=0, action="run")),
     ("speed", lambda d: d.show_speed("A", 3, 15)),
+    ("timeout", lambda d: d.show_timeout(24, 3, 60)),
+    ("keytest", lambda d: d.show_keytest({"cnt": [1, 0, 3, 0, 0, 2],
+                                          "nav": [1, 0, 4], "enc": -3,
+                                          "last": 2})),
     ("saved", lambda d: d.show_saved("A", 1, 15)),
     ("about", lambda d: d.show_about((("Model", "vision6"),
-                                      ("Firmware", "0.20.0"),
+                                      ("Firmware", "0.23.1"),
                                       ("Device ID", "5035586072b9")))),
     ("card", lambda d: d.show_card("WHEEL", "Next layer", None, "run")),
     ("toast", lambda d: d.show_toast("USB", "USB drive is on", "read-only")),
+    ("obs", lambda d: d.show_obs({"rec": True, "blink": True, "live": False,
+                                  "mic": 64, "time": "01:35",
+                                  "scene": "Intro", "hint": "stop"})),
+    ("obsrec", lambda d: d.show_obsrec({"rec": True, "blink": True, "key": 2,
+                                        "time": "01:35", "scene": "Intro",
+                                        "hint": "stop"})),
+    ("host", lambda d: d.show_host()),
 ):
     d = make_oled()
     fn(d)
@@ -406,44 +527,11 @@ for name, fn in (
 
 i18n.set_lang("tr")
 d = make_oled()
-d.show_menu("AYARLAR", ["Otomatik Dönüş", "Dil", "Katman bandı",
-                        "Profil bandı", "Hakkında", "Yeniden Başlat"], 0)
-golden("menu_tr", d)
-
-# ---------- the published demo must agree with the firmware ----------
-# docs/font.html is what people (and we, when the device is out of reach) look
-# at to decide whether a screen is right. If its layout drifts from the
-# firmware's, it stops being evidence and starts being decoration.
-viewer = open(os.path.join(REPO, "scripts", "font-viewer.template.html"),
-              encoding="utf-8").read()
-block = viewer[viewer.index("const L = {"):]
-block = block[:block.index("};")]
-L = {}
-# Strip the // comments first — several of them contain commas, which would
-# otherwise split an entry in half.
-code = " ".join(line.split("//")[0] for line in block.split("\n"))
-for part in code.split(","):
-    k, _, v = part.partition(":")
-    k = k.split("{")[-1].strip()
-    v = v.strip()
-    if k.isupper() and v.isdigit():
-        L[k] = int(v)
-
-for name, viewer_value, fw_value in (
-    ("BAR_H", L.get("BAR_H"), oledmod.BAR_H),
-    ("BOT_SEP", L.get("BOT_SEP"), oledmod.BOT_SEP),
-    ("ROW_H", L.get("ROW_H"), oledmod.ROW_H),
-    ("HBAR_Y", L.get("HBAR_Y"), oledmod.HBAR_Y),
-    ("HBAR_H", L.get("HBAR_H"), oledmod.HBAR_H),
-    ("BAND_H", L.get("BAND_H"), oledmod.Oled.BAND_H),
-    ("MENU_VIS", L.get("MENU_VIS"), oledmod.Oled.MENU_VIS),
-    # the viewer stores glyph-box tops; the firmware stores cap centres
-    ("BAR_TEXT", L.get("BAR_TEXT"), oledmod.BAR_Y - 3),
-    ("BOT_TEXT", L.get("BOT_TEXT"), oledmod.BOT_Y - 3),
-    ("MENU_TOP", L.get("MENU_TOP"), oledmod.MENU_TOP - 3),
-):
-    check("demo layout %s matches the firmware" % name, viewer_value == fw_value,
-          "viewer=%s firmware=%s" % (viewer_value, fw_value))
+d.show_settings("AYARLAR", [("Otomatik Dönüş", "text", "10sn"),
+                            ("Dil", "text", "Türkçe"),
+                            ("Katman bandı", "toggle", True),
+                            ("Profil bandı", "toggle", False)], 0)
+golden("settings_tr", d)
 
 print("\n%d checks, %d failed" % (count, len(fails)))
 if BLESS:

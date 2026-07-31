@@ -32,6 +32,17 @@ STRINGS = {
         "firmware": "Firmware",
         "device_id": "Device ID",
         "restart": "Restart",
+        # Added with the redesigned menu.
+        "wheel_layers": "Wheel layers",
+        "boot_disp": "display",
+        "boot_cfg": "profiles",
+        "boot_hid": "USB HID",
+        "update_title": "FIRMWARE UPDATE",
+        "sec_unit": "SEC",
+        "idle_t": "IDLE",
+        "live_t": "LIVE",
+        "rec_t": "REC",
+        "scene_t": "SCENE",
         "speed": "speed",
         "auto_return_title": "AUTO RETURN",
         "lang_title": "SETTINGS > LANGUAGE",
@@ -52,6 +63,8 @@ STRINGS = {
         "setup_test": "SETUP - TEST",
         "press_key": "press a key",
         "keys_test": "KEY TEST",
+        "pixel_test": "Pixel test",
+        "pixel_hint": "any button: back",
         "keys_test_paused": "Macros paused",
         "keys_test_switch": "Use another tab",
         # Settings > Key test — the same check with no app attached
@@ -99,6 +112,17 @@ STRINGS = {
         "firmware": "Yazılım",
         "device_id": "Cihaz No",
         "restart": "Yeniden Başlat",
+        # Yeni menüyle gelenler.
+        "wheel_layers": "Tekerle katman",
+        "boot_disp": "ekran",
+        "boot_cfg": "profiller",
+        "boot_hid": "USB HID",
+        "update_title": "YAZILIM GÜNCELLEME",
+        "sec_unit": "SN",
+        "idle_t": "BOŞTA",
+        "live_t": "YAYINDA",
+        "rec_t": "KAYIT",
+        "scene_t": "SAHNE",
         "speed": "hız",
         "auto_return_title": "OTOMATİK DÖNÜŞ",
         "lang_title": "AYARLAR > DİL",
@@ -117,6 +141,8 @@ STRINGS = {
         "setup_test": "KURULUM - TEST",
         "press_key": "bir tuşa bas",
         "keys_test": "TUŞ TESTİ",
+        "pixel_test": "Piksel testi",
+        "pixel_hint": "herhangi bir tuş: geri",
         "keys_test_paused": "Makrolar durduruldu",
         "keys_test_switch": "Başka sekme kullan",
         "key_test": "Tuş testi",
@@ -161,3 +187,20 @@ def get_lang():
 def tr(key):
     table = STRINGS.get(_lang) or STRINGS[DEFAULT_LANG]
     return table.get(key) or STRINGS[DEFAULT_LANG].get(key, key)
+
+
+def upper(s):
+    """Uppercase the way the UI language wants it.
+
+    str.upper() is locale-blind: it maps Turkish "i" to "I", so the device drew
+    "HATA - SERI KAYDA BAK" where Turkish spells it "SERİ". Turkish is the one
+    language here that needs the dotted/dotless pair handled, and only two
+    characters are involved, so the fix is two replaces rather than a case
+    table the board would have to carry.
+
+    ("ı".upper() is already "I", so only the "i" -> "İ" direction needs help;
+    the second replace is there for text that mixes both.)"""
+    s = str(s)
+    if _lang == "tr":
+        s = s.replace("i", "İ").replace("ı", "I")
+    return s.upper()

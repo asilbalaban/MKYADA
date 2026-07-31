@@ -10,6 +10,11 @@ import type { WheelPreview } from "./oled-draw";
 import { KIND_ICON } from "../components/action-icons";
 import { kindRequiresHost } from "./macro-model";
 
+/** Which key the preview is standing in for. The speed editor prints "A > K3"
+ * from it; callers that don't know (the Settings reference table shows one
+ * example per kind, not a real key) leave it out and get the A/K1 default. */
+export type PreviewWhere = { layer?: string; key?: number };
+
 /** How the picker groups action kinds. Order here is the order shown. */
 export const KIND_CATEGORIES = [
   { id: "keyboard", label: "Keyboard, mouse & text" },
@@ -309,15 +314,16 @@ export function categoryLabel(id: KindCategory): string {
   return KIND_CATEGORIES.find((c) => c.id === id)?.label ?? "";
 }
 
-function speedPreview(speed = 1): WheelPreview {
-  const t = Math.max(1, Math.min(100, Math.round(speed * 10)));
-  const v = t / 10;
+function speedPreview(speed = 1, where?: PreviewWhere): WheelPreview {
+  // The device composes this screen from the layer, the key and the speed in
+  // tenths, so the preview passes the same three things rather than a
+  // pre-rendered picture — that is what keeps oled-draw.test.ts able to check
+  // it against the firmware's own golden image.
   return {
     screen: "speed",
-    title: "SPEED",
-    value: v >= 10 ? String(v | 0) : v.toFixed(1),
-    frac: (t - 1) / 99,
-    action: "Save",
+    layer: where?.layer ?? "A",
+    key: where?.key ?? 1,
+    t: Math.max(1, Math.min(100, Math.round(speed * 10))),
   };
 }
 
@@ -345,7 +351,7 @@ const OBS_CARD: Record<string, { title: string; big: string }> = {
  * OledPreview in the editor and the Settings reference. Representative where
  * live data (scene lists, HTTP status) only exists at run time.
  */
-export function wheelPreview(a: Assignment): WheelPreview {
+export function wheelPreview(a: Assignment, where?: PreviewWhere): WheelPreview {
   switch (a.kind) {
     case "keystroke":
       return { screen: "card", title: "KEY", big: (a.key || "KEY").toUpperCase(), line: "turn: repeat", hint: "run" };
@@ -358,11 +364,11 @@ export function wheelPreview(a: Assignment): WheelPreview {
         hint: "run",
       };
     case "text":
-      return speedPreview(1);
+      return speedPreview(1, where);
     case "recorded":
-      return speedPreview(a.macro?.settings?.speed ?? 1);
+      return speedPreview(a.macro?.settings?.speed ?? 1, where);
     case "volume":
-      return { screen: "slider", title: "VOLUME", value: "40%", frac: 0.4, action: "OK" };
+      return { screen: "slider", title: "VOLUME", hero: "40%", frac: 0.4, action: "OK" };
     case "media": {
       // a browser of every media key, cursor on the assigned one
       const label = (u: string) =>
@@ -414,7 +420,7 @@ export function wheelPreview(a: Assignment): WheelPreview {
         hold: "hold: assign",
       };
     case "mic_level":
-      return { screen: "slider", title: "MIC LEVEL", value: "60%", frac: 0.6, action: "OK" };
+      return { screen: "slider", title: "MIC LEVEL", hero: "60%", frac: 0.6, action: "OK" };
     case "webhook":
       return { screen: "card", title: "WEBHOOK", big: "SEND", line: "last: 200 OK", hint: "run" };
     case "command":

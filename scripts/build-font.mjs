@@ -60,12 +60,8 @@
 // and volume screens) from this same data at boot — they are not stored, so
 // there is exactly one drawn source for every size on screen.
 //
-// Usage: node scripts/build-font.mjs [--preview] [--html] [--term] [--show TEXT] [--check]
+// Usage: node scripts/build-font.mjs [--preview] [--term] [--show TEXT] [--check]
 //        --preview    writes PNG proofs next to the source (atlas + samples)
-//        --html       writes a self-contained browser viewer (live text +
-//                     per-glyph inspector + the real screens + a demo)
-//        --public     with --html: build docs/font.html from the committed
-//                     demo keypad instead of the local device.json
 //        --term       draws the atlas and the sample screens in the terminal
 //        --show TEXT  draws just TEXT, at 1x and at the 2x hero size
 //        --check      compiles and validates without writing the .fnt
@@ -81,9 +77,6 @@ const OUT_DIR = path.join(ROOT, "firmware", "fonts");
 const PREVIEW = process.argv.includes("--preview");
 const CHECK = process.argv.includes("--check");
 const TERM = process.argv.includes("--term");
-const HTML = process.argv.includes("--html");
-// Build the page the repo publishes: committed demo keypad, into docs/.
-const PUBLIC = process.argv.includes("--public");
 const SHOW = process.argv.includes("--show")
   ? process.argv[process.argv.indexOf("--show") + 1] ?? ""
   : null;
@@ -495,59 +488,6 @@ for (const src of sources) {
     console.log(`\n  ${stem}: "${SHOW}"  (1x / 2x / inverted)\n`);
     console.log(buildShow(font, SHOW).toTerm());
     console.log();
-  }
-  if (HTML) {
-    const tpl = fs.readFileSync(path.join(ROOT, "scripts", "font-viewer.template.html"), "utf8");
-    const data = {
-      name: font.name ?? stem,
-      boxW: font.boxW,
-      boxH: font.boxH,
-      first: font.first,
-      bytes: bin.length,
-      glyphs: font.glyphs.map((g) => ({ code: g.code, advance: g.advance, rows: g.rows })),
-    };
-    if (!tpl.includes("__FONT_DATA__")) die("viewer template lost its __FONT_DATA__ placeholder");
-    // The demo mirrors a real keypad when scripts/dump-device.mjs has dumped
-    // one; otherwise it falls back to a stock Vision 6 so the page still works
-    // on a machine that has never seen the hardware.
-    // device.json is one particular keypad, dumped by scripts/dump-device.mjs
-    // and gitignored — it carries that board's UID and whatever the owner
-    // named their macros. --public forces the committed demo setup instead,
-    // which is what the published page must use.
-    const devFile = path.join(SRC_DIR, PUBLIC ? "device.demo.json" : "device.json");
-    const fallback = path.join(SRC_DIR, "device.demo.json");
-    const src = fs.existsSync(devFile) ? devFile : fallback;
-    const device = JSON.parse(fs.readFileSync(src, "utf8"));
-    delete device._comment;
-    log(`viewer device: ${path.basename(src)} — ${device.layer_count}x${device.key_count}, ` +
-        `${Object.keys(device.keys).length} named keys`);
-    const out = PUBLIC
-      ? path.join(ROOT, "docs", "font.html")
-      : path.join(SRC_DIR, `${stem}-viewer.html`);
-    fs.mkdirSync(path.dirname(out), { recursive: true });
-    let page = tpl
-      .replaceAll("__FONT_DATA__", JSON.stringify(data))
-      .replaceAll("__DEVICE_DATA__", JSON.stringify(device));
-    if (PUBLIC) {
-      // The template is a body fragment because the artifact host supplies the
-      // document shell; a page served by GitHub Pages has to bring its own.
-      page = `<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>MKYADA font &amp; keypad demo</title>
-<meta name="description" content="The bitmap font the MKYADA Vision 6 draws with, and a keypad you can drive in the browser." />
-<style>*{box-sizing:border-box}html,body{margin:0}</style>
-</head>
-<body>
-${page}
-</body>
-</html>
-`;
-    }
-    fs.writeFileSync(out, page);
-    log(`viewer: ${path.relative(ROOT, out)}`);
   }
   if (TERM) {
     for (const { name, c } of [{ name: "atlas", c: buildAtlas(font) }, ...buildSamples(font)]) {

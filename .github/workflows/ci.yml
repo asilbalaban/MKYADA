@@ -15,10 +15,25 @@ jobs:
           python-version: "3.12"
       - name: Syntax-check firmware
         run: python3 -m py_compile firmware/boot.py firmware/code.py firmware/mkyada/*.py
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      # The icon family has three generated consumers (simulator, firmware,
+      # app). icons/src/icons.txt is the only editable copy, so an edit that
+      # never ran the generator would leave the device drawing one picture and
+      # the app offering another.
+      - name: Icons match their source
+        run: node scripts/build-icons.mjs --check
+      # The device's UI strings are the firmware's; the web side's copy is
+      # generated. The screens are laid out around how wide these are, so a
+      # string edited on one side only is a layout bug waiting to happen.
+      - name: UI strings match the firmware
+        run: node scripts/build-oled-i18n.mjs --check
       - name: Firmware simulation tests
         run: python3 tests/firmware_sim_test.py
-      # Renders all 19 OLED screens into a real 128x64 buffer and diffs them
-      # against tests/golden/*.txt. Regenerate deliberately with --bless.
+      # Renders every OLED screen into a real 128x64 buffer, checks the
+      # structural invariants, and diffs the pictures against
+      # tests/golden/*.txt. Regenerate deliberately with --bless.
       - name: OLED render + golden-image tests
         run: python3 tests/oled_render_test.py
 
@@ -47,6 +62,13 @@ jobs:
         run: |
           npm ci
           npm run build
+      # docs/simulator.html carries a pre-bundled copy of the app's own drawing
+      # modules so it works as a static file. Committed for that reason, which
+      # means it can go stale — this proves it hasn't.
+      - name: Demo page bundle matches the app's modules
+        run: |
+          node scripts/build-demo.mjs
+          git diff --exit-code -- docs/simulator.html
       # firmware/fonts/*.fnt is committed because it ships in the bundle, so the
       # thing that can go wrong is an edited .txt with a stale .fnt beside it —
       # the device would keep drawing the old glyphs and nothing would say so.
@@ -54,8 +76,7 @@ jobs:
       - name: Font compiles and matches its source
         run: |
           node scripts/build-font.mjs
-          node scripts/build-font.mjs --html --public
-          git diff --exit-code -- firmware/fonts/ docs/font.html app/src/lib/oled-font.ts
+          git diff --exit-code -- firmware/fonts/ app/src/lib/oled-font.ts
 
       # The published OLED pictures are firmware renders, not artwork: an
       # oled.py change must reach docs/images/oled or the site starts showing a

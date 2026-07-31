@@ -1,0 +1,11 @@
+# The golden screen renders are a fixture two languages read: Python writes
+# them (tests/oled_render_test.py --bless) and TypeScript diffs against them
+# (app/src/lib/oled-draw.test.ts). On Windows, core.autocrlf would hand the
+# checkout CRLF and --bless would immediately rewrite it back to LF, so every
+# re-bless would show the whole set as modified for no reason. Pin them.
+tests/golden/*.txt text eol=lf
+
+# Same deal for the two ASCII design sources — they are parsed by generators
+# whose line handling is exact, and a stray CR is not worth debugging twice.
+fonts/src/*.txt text eol=lf
+icons/src/*.txt text eol=lf

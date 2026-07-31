@@ -568,6 +568,11 @@ export function compileAssignment(a: Assignment, name?: string): MacroFile | nul
       compiled.version = 3;
     }
   }
+  // The chosen grid icon rides at the top level, next to the name it sits
+  // above on the glass. Written only when the user picked one: absent means
+  // "whatever the action kind defaults to", which is what old files carry and
+  // what the firmware falls back to for an unknown name.
+  if (compiled && a.icon) compiled.icon = a.icon;
   return compiled;
 }
 
@@ -671,6 +676,7 @@ export function parseAssignment(m: MacroFile): Assignment {
   if (m.name && a.kind !== "recorded" && a.kind !== "none" && compileAssignment(a)?.name !== m.name) {
     a.label = m.name;
   }
+  if (m.icon) a.icon = m.icon;
   return a;
 }
 

@@ -16,8 +16,17 @@ class Bitmap:
         self.width, self.height, self.values = w, h, n
         self.px = bytearray(w * h)
 
+    def check(self, v):
+        """CircuitPython refuses a value the bitmap has no room for, and says
+        so with this exact message. Worth mirroring: a colour argument
+        accidentally shadowed by a character code drew fine here and threw on
+        the board, which cost a flash cycle to find."""
+        if not 0 <= v < self.values:
+            raise ValueError("%r out of range of target" % (v,))
+
     def __setitem__(self, key, v):
         x, y = key if isinstance(key, tuple) else (key % self.width, key // self.width)
+        self.check(v)
         if 0 <= x < self.width and 0 <= y < self.height:
             self.px[y * self.width + x] = v
         else:
@@ -31,6 +40,7 @@ class Bitmap:
         """CircuitPython's memset-style whole-bitmap fill. Fb.clear() uses it
         instead of bitmaptools.fill_region because on the board it is 145x
         faster (0.06ms against 9.3ms) and marks the same dirty area."""
+        self.check(v)
         for i in range(len(self.px)):
             self.px[i] = v
 
@@ -69,6 +79,7 @@ class Group(list):
 
 
 def fill_region(dest, x1, y1, x2, y2, value):
+    dest.check(value)
     for y in range(max(0, y1), min(dest.height, y2)):
         row = y * dest.width
         for x in range(max(0, x1), min(dest.width, x2)):
@@ -98,6 +109,7 @@ def blit(dest, source, x, y, x1=0, y1=0, x2=None, y2=None,
 
 
 def draw_line(dest, x1, y1, x2, y2, value):
+    dest.check(value)
     steps = max(abs(x2 - x1), abs(y2 - y1), 1)
     for i in range(steps + 1):
         x = x1 + (x2 - x1) * i // steps

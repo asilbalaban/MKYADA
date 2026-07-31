@@ -210,6 +210,122 @@ class Fb:
                 continue
             self.rect(x + (w - span) // 2, y + row, span, 1, c)
 
+    # --- v2 chrome ---------------------------------------------------------
+    # Everything below is built on rect() on purpose: no new allocation, no new
+    # displayio object, and each one is a handful of fill_region calls. They are
+    # the vocabulary the redesigned screens are drawn in (docs/simulator.html
+    # holds the same set in JavaScript, primitive for primitive).
+
+    def fill(self, c=1):
+        """Whole screen to one value. clear() is fill(0); the boot screen is
+        fill(1) with everything carved out of it."""
+        self.bmp.fill(c)
+
+    def frame(self, x, y, w, h, c=1):
+        """Plain rectangle outline."""
+        self.hline(x, y, w, c)
+        self.hline(x, y + h - 1, w, c)
+        self.vline(x, y, h, c)
+        self.vline(x + w - 1, y, h, c)
+
+    def rfill(self, x, y, w, h, c=1, bg=0):
+        """Filled block with its four corner pixels punched back to `bg` — at
+        this size that reads as a rounded block."""
+        self.rect(x, y, w, h, c)
+        self.rect(x, y, 1, 1, bg)
+        self.rect(x + w - 1, y, 1, 1, bg)
+        self.rect(x, y + h - 1, 1, 1, bg)
+        self.rect(x + w - 1, y + h - 1, 1, 1, bg)
+
+    def rframe(self, x, y, w, h, c=1):
+        """rfill's outline: edges drawn, corners left empty."""
+        self.hline(x + 1, y, w - 2, c)
+        self.hline(x + 1, y + h - 1, w - 2, c)
+        self.vline(x, y + 1, h - 2, c)
+        self.vline(x + w - 1, y + 1, h - 2, c)
+
+    def sw(self, x, y, on, c=1):
+        """17x8 on/off switch. `c` is the drawing colour: a selected settings
+        row is an inverted block, so its switch has to be carved out of it (0)
+        or it disappears into the fill."""
+        b = 0 if c else 1
+        if on:
+            self.rfill(x, y, 17, 8, c, b)
+            self.rect(x + 10, y + 2, 5, 4, b)
+        else:
+            self.rframe(x, y, 17, 8, c)
+            self.rect(x + 3, y + 2, 5, 4, c)
+
+    def sbarv(self, x, y, h, ty, th):
+        """Thin vertical scrollbar: dotted track one pixel to the right, a 3px
+        wide thumb over it."""
+        yy = y
+        while yy < y + h:
+            self.rect(x + 1, yy, 1, 1)
+            yy += 2
+        self.rect(x, ty, 3, th)
+
+    def segbar(self, x, y, w, h, n, f):
+        """Segmented value bar: `n` segments, the first `f` filled, the rest
+        showing only their baseline."""
+        step = (w + 1) // n
+        sw_ = step - 1
+        for i in range(n):
+            sx = x + i * step
+            if i < f:
+                self.rect(sx, y, sw_, h)
+            else:
+                self.rect(sx, y + h - 1, sw_, 1)
+
+    def icon(self, x, y, data, c=1):
+        """8x8 icon from 8 packed bytes, one per row, bit 7 = leftmost pixel.
+        Scanned by row and emitted as runs, the same trick big() uses: an icon
+        averages ~4 runs a row instead of 8 pixel-sized fill_region calls."""
+        if not data:
+            return
+        for row in range(8):
+            bits = data[row]
+            if not bits:
+                continue
+            run = 0
+            for col in range(8):
+                if bits & (0x80 >> col):
+                    run += 1
+                    continue
+                if run:
+                    self.rect(x + col - run, y + row, run, 1, c)
+                    run = 0
+            if run:
+                self.rect(x + 8 - run, y + row, run, 1, c)
+
+    def icon2(self, x, y, data, c=1):
+        """Same icon at 2x — the dialog and alert screens."""
+        if not data:
+            return
+        for row in range(8):
+            bits = data[row]
+            if not bits:
+                continue
+            run = 0
+            for col in range(8):
+                if bits & (0x80 >> col):
+                    run += 1
+                    continue
+                if run:
+                    self.rect(x + (col - run) * 2, y + row * 2, run * 2, 2, c)
+                    run = 0
+            if run:
+                self.rect(x + (8 - run) * 2, y + row * 2, run * 2, 2, c)
+
+    def dither(self):
+        """50% checkerboard — the backdrop the saved/toast dialogs sit on, so
+        the screen behind still reads as present but clearly inactive."""
+        for y in range(self.H):
+            x = y & 1
+            while x < self.W:
+                self.rect(x, y, 1, 1)
+                x += 2
+
     # --- text ---
     def text(self, s, x, y, anchor=0.5, invert=False, vcenter=True):
         """Draw `s` with its box-left at x (anchor 0.0), centred (0.5) or
@@ -253,13 +369,16 @@ class Fb:
             x += a
         return x
 
-    def big(self, s, x, y, scale=2, anchor=0.5):
+    def big(self, s, x, y, scale=2, anchor=0.5, c=1):
         """Scaled text for the hero numbers (speed, volume, the boot wordmark).
 
         Drawn by expanding lit pixels rather than from a pre-scaled atlas: the
         hero lines are at most a handful of characters and never on a hot path,
         so a few fill_region calls are cheaper than the ~500 bytes a second
         atlas would cost forever.
+
+        `c` is the drawing colour. The boot screen is an inverted field, so its
+        wordmark is carved out of it with c=0 rather than blitted onto it.
 
         Scanned by ROW, emitting one rect per run of lit pixels. Per-pixel
         rects meant ~40 fill_region calls for a two-digit hero at ~50us of call
@@ -278,8 +397,13 @@ class Fb:
         first = f.first
         last = f.last
         for ch in s:
-            c = ord(ch)
-            i = c - first if first <= c <= last else f.index(ch)
+            # NOT `c` — that is the colour parameter. Shadowing it here made
+            # every rect below take a character code as its colour, which
+            # fill_region rejects on a 2-value bitmap ("out of range of
+            # target"), and since the boot splash is the first thing drawn the
+            # whole display fell back to headless.
+            cp = ord(ch)
+            i = cp - first if first <= cp <= last else f.index(ch)
             gx = i * bw
             for cy in range(bh):
                 run = 0
@@ -289,10 +413,10 @@ class Fb:
                         continue
                     if run:
                         self.rect(x + (cx - run) * scale, y + cy * scale,
-                                  run * scale, scale)
+                                  run * scale, scale, c)
                         run = 0
                 if run:
                     self.rect(x + (bw - run) * scale, y + cy * scale,
-                              run * scale, scale)
+                              run * scale, scale, c)
             x += adv[i] * scale
         return x
