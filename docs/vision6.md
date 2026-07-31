@@ -52,6 +52,13 @@ flash.
 
 ## Screens & controls
 
+**Try the menu in a browser: [simulator.html](simulator.html).** It is not a
+mockup either — `firmware/mkyada/oled.py` and `firmware/mkyada/ui.py` are ported
+to JavaScript in that one file, with the shipped `mkyada.fnt` embedded, so the
+whole menu (wheel menus, host menus, key test, bands, update/error screens)
+runs and can be changed without flashing a board. See
+[Working on the menu](#working-on-the-menu) below.
+
 Real renders of the 128×64 OLED (layer A, nicknamed "Stream" — the nickname
 shows in the grid's band; the layer picker always shows the plain letter) —
 produced by
@@ -101,6 +108,27 @@ device's pixels rather than a drawing of them.
   the band on top if enabled — so you can see what the keys do, not just
   that an app owns them. Falls back to a plain "Connected to app" note on
   older apps.
+
+## Working on the menu
+
+[`docs/simulator.html`](simulator.html) is where menu changes get tried before
+they reach a board. Open the file — no server, no build, no dependencies — and
+the whole Vision 6 UI runs in the page: six macro keys, the wheel with push,
+BACK and CONFIRM, plus a panel that simulates the desktop app (connect, host
+mode, OBS record/stream, the read-only USB drive, a firmware update) so the
+host-fed wheel menus and the band markers are reachable too. Screen scale is
+1× (the SH1106's real 128×64) through 7×.
+
+It is a **hand-maintained port**, not generated: sections 1–7 of the file map
+one-to-one onto `fonts/mkyada.fnt`, `font.py`, `i18n.py`, `oled.py` and
+`ui.py`, layout constants included. Changing a menu means changing both sides —
+the simulator first, the firmware after. Two things keep it honest:
+
+- `node scripts/embed-sim-font.mjs` re-embeds `mkyada.fnt` when the font
+  changes (`--check` verifies without writing).
+- `tests/golden/*.txt` are ASCII renders of the real firmware screens, produced
+  by `tests/oled_render_test.py` through the software displayio — the reference
+  to diff a suspicious simulator screen against.
 
 ## Custom wheel / button assignments
 

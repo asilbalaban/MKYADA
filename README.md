@@ -81,7 +81,9 @@ Unlike most DIY macro pads that just remap keys, MKYADA plays back **full record
 
 The Vision 6's own OLED screens. These are not mockups: `scripts/render-oled.py`
 runs the firmware's drawing code over the font the device flashes, so every lit
-pixel here is a pixel the SH1106 lights.
+pixel here is a pixel the SH1106 lights. The whole menu also runs in a browser —
+open [`docs/simulator.html`](docs/simulator.html) to drive the keys, wheel and
+buttons without a board.
 
 <p align="center">
   <img src="docs/images/oled/home.png" alt="Vision 6 Home" width="170">
