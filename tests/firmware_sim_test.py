@@ -1697,6 +1697,36 @@ check("set menu has key test", _items[uimod.SET_KEYTEST][0] == "Key test")
 # Settings > Pixel test: the whole panel lights so a dead column or a stuck row
 # shows up. Nothing on it is readable, so EVERY button has to be a way out —
 # that is the invariant worth locking down.
+from mkyada import icons as fw_icons  # noqa: E402
+
+# --- the grid's six icons: named, drawn, absent, retired, or refused ---
+# Three states are easy to collapse into two by accident: no "icon" field means
+# "the action family chooses", and only the reserved name "none" means "draw
+# nothing". Without the second there was no way to ask for a bare, full-width
+# name on a key whose kind has a default.
+_ico_l = ui.app.layer
+ui._icons.clear()
+ui._kinds.clear()
+for _k in range(6):
+    ui._kinds[(_ico_l, _k)] = ("keystroke", None)
+ui._icons[(_ico_l, 0)] = "rocket"
+ui._icons[(_ico_l, 1)] = "none"
+ui._icons[(_ico_l, 2)] = "px:183c7effc3c30000"
+ui._icons[(_ico_l, 3)] = "no-such-icon-was-ever-shipped"
+_ico = ui._grid_icons(_ico_l)
+check("a named icon is drawn", _ico[0] == fw_icons.get("rocket"))
+check("\"none\" draws nothing, not the kind default", _ico[1] is None)
+check("a hand-drawn icon is drawn",
+      _ico[2] == b"\x18\x3c\x7e\xff\xc3\xc3\x00\x00")
+# A retired name must fall back rather than blank the tile — the opposite of
+# "none", and the reason "none" had to be a name of its own.
+check("a retired name falls back to the kind default",
+      _ico[3] == fw_icons.get("keyboard"))
+check("no icon field means the kind default",
+      _ico[4] == fw_icons.get("keyboard"))
+ui._icons.clear()
+ui._kinds.clear()
+
 _px = 4000.0
 ui.state = uimod.S_SET_MENU
 ui.set_menu_sel = uimod.SET_PIXTEST

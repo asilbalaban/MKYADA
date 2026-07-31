@@ -172,7 +172,10 @@ packing *is* the flash layout, so the firmware reads the same bytes without
 conversion. A macro picks one by **name** (`"icon": "rocket"` in its JSON),
 never by index: names are permanent, so reordering or extending the set can
 never repoint a user's macro at a different picture. An unknown name falls back
-to the action family's default.
+to the action family's default. One name is reserved: `"icon": "none"` means
+**draw nothing**, which is a different thing from having no `icon` field at all
+(that one means "the action family chooses") — without it there was no way to
+ask for a bare, full-width name on a key whose kind has a default picture.
 
 Since firmware 0.25.0 the field can also be the picture instead of a name:
 `"icon": "px:183c7effc3c30000"` is those same eight rows written out in hex,

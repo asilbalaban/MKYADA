@@ -233,8 +233,8 @@ function core6(): Fixture {
   };
   const hello: Hello = {
     t: "hello",
-    fw: "0.21.1",
-    proto: 10,
+    fw: "0.25.0",
+    proto: 12,
     format: "mkyada-config",
     uid: "E6605481DB334C2A",
     key_count: 6,
@@ -286,8 +286,8 @@ function vision6(): Fixture {
   };
   const hello: Hello = {
     t: "hello",
-    fw: "0.21.1",
-    proto: 10,
+    fw: "0.25.0",
+    proto: 12,
     format: "mkyada-config",
     uid: "E6605481DB119A7F",
     key_count: 6,
@@ -299,6 +299,7 @@ function vision6(): Fixture {
     nav: ["GP2", "GP3", "GP4"],
     show_layer: true,
     show_profile: true,
+    wheel_layers: false,
     timeout: 10,
     enc_swap: false,
     layer_names: ["Stream", "Edit", "Dev"],

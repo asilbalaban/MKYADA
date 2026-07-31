@@ -26,7 +26,9 @@ v11 (firmware 0.23.0) is the **new menu** release. Two additions:
   reordering the family cannot repoint an existing macro at a different
   picture; an unknown name falls back to the default rather than blanking the
   cell. Old firmware ignores the field entirely. Since v12 the field may also
-  carry the eight rows inline (`px:` above) instead of a name.
+  carry the eight rows inline (`px:` above) instead of a name, and the reserved
+  name `"none"` means *draw nothing* — distinct from an absent field, which
+  means "use the kind's default".
 - **`mtype:"obs"`** — a fourth wheel-menu shape (see `menu` below): a live OBS
   status screen rather than a chooser.
 

@@ -48,12 +48,25 @@ export function defaultIconFor(kind: string): string | null {
   return KIND_ICON[kind] ?? null;
 }
 
-/** One icon drawn at `scale`, straight from the packed bytes. */
+/** The reserved icon name meaning "draw no icon at all", as opposed to an
+ *  absent field, which means "let the action family choose". Read the same way
+ *  by Ui._grid_icons in firmware/mkyada/ui.py. */
+export const NO_ICON = "none";
+
+/** One icon drawn at `scale`, straight from the packed bytes.
+ *
+ * Drawn in the surrounding text colour, not the display's own near-white blue
+ * (#eaf3ff). That blue is right on the black glass and right in the OLED
+ * preview beside this list, but on the app's panel it is a pale wash that
+ * barely registers as a shape — 270 of them side by side were unreadable.
+ * Reading the computed colour off the canvas keeps it correct in both
+ * themes without hard-coding either one. */
 function Swatch({ name, scale = 2, title }: { name: string | null; scale?: number; title?: string }) {
   const ref = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
-    const c = ref.current?.getContext("2d");
-    if (c) drawIconSwatch(c, name ?? "", scale);
+    const el = ref.current;
+    const c = el?.getContext("2d");
+    if (el && c) drawIconSwatch(c, name ?? "", scale, getComputedStyle(el).color);
   }, [name, scale]);
   return (
     <canvas
@@ -169,10 +182,18 @@ function IconDrawer({
               aria-pressed={on}
               className={`h-[22px] w-[22px] ${on ? "bg-accent" : "bg-panel2 hover:bg-panel"}`}
               onPointerDown={(e) => {
-                // Capture on the cell that started the stroke: without it the
-                // browser keeps sending the moves to that one element and
-                // dragging across the grid paints a single pixel.
-                e.currentTarget.releasePointerCapture?.(e.pointerId);
+                // Touch implicitly captures the pointer on the cell the stroke
+                // started in, so every later move is delivered there and a drag
+                // across the grid paints exactly one pixel. Releasing hands the
+                // moves back to whatever is under the finger. Chromium ignores
+                // a release with nothing captured, but the spec lets an engine
+                // throw, and losing this handler would mean a click that draws
+                // nothing — cheap to guard, expensive to debug.
+                try {
+                  e.currentTarget.releasePointerCapture(e.pointerId);
+                } catch {
+                  /* nothing was captured — a mouse, nothing to hand back */
+                }
                 stroke.current = !on;
                 apply(x, y, !on);
               }}
@@ -240,7 +261,11 @@ export function IconPicker({
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
   const fallback = defaultIconFor(assignment.kind);
-  const effective = value ?? fallback;
+  // Three distinct states, not two: no field at all means "the action family
+  // picks", which is why asking for a bare cell needs a name of its own.
+  // NO_ICON is that name, and the firmware reads it the same way (_grid_icons).
+  const none = value === NO_ICON;
+  const effective = none ? null : (value ?? fallback);
   const custom = !!value?.startsWith(CUSTOM_ICON_PREFIX);
   // An icon already drawn stays editable even on firmware that can't show it —
   // hiding the way back in would strand the drawing inside the macro file.
@@ -286,8 +311,25 @@ export function IconPicker({
         >
           <Swatch name={shown} scale={2} />
           <span className="text-fg-muted">
-            {custom ? "Drawn by you" : (value ?? `Automatic${fallback ? ` (${fallback})` : ""}`)}
+            {custom
+              ? "Drawn by you"
+              : none
+                ? "No icon"
+                : (value ?? `Automatic${fallback ? ` (${fallback})` : ""}`)}
           </span>
+        </button>
+        <button
+          type="button"
+          aria-pressed={none}
+          onClick={() => {
+            setDrawing(false);
+            // Clicking it again is the way back to automatic, the same rule
+            // the swatches follow — otherwise "no icon" is a one-way door.
+            onChange(none ? undefined : NO_ICON);
+          }}
+          className={`text-xs underline ${none ? "text-fg" : "text-fg-faint hover:text-fg-muted"}`}
+        >
+          No icon
         </button>
         {canDraw && (
           <button
@@ -353,7 +395,10 @@ export function IconPicker({
                         // automatic icon — otherwise there is no way out of a
                         // choice except finding the kind's default by eye.
                         onClick={() => onChange(picked ? undefined : n)}
-                        className={`rounded border p-1 ${
+                        // text-fg is not decoration: Swatch draws the icon in
+                        // its own computed colour, so this is what makes the
+                        // pixels legible on the panel.
+                        className={`rounded border p-1 text-fg ${
                           picked ? "border-accent bg-panel2" : "border-transparent hover:border-line"
                         }`}
                       >
@@ -369,9 +414,11 @@ export function IconPicker({
         </div>
       )}
       <span className="text-[11px] text-fg-faint">
-        {iconBytes(effective)
-          ? "Shown above the name in the key grid. A name that needs two lines drops the icon."
-          : "This action has no default icon; the cell shows the name alone."}
+        {none
+          ? "No picture on this key — the cell is the name alone, on two lines if it needs them."
+          : iconBytes(effective)
+            ? "Shown above the name in the key grid. A name that needs two lines drops the icon."
+            : "This action has no default icon; the cell shows the name alone."}
       </span>
     </div>
   );

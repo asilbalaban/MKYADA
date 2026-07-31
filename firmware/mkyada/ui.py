@@ -847,11 +847,18 @@ class Ui:
     def _grid_icons(self, l):
         """The six action icons. A macro's own "icon" name wins; without one
         the action family's default is used. An unknown name also falls back —
-        an icon retired from the set must never blank a tile."""
+        an icon retired from the set must never blank a tile.
+
+        The one name that means "draw nothing" is "none": a macro with no icon
+        field at all gets the family default, so without a way to say it out
+        loud there was no way to ask for a bare, full-width name."""
         from mkyada import icons
         out = []
         for k in range(6):
             name = self._icons.get((l, k))
+            if name == "none":
+                out.append(None)
+                continue
             art = icons.get(name) if name else None
             if art is None:
                 kind = self._kinds.get((l, k), (None, None))[0]

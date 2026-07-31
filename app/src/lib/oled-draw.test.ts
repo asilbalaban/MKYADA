@@ -20,7 +20,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { renderWheelScreen, type WheelPreview } from "./oled-draw";
 import { OledScreens, type SettingsItem } from "./oled-screens";
 import { oledFont } from "./oled-fb";
-import { iconBytes, packCustomIcon } from "./oled-icons";
+import { ICON_NAMES, iconBytes, packCustomIcon } from "./oled-icons";
 import { setLang } from "./oled-i18n";
 
 const GOLDEN = resolve(__dirname, "../../../tests/golden");
@@ -254,6 +254,15 @@ describe("the icon family", () => {
   it("round-trips a named icon through the drawn form", () => {
     const src = iconBytes("rocket")!;
     expect(Array.from(iconBytes(packCustomIcon(src))!)).toEqual(Array.from(src));
+  });
+
+  // "none" is the reserved name for "draw nothing" (IconPicker's NO_ICON,
+  // read the same way by Ui._grid_icons). If the family ever shipped an icon
+  // called "none" the two meanings would collide and every key asking for a
+  // bare cell would sprout a picture instead.
+  it("keeps the reserved no-icon name out of the family", () => {
+    expect(ICON_NAMES).not.toContain("none");
+    expect(iconBytes("none")).toBeNull();
   });
 
   it("reads a malformed drawn icon as no icon", () => {
