@@ -851,7 +851,8 @@ var MKOLED = (() => {
       "assigned": "assigned",
       "hold_set": "hold: assign",
       "menu_t": "LAYER",
-      "mic_t": "MIC"
+      "mic_t": "MIC",
+      "vol_app_note": "% needs the app"
     },
     tr: {
       "loading": "yükleniyor",
@@ -929,7 +930,8 @@ var MKOLED = (() => {
       "assigned": "atandı",
       "hold_set": "tut: ata",
       "menu_t": "KATMAN",
-      "mic_t": "MİKROFON"
+      "mic_t": "MİKROFON",
+      "vol_app_note": "% için uygulama gerekli"
     }
   };
   var current = DEFAULT_LANG;
