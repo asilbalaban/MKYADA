@@ -262,7 +262,8 @@
 
   <p><b>Gezinme.</b> Cihaz son katmanın <b>ızgarasında</b> açılır. Izgarada teker hücre seçer, <code>BACK</code> <b>katman seçiciye</b> (Home) çıkar, en sağdaki <code>SETTINGS</code> girişi <b>Ayarlar</b>'ı açar. <code>CONFIRM</code>/<code>PSH</code> seçili tuşun <b>teker menüsünü</b> açar.</p>
 
-  <p><b>Teker menüsü bağlama duyarlı.</b> Kaydedilmiş makro / metin → hız düzenleyici. Tuş / kısayol → çevirince tekrar eder. Medya → tüm medya tuşlarını gezersin, <b>basılı tutunca</b> tuşu o eyleme yeniden atar (cihaz dosyayı kendi yazar, uygulamasız çalışır). Katman / menü tuşu → aynı gramerle katmanlar ve Home/Grid/Settings. Ses ve mikrofon seviyesi → <b>fiziksel basış doğrudan kaydırıcıyı açar</b>.</p>
+  <p><b>Teker menüsü bağlama duyarlı.</b> Kaydedilmiş makro / metin / <b>dizi (sequence)</b> → hız düzenleyici (dizinin adım gecikmeleri de hıza uyar). Tuş / kısayol → çevirince tekrar eder. Medya → tüm medya tuşlarını gezersin, <b>basılı tutunca</b> tuşu o eyleme yeniden atar (cihaz dosyayı kendi yazar, uygulamasız çalışır). Katman / menü tuşu → aynı gramerle katmanlar ve Home/Grid/Settings. Ses ve mikrofon seviyesi → <b>fiziksel basış doğrudan kaydırıcıyı açar</b>; uygulamasız ses kartı yüzdenin uygulama gerektirdiğini söyler.</p>
+  <p><b>Çoklu tanım (app 0.38.0).</b> Bir ses / dosya / komut / webhook tuşuna uygulamadan 5'e kadar tanım eklenebilir. Tekere basınca <b>liste</b> açılır: <b>tap</b> seçileni hemen kullanır (menü açık kalır), <b>basılı tutmak</b> onu tuşun varsayılanı yapar. Listede satıra uygulamada verilen <b>ad</b>, verilmemişse <b>dosya adı</b> görünür. Tek tanımlı tuşun kartında <i>"add more in app"</i> satırı çıkar. Denemek için: B katmanındaki <b>Airhorn</b> (3 ses) ve C katmanındaki <b>Discord</b> (3 hedef) — uygulama bağlıyken.</p>
 
   <p><b>Host eylemleri</b> (OBS, mikrofon, webhook, komut, uygulama başlat, ses çal, dizi) uygulama bağlıyken menüyü <b>uygulamadan</b> alır: liste, kaydırıcı ya da durum kartı. Uygulama kapalıyken <code>MKYADA uygulaması gerekli</code> uyarısı çıkar.</p>
 
@@ -1739,6 +1740,93 @@ var MKOLED = (() => {
       fb.hline(0, 51, this.W);
       if (o.hint) this._txt(f.fit(String(o.hint), 124), this.CX, 54);
     }
+    /** OBS Center dashboard (proto v13). Every widget is optional — a None
+     * field means the app turned it off — and the enabled ones reflow top-down,
+     * vertically centred in whatever room the quick-key row leaves. The timer
+     * drops from 2x to 1x only when the stack would not fit, which is the
+     * everything-on + six-labels case. Mirrors oled.py show_obscenter. */
+    show_obscenter(o) {
+      const fb = this.fb;
+      const f = this.font;
+      this.clear();
+      fb.rect(0, 0, this.W, BAR_H);
+      this._txt("OBS", 2, 1, 0, true);
+      const rec = o.rec ?? null;
+      const live = o.live ?? null;
+      if (rec !== null || live !== null) {
+        const lab = rec ? upper(tr("rec_t")) : live ? upper(tr("live_t")) : upper(tr("idle_t"));
+        const dot = rec ? 5 : 0;
+        const bw = f.measure(lab) + 6 + dot;
+        const bx = this.W - 2 - bw;
+        fb.rfill(bx, 1, bw, 7, 0, 1);
+        if (rec && o.blink) fb.rect(bx + 3, 3, 3, 3);
+        this._txt(lab, bx + 3 + dot, 1, 0);
+      }
+      const t = o.time ?? null;
+      const sc = o.scene ?? null;
+      const mic = o.mic ?? null;
+      const cpu = o.cpu ?? null;
+      const fps = o.fps ?? null;
+      const drop = o.drop ?? null;
+      const health = cpu !== null || fps !== null || drop !== null;
+      const kl = o.klabels ?? null;
+      const bot = kl !== null ? 50 : 62;
+      const avail = bot - 11;
+      let th = 16;
+      let total = (t !== null ? th + 2 : 0) + (sc !== null ? 11 : 0) + (mic !== null ? 9 : 0) + (health ? 10 : 0);
+      if (total) total -= 2;
+      if (t !== null && total > avail) {
+        total -= 8;
+        th = 8;
+      }
+      let y = 11 + Math.max(0, Math.trunc((avail - total) / 2));
+      if (t !== null) {
+        if (th === 16) this._hero(String(t || "00:00"), this.CX, y, 2, 0.5, 1, 124);
+        else this._txt(f.fit(String(t || "00:00"), 124), this.CX, y);
+        y += th + 2;
+      }
+      const focus = o.focus ?? null;
+      if (sc !== null) {
+        const sl = upper(tr("scene_t"));
+        const sx = Math.max(38, 2 + f.measure(sl) + 4);
+        this._txt(sl, 2, y + 1, 0);
+        if (focus === "scene") {
+          fb.frame(0, y, f.measure(sl) + 5, 9);
+        }
+        const sn = f.fit(String(sc), this.W - sx - 6);
+        fb.rfill(sx, y, f.measure(sn) + 6, 9, 1);
+        this._txt(sn, sx + 3, y + 1, 0, true);
+        y += 11;
+      }
+      if (mic !== null) {
+        const ml = upper(tr("mic_t"));
+        const mx = Math.max(24, 2 + f.measure(ml) + 4);
+        if (o.mute) {
+          fb.rect(0, y, f.measure(ml) + 4, 7);
+          this._txt(ml, 2, y, 0, true);
+        } else {
+          this._txt(ml, 2, y, 0);
+        }
+        if (focus === "mic") {
+          fb.frame(0, y - 1, f.measure(ml) + 6, 9);
+        }
+        fb.segbar(mx, y, this.W - 6 - mx, 7, 14, Math.max(0, Math.trunc(mic * 14 / 100 + 0.5)));
+        y += 9;
+      }
+      if (health) {
+        if (cpu !== null) this._txt(`CPU ${cpu}%`, 2, y, 0);
+        if (drop !== null) this._txt(`DROP ${drop}`, this.CX, y, 0.5);
+        if (fps !== null) this._txt(`${fps} FPS`, this.W - 2, y, 1);
+        y += 10;
+      }
+      if (kl !== null) {
+        fb.hline(0, 52, this.W);
+        for (let i = 0; i < 6; i++) {
+          const s = i < kl.length && kl[i] ? String(kl[i]) : "";
+          if (s) this._txt(f.fit(s, 20), 11 + i * 21, 55, 0.5);
+        }
+      }
+    }
     /** The design's fault screen: a 2x warning icon with two lines beside it.
      * Theirs sits high because an error code and a retry line follow; we have
      * neither, so the block is centred between bar and bottom. */
@@ -1840,7 +1928,7 @@ const UI_SLOTS=["enc-cw","enc-ccw","btn-back","btn-confirm","btn-psh"];
 const KEY_PINS=["GP29","GP28","GP27","GP26","GP15","GP14"];   // vision6 pin_order
 const NAV_PINS=["GP4","GP5","GP6"];                            // PSH, BACK, CONFIRM
 const ENC_PINS=["GP2","GP3"];
-const FW_VERSION="0.25.0";
+const FW_VERSION="0.26.0";
 const UID="E66138935F63";
 
 const CFG={
@@ -1867,12 +1955,22 @@ const MACROS={
      {name:"Record",kind:"obs",sub:"record"},
      {name:"Mic",kind:"mic",sub:"toggle"},
      {name:"Mic Gain",kind:"mic_level"},
-     {name:"Airhorn",kind:"sound"},
-     {name:"Go Live",kind:"sequence"}],
+     // Çoklu ses (app 0.38.0): `sound` varsayılan, `sounds` tam liste —
+     // tekerde liste açılır; tap = çal, tut = varsayılan yap. Satıra ad
+     // verilmişse o, verilmemişse dosya adı görünür (applause örneği).
+     {name:"Airhorn",kind:"sound",sound:"airhorn.mp3",
+      sounds:[{label:"Airhorn",sound:"airhorn.mp3"},
+              {sound:"applause.mp3"},
+              {label:"Davul",sound:"drumroll.mp3"}]},
+     // Sequence artık tekerde hız düzenler (adım gecikmeleri hıza uyar).
+     {name:"Go Live",kind:"sequence",speed:10}],
   2:[{name:"Zoom",kind:"scroll",sub:"v"},
      {name:"Signature",kind:"text",speed:14},
+     // Build tek komut: kartta "add more in app" satırı görünür.
      {name:"Build",kind:"command"},
-     {name:"Discord",kind:"launch"},
+     // Çoklu hedef: tekerde liste (tap = aç, tut = varsayılan yap).
+     {name:"Discord",kind:"launch",target:"Discord.app",
+      targets:["Discord.app","Slack.app","Teams.app"]},
      {name:"Lights",kind:"webhook"},
      {name:"Home",kind:"menu",sub:"home"}],
   // Adsız katman: yalnız iki tuşu dolu, kalanı boş — yeni açılmış bir
@@ -1937,10 +2035,36 @@ const APP_HOST={
       UI.on_menu({key:APP.ctxKey,mtype:"slider",title:tr("volume"),
         value:APP.sysvol,min:0,max:100,step:2,unit:"%",action:tr("save")});
     } else {
-      const name=(MACROS[DEV.layer][APP.ctxKey-1]||{}).name||"";
-      UI.on_menu({key:APP.ctxKey,mtype:"card",title:KIND_TITLE[k]||tr("run_t"),
-        big:name, l1:"", hint:tr("run")});
+      // launch / command / sound / webhook: birden fazla tanım varsa liste
+      // (tap = şimdi kullan, tut = varsayılan yap), tek tanımda kart —
+      // üstünde "add more in app" satırıyla (app 0.38.0).
+      const mf=(MACROS[DEV.layer]||[])[APP.ctxKey-1]||{};
+      const multi=this._multi(mf);
+      if(multi){
+        const sel=Math.max(0,multi.items.findIndex(it=>it[2]));
+        UI.on_menu({key:APP.ctxKey,mtype:"list",title:multi.title,
+          items:multi.items,sel,action:multi.action,hold:true});
+      } else {
+        UI.on_menu({key:APP.ctxKey,mtype:"card",title:KIND_TITLE[k]||tr("run_t"),
+          big:mf.name||"", l1:KIND_TITLE[k]?"add more in app":"", hint:tr("run")});
+      }
     }
+  },
+  // Çok değerli bir tuşun teker listesi: [id, etiket, varsayılan?] satırları.
+  // Tek değerli tuşta null -> kart gösterilir.
+  _multi(mf){
+    const base=p=>String(p).split("/").pop();
+    if(mf.sounds&&mf.sounds.length>1)
+      // satıra verilen ad, yoksa dosya adı
+      return {title:"SOUND",action:"play",
+        items:mf.sounds.map((s,i)=>[String(i),s.label||base(s.sound),s.sound===mf.sound])};
+    if(mf.targets&&mf.targets.length>1)
+      return {title:"OPEN",action:"open",
+        items:mf.targets.map((p,i)=>[String(i),base(p),p===mf.target])};
+    if(mf.commands&&mf.commands.length>1)
+      return {title:"COMMAND",action:"run",
+        items:mf.commands.map((c,i)=>[String(i),c.label||c.command,c.command===mf.command])};
+    return null;
   },
   // cihazdan gelen {t:"menu_ev", ...}
   onMenuEv(m){
@@ -1963,6 +2087,24 @@ const APP_HOST={
         if(m.ev==="pick") UI.on_menu_result({toast:["MIC",String(m.id)]});
         else { MACROS[DEV.layer][APP.ctxKey-1].sub=m.id;
           UI.on_menu_result({toast:[tr("assigned"),String(m.id)]}); }
+      } else if(KIND_TITLE[k]){
+        // çok değerli launch/command/sound listesi (app 0.38.0)
+        const mf=(MACROS[DEV.layer]||[])[APP.ctxKey-1]||{};
+        const i=parseInt(m.id,10)||0;
+        if(m.ev==="pick"){
+          // gerçek uygulama seçileni hemen çalıştırır (sesi çalar / hedefi
+          // açar / komutu koşturur) ve menü açık kalır — cevap gönderilmez
+        } else {
+          let label="";
+          if(mf.sounds){ const s=mf.sounds[i]||{}; mf.sound=s.sound;
+            label=s.label||String(s.sound||"").split("/").pop(); }
+          else if(mf.targets){ mf.target=mf.targets[i]; label=String(mf.target).split("/").pop(); }
+          else if(mf.commands){ const c=mf.commands[i]||{}; mf.command=c.command; label=c.label||c.command||""; }
+          // gerçek uygulama gibi: özel tuş adı yoksa ızgara adı varsayılanı izler
+          if(label) mf.name=label;
+          UI.on_menu_result({changed:"/macros/key"+APP.ctxKey+".json",
+                             toast:[KIND_TITLE[k],label]});
+        }
       } else UI.on_menu_result({});
       return;
     }
@@ -2290,7 +2432,9 @@ const UI={
     const l=DEV.layer, k0=this.sel_key;
     const [kind,sub]=this.kind_sub(l,k0);
     const path="/macros/key"+(k0+1)+".json";
-    if(kind===null||kind==="recorded"||kind==="text"){ this._enter_speed(); return; }
+    // Hız düzenleyen kind'lar: kayıtlı makro / yazı / çok adımlı sequence
+    // (adım gecikmeleri hıza uyar) / eski dosyalar — fw 0.26.0.
+    if(kind===null||kind==="recorded"||kind==="text"||kind==="sequence"){ this._enter_speed(); return; }
     const name=this._cell_name(l,k0);
     if(kind==="keystroke"||kind==="combo")
       this._card_state("key",path,tr("key_t"),name,tr("hint_repeat"));
@@ -2299,22 +2443,22 @@ const UI={
     else if(kind==="media")
       this._enter_optlist("media",path,MEDIA_OPTS,sub,tr("media"));
     else if(kind==="volume"){
+      // uygulama açık -> mutlak % slider; kapalı -> göreli HID düğmesi,
+      // kartta "%' için uygulama gerekli" satırıyla (fw 0.26.0)
       if(APP.connected&&APP.menus) this._ctx_host(kind,sub,path,k0,l);
       else this._card_state("adjust",path,tr("volume"),name,tr("hint_vol"),
-                            "volume_up","volume_down","mute");
+                            "volume_up","volume_down","mute",tr("vol_app_note"));
     }
     else if(kind==="menu")
       this._enter_optlist("menu",path,this._menu_opts(),sub,tr("menu_t"));
-    else if(kind==="sequence")
-      this._card_state("fire",path,tr("run_t"),name,tr("run"));
     else if(["launch","command","sound","mic","mic_level","webhook","obs"].includes(kind))
       this._ctx_host(kind,sub,path,k0,l);
     else this._enter_speed();
   },
-  _card_state(mode,path,title,big,hint,up,down,conf){
+  _card_state(mode,path,title,big,hint,up,down,conf,line){
     this.ctx={mode,path,up:up||null,down:down||null,conf:conf||null};
     this.state=S_CTX; this.activity_at=nowS();
-    OLED.show_card(title,String(big).slice(0,12),null,hint);
+    OLED.show_card(title,String(big).slice(0,12),line||null,hint);
   },
   _menu_opts(){
     const n=CFG.layer_count;
@@ -3097,9 +3241,10 @@ const JUMPS=[
   ["keytest","TUŞ TESTİ"],["speed","HIZ DÜZENLEYİCİ"],["saved","KAYDEDİLDİ"],
   ["toast","BİLGİ (toast)"],["wheel_media","TEKER: MEDYA LİSTESİ"],
   ["wheel_menu","TEKER: KATMAN LİSTESİ"],["wheel_key","TEKER: TUŞ KARTI"],
-  ["wheel_scroll","TEKER: KAYDIRMA KARTI"],["wheel_fire","TEKER: DİZİ KARTI"],
+  ["wheel_scroll","TEKER: KAYDIRMA KARTI"],["wheel_seq","TEKER: DİZİ HIZI"],
   ["wheel_vol","TEKER: SES KARTI (uygulamasız)"],["wheel_wait","TEKER: UYGULAMA BEKLENİYOR"],
   ["host_list","HOST MENÜ: LİSTE"],["host_slider","HOST MENÜ: KAYDIRICI"],
+  ["host_sound","HOST MENÜ: SES LİSTESİ"],["host_open","HOST MENÜ: HEDEF LİSTESİ"],
   ["host_card","HOST MENÜ: KART"],["obs_rec","HOST: OBS KAYIT"],
   ["obs_main","HOST: OBS"],["host","HOST MODU (ızgara)"],
   ["host_plain","HOST MODU (ad yokken)"],["boot","AÇILIŞ"],
@@ -3137,7 +3282,7 @@ jump.onchange=()=>{
     case "wheel_menu": setLayer(0); UI.sel_key=5; UI._enter_ctx(); break;
     case "wheel_key": setLayer(0); UI.sel_key=0; UI._enter_ctx(); break;
     case "wheel_scroll": setLayer(2); UI.sel_key=0; UI._enter_ctx(); break;
-    case "wheel_fire": setLayer(1); UI.sel_key=5; UI._enter_ctx(); break;
+    case "wheel_seq": setLayer(1); UI.sel_key=5; UI._enter_ctx(); break; // dizi -> hız
     case "wheel_vol":  // uygulamasız ses tuşu -> yerel ayar kartı
       if(APP.connected) toggleApp();
       setLayer(0); UI.sel_key=3; UI._enter_ctx(); break;
@@ -3150,7 +3295,13 @@ jump.onchange=()=>{
       setLayer(1); UI.sel_key=0; UI._enter_ctx(); break;
     case "host_slider": if(!APP.connected) toggleApp();
       setLayer(1); UI.sel_key=3; UI._enter_ctx(); break;
-    // Genel kart: OBS'e ait olmayan bir host eylemi (komut)
+    // Çok değerli tuşların listeleri (app 0.38.0): ses / açılacak hedef
+    case "host_sound":  if(!APP.connected) toggleApp();
+      setLayer(1); UI.sel_key=4; UI._enter_ctx(); break;
+    case "host_open":   if(!APP.connected) toggleApp();
+      setLayer(2); UI.sel_key=3; UI._enter_ctx(); break;
+    // Genel kart: OBS'e ait olmayan tek tanımlı bir host eylemi (komut) —
+    // "add more in app" satırıyla
     case "host_card":   if(!APP.connected) toggleApp();
       setLayer(2); UI.sel_key=2; UI._enter_ctx(); break;
     case "obs_rec":     if(!APP.connected) toggleApp();

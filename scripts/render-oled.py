@@ -103,6 +103,13 @@ SCREENS = [
      lambda d: d.show_card("RECORD", "Recording", "12:04 elapsed", "toggle")),
     ("wheel-volume", "Wheel menu — system volume",
      lambda d: d.show_adjust("VOLUME", "40%", 0.4, "OK")),
+    ("obs-center", "OBS Center — the live dashboard",
+     lambda d: d.show_obscenter({"rec": True, "live": False, "blink": True,
+                                 "mic": 64, "mute": False, "time": "00:42:10",
+                                 "scene": "Gameplay", "cpu": 8, "fps": 60,
+                                 "drop": 0, "focus": "mic",
+                                 "klabels": ["MUTE", "CAM", "CLIP",
+                                             "", "", "REC"]})),
     # The one Turkish screen: proof the device draws Ç Ğ İ Ö Ş Ü rather than
     # folding them, which is the whole reason the font was drawn by hand.
     ("menu-tr", "Turkish is drawn, not folded",

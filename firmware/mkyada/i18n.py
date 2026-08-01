@@ -99,6 +99,8 @@ STRINGS = {
         "hold_set": "hold: assign",
         "menu_t": "LAYER",
         "mic_t": "MIC",
+        # standalone volume knob: percent needs the app's host slider
+        "vol_app_note": "% needs the app",
     },
     "tr": {
         "loading": "yükleniyor",
@@ -179,6 +181,8 @@ STRINGS = {
         "hold_set": "tut: ata",
         "menu_t": "KATMAN",
         "mic_t": "MİKROFON",
+        # standalone volume knob: percent needs the app's host slider
+        "vol_app_note": "% için uygulama gerekli",
     },
 }
 

@@ -56,6 +56,7 @@ import type {
 } from "./types";
 import { DOUBLE_MS_DEFAULT, HOLD_MS_DEFAULT, LAYER_NAMES } from "./types";
 import { testModeActive } from "./focus";
+import { isObsCenterOpen } from "./obs-center";
 import {
   AUX_FILE_RE,
   compileAssignment,
@@ -292,7 +293,7 @@ export function ProfilesProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const runSequence = useCallback(
-    async (keyId: string, steps: SequenceStep[], mainFile: string) => {
+    async (keyId: string, steps: SequenceStep[], mainFile: string, speed = 1) => {
       const running = seqActive.current.get(keyId);
       if (running) {
         // pressing the key again mid-sequence stops it (on_repress semantics)
@@ -307,7 +308,12 @@ export function ProfilesProvider({ children }: { children: ReactNode }) {
           const step = steps[i];
           if (stepIsHid(step)) {
             const done = waitPlayDone();
-            await send({ t: "play", file: sequencePartFileName(mainFile, i) });
+            // the wheel-set speed scales the HID parts on the device too
+            await send({
+              t: "play",
+              file: sequencePartFileName(mainFile, i),
+              ...(speed !== 1 ? { speed } : {}),
+            });
             await done;
           } else if (step.a.kind === "sound") {
             void playSound(step.a.file).catch(() => {});
@@ -315,7 +321,7 @@ export function ProfilesProvider({ children }: { children: ReactNode }) {
             runHostAction(step.a);
           }
           if (!state.cancelled && step.delayMs > 0 && i < steps.length - 1) {
-            await new Promise((r) => setTimeout(r, step.delayMs));
+            await new Promise((r) => setTimeout(r, step.delayMs / speed));
           }
         }
       } finally {
@@ -462,7 +468,7 @@ export function ProfilesProvider({ children }: { children: ReactNode }) {
           ) {
             runHostAction(node);
           } else if (node.kind === "sequence" && !node.events?.length && node.seq?.length) {
-            void runSequence(`${m.key}:${m.layer}`, node.seq, file);
+            void runSequence(`${m.key}:${m.layer}`, node.seq, file, node.settings?.speed ?? 1);
           }
         });
       }),
@@ -548,6 +554,11 @@ export function ProfilesProvider({ children }: { children: ReactNode }) {
         // while editing it still launched apps and switched OBS scenes
         // (issue #40).
         if (testModeActive()) return;
+        // OBS Center open: the six keys are its quick actions — obs-center.ts
+        // runs them off this same btn stream, and the firmware already
+        // swallowed the local macro. Running the key's normal assignment here
+        // too would be the double execution the whole design avoids.
+        if (isObsCenterOpen()) return;
         // key logic: a second press inside the double window fires "double"
         const klPending = klStates.current.get(keyId);
         if (klPending?.phase === "wait2") {
@@ -588,7 +599,7 @@ export function ProfilesProvider({ children }: { children: ReactNode }) {
             return;
           }
           if (a.kind === "sequence" && !sequenceIsPureHid(a.steps)) {
-            return void runSequence(keyId, a.steps, profileMacroFileName(profile.id, slot));
+            return void runSequence(keyId, a.steps, profileMacroFileName(profile.id, slot), a.speed ?? 1);
           }
           return; // pure-HID override — the device plays it natively
         }
@@ -615,7 +626,7 @@ export function ProfilesProvider({ children }: { children: ReactNode }) {
           if (a.kind === "sound") return;
           if (a.kind === "sequence") {
             if (a.steps && !sequenceIsPureHid(a.steps)) {
-              void runSequence(keyId, a.steps, macroFileName(slot, layerIndex));
+              void runSequence(keyId, a.steps, macroFileName(slot, layerIndex), a.speed ?? 1);
             }
             return;
           }

@@ -95,9 +95,9 @@ const KINDS: KindMeta[] = [
     category: "keyboard",
     host: false,
     wheel: {
-      mtype: "card",
-      title: "SEQUENCE",
-      summary: "Press to run the whole sequence from the top.",
+      mtype: "speed",
+      title: "SPEED",
+      summary: "Turn to set the playback speed (0.1×–10×) — the step delays scale with it; press to save.",
       standaloneFallback: "Steps that need the app are skipped when it's closed; the rest still run.",
     },
   },
@@ -137,7 +137,8 @@ const KINDS: KindMeta[] = [
     wheel: {
       mtype: "card",
       title: "SOUND",
-      summary: "Press to play or stop the sound; shows whether it's playing.",
+      summary:
+        "Press to play the sound. With several sounds on the key, the wheel lists them: tap to play one, hold to make it the default.",
       standaloneFallback: "Needs the MKYADA app — the wheel shows a short reminder.",
     },
   },
@@ -214,7 +215,8 @@ const KINDS: KindMeta[] = [
     wheel: {
       mtype: "card",
       title: "OPEN",
-      summary: "Press to open the target on the computer.",
+      summary:
+        "Press to open the target on the computer. With several targets on the key, the wheel lists them: tap to open one, hold to make it the default.",
       standaloneFallback: "Needs the MKYADA app — the wheel shows a short reminder.",
     },
   },
@@ -227,7 +229,8 @@ const KINDS: KindMeta[] = [
     wheel: {
       mtype: "card",
       title: "COMMAND",
-      summary: "Press to run the command; shows the last exit code.",
+      summary:
+        "Press to run the command. With several commands on the key, the wheel lists them: tap to run one, hold to make it the default.",
       standaloneFallback: "Needs the MKYADA app — the wheel shows a short reminder.",
     },
   },
@@ -240,7 +243,8 @@ const KINDS: KindMeta[] = [
     wheel: {
       mtype: "card",
       title: "WEBHOOK",
-      summary: "Press to send the request; shows the last HTTP status (e.g. 200 OK).",
+      summary:
+        "Press to send the request. With alternative requests on the key, the wheel lists them: tap to send one, hold to make it the default.",
       standaloneFallback: "Needs the MKYADA app — the wheel shows a short reminder.",
     },
   },
@@ -257,6 +261,20 @@ const KINDS: KindMeta[] = [
       summary:
         "Depends on the OBS action: pick a scene to reassign the key, or see live REC/LIVE status and toggle it.",
       standaloneFallback: "Needs the MKYADA app connected to OBS — the wheel shows a short reminder.",
+    },
+  },
+  {
+    id: "obs_center",
+    label: "OBS Center (live dashboard)",
+    icon: KIND_ICON.obs_center,
+    category: "stream",
+    host: true,
+    wheel: {
+      mtype: "card",
+      title: "OBS",
+      summary:
+        "Pressing the key opens a live OBS dashboard on the keypad screen: REC/LIVE status, timer, scene, mic meter and health — the six keys become your OBS shortcuts while it's open.",
+      standaloneFallback: "Needs the MKYADA app connected to OBS, and a screen model.",
     },
   },
   // ── Device screen ────────────────────────────────────────────────────────
@@ -407,6 +425,31 @@ export function wheelPreview(a: Assignment, where?: PreviewWhere): WheelPreview 
       const card = OBS_CARD[a.action] ?? { title: "OBS", big: "OBS" };
       return { screen: "card", title: card.title, big: card.big, line: "live status", hint: "toggle" };
     }
+    case "obs_center": {
+      // a representative live dashboard, with the user's own widget toggles
+      // and quick-key labels where they exist
+      const w = a.center?.widgets ?? {};
+      const on = (v?: boolean) => v !== false;
+      const kl = (a.center?.quickKeys ?? []).map((q) => (q ? q.label : ""));
+      while (kl.length < 6) kl.push("");
+      return {
+        screen: "obscenter",
+        o: {
+          rec: on(w.status) ? true : null,
+          live: on(w.status) ? false : null,
+          blink: true,
+          time: on(w.timer) ? "00:42:10" : null,
+          scene: on(w.scene) ? "Scene 1" : null,
+          mic: on(w.mic) ? 64 : null,
+          mute: on(w.mic) ? false : null,
+          focus: on(w.mic) ? "mic" : on(w.scene) ? "scene" : null,
+          cpu: on(w.health) ? 8 : null,
+          drop: on(w.health) ? 0 : null,
+          fps: on(w.health) ? 60 : null,
+          klabels: kl.some(Boolean) ? kl : ["MUTE", "CAM", "CLIP", "", "", "REC"],
+        },
+      };
+    }
     case "mic":
       return {
         screen: "picker",
@@ -421,16 +464,50 @@ export function wheelPreview(a: Assignment, where?: PreviewWhere): WheelPreview 
       };
     case "mic_level":
       return { screen: "slider", title: "MIC LEVEL", hero: "60%", frac: 0.6, action: "OK" };
-    case "webhook":
-      return { screen: "card", title: "WEBHOOK", big: "SEND", line: "last: 200 OK", hint: "run" };
-    case "command":
-      return { screen: "card", title: "COMMAND", big: "RUN", line: "last: exit 0", hint: "run" };
-    case "launch":
-      return { screen: "card", title: "OPEN", big: a.target ? basename(a.target) : "OPEN", hint: "open" };
-    case "sound":
-      return { screen: "card", title: "SOUND", big: a.file ? basename(a.file) : "SOUND", hint: "play" };
+    case "webhook": {
+      if (a.hooks?.length) {
+        const label = (h: { label?: string; url: string }, i: number) =>
+          h.label || (() => { try { return new URL(h.url).hostname.replace(/^www\./, ""); } catch { return h.url || `#${i + 1}`; } })();
+        const items = [{ url: a.url, label: "" }, ...a.hooks].map((h, i) => ({
+          label: label(h, i) || "default",
+          mark: i === 0 ? ("cursor" as const) : undefined,
+        }));
+        return { screen: "picker", title: "WEBHOOK", items, action: "Send", hold: "hold: assign" };
+      }
+      return { screen: "card", title: "WEBHOOK", big: "SEND", line: "add more in app", hint: "run" };
+    }
+    case "command": {
+      if (a.commands && a.commands.length > 1) {
+        const items = a.commands.map((c) => ({
+          label: c.label || c.command,
+          mark: c.command === a.command ? ("cursor" as const) : undefined,
+        }));
+        return { screen: "picker", title: "COMMAND", items, action: "Run", hold: "hold: assign" };
+      }
+      return { screen: "card", title: "COMMAND", big: "RUN", line: "add more in app", hint: "run" };
+    }
+    case "launch": {
+      if (a.targets && a.targets.length > 1) {
+        const items = a.targets.map((t) => ({
+          label: basename(t),
+          mark: t === a.target ? ("cursor" as const) : undefined,
+        }));
+        return { screen: "picker", title: "OPEN", items, action: "Open", hold: "hold: assign" };
+      }
+      return { screen: "card", title: "OPEN", big: a.target ? basename(a.target) : "OPEN", line: "add more in app", hint: "open" };
+    }
+    case "sound": {
+      if (a.files && a.files.length > 1) {
+        const items = a.files.map((f) => ({
+          label: f.label || basename(f.file),
+          mark: f.file === a.file ? ("cursor" as const) : undefined,
+        }));
+        return { screen: "picker", title: "SOUND", items, action: "Play", hold: "hold: assign" };
+      }
+      return { screen: "card", title: "SOUND", big: a.file ? basename(a.file) : "SOUND", line: "add more in app", hint: "play" };
+    }
     case "sequence":
-      return { screen: "card", title: "ACTION", big: `${a.steps.length} steps`, hint: "run" };
+      return speedPreview(a.speed ?? 1, where);
     case "menu": {
       // a browser of the layer/nav family, cursor on the assigned action
       const label = (act: string) =>

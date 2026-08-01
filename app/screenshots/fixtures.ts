@@ -103,7 +103,22 @@ const VISION6_KEYS: Record<number, Record<string, Assignment>> = {
     1: { kind: "obs", action: "setScene", sceneName: "Live", label: "Go Live" },
     2: { kind: "obs", action: "recordToggle", label: "Record" },
     3: { kind: "mic", mode: "push_to_talk", label: "Push-to-talk" },
-    4: { kind: "launch", target: "discord://", label: "Discord" },
+    4: {
+      kind: "obs_center",
+      label: "OBS Center",
+      center: {
+        micInput: "Mic/Aux",
+        encoder: "mic",
+        quickKeys: [
+          { label: "MUTE", action: { action: "micToggle", inputName: "Mic/Aux" } },
+          { label: "CAM", action: { action: "virtualCamToggle" } },
+          { label: "CLIP", action: { action: "replayBufferToggle" } },
+          null,
+          null,
+          { label: "REC", action: { action: "recordToggle" } },
+        ],
+      },
+    },
     5: { kind: "media", usage: "MUTE", label: "Mute" },
     6: { kind: "recorded", name: RECORDED.name!, macro: RECORDED, label: "Post the clip" },
   },

@@ -181,7 +181,8 @@ export function kindRequiresHost(kind: Assignment["kind"]): boolean {
     kind === "mic" ||
     kind === "mic_level" ||
     kind === "webhook" ||
-    kind === "obs"
+    kind === "obs" ||
+    kind === "obs_center"
   );
 }
 
@@ -453,18 +454,50 @@ export function compileAssignment(a: Assignment, name?: string): MacroFile | nul
       // (empty events) so the assignment travels with the device; the
       // desktop app watches key presses and performs the action.
       case "launch":
-        return { ...base, name: name ?? `Open ${a.target}`, kind: "launch", target: a.target, events: [] };
-      case "command":
-        return { ...base, name: name ?? `Run ${a.command.slice(0, 24)}`, kind: "command", command: a.command, events: [] };
-      case "sound":
         return {
           ...base,
-          name: name ?? `Sound ${fileBaseName(a.file)}`,
+          name: name ?? `Open ${a.target}`,
+          kind: "launch",
+          target: a.target,
+          // half-typed rows in the editor don't travel to the device
+          ...(a.targets && a.targets.filter((t) => t.trim()).length > 1
+            ? { targets: a.targets.filter((t) => t.trim()) }
+            : {}),
+          events: [],
+        };
+      case "command":
+        return {
+          ...base,
+          name: name ?? `Run ${a.command.slice(0, 24)}`,
+          kind: "command",
+          command: a.command,
+          ...(a.commands && a.commands.filter((c) => c.command.trim()).length > 1
+            ? { commands: a.commands.filter((c) => c.command.trim()) }
+            : {}),
+          events: [],
+        };
+      case "sound": {
+        const files = a.files?.filter((f) => f.file.trim());
+        // the grid tile shows the default row's name when the user gave one —
+        // bare, like scene keys: the OLED cell is too small for a prefix
+        const defLabel = files?.find((f) => f.file === a.file)?.label?.trim();
+        return {
+          ...base,
+          name: name ?? defLabel ?? `Sound ${fileBaseName(a.file)}`,
           kind: "sound",
           sound: a.file,
+          ...(files && files.length > 1
+            ? {
+                sounds: files.map((f) => ({
+                  ...(f.label?.trim() ? { label: f.label.trim() } : {}),
+                  sound: f.file,
+                })),
+              }
+            : {}),
           ...(a.holdAction && a.holdAction !== "stop" ? { sound_hold: a.holdAction } : {}),
           events: [],
         };
+      }
       case "mic":
         return {
           ...base,
@@ -483,11 +516,24 @@ export function compileAssignment(a: Assignment, name?: string): MacroFile | nul
           ...(cleanHeaders?.length ? { headers: cleanHeaders } : {}),
           ...(a.body ? { body: a.body } : {}),
         };
+        // alternative requests get the same blank-header cleanup as the default
+        const hooks = a.hooks
+          ?.map((h) => ({
+            ...(h.label ? { label: h.label } : {}),
+            url: h.url,
+            ...(h.method && h.method !== "GET" ? { method: h.method } : {}),
+            ...(h.headers?.filter((x) => x.name.trim()).length
+              ? { headers: h.headers.filter((x) => x.name.trim()) }
+              : {}),
+            ...(h.body ? { body: h.body } : {}),
+          }))
+          .filter((h) => h.url.trim());
         return {
           ...base,
           name: name ?? `Webhook ${a.url.slice(0, 40)}`,
           kind: "webhook",
           webhook: req,
+          ...(hooks?.length ? { webhooks: hooks } : {}),
           events: [],
         };
       }
@@ -507,6 +553,17 @@ export function compileAssignment(a: Assignment, name?: string): MacroFile | nul
           name: name ?? (a.action === "setScene" && a.sceneName ? a.sceneName : obsActionName(a)),
           kind: "obs",
           obs: req,
+          events: [],
+        };
+      }
+      case "obs_center": {
+        // A no-op carrier like webhook/obs: the device opens the dashboard
+        // (PRESS_MENU_KINDS) and the app drives it; standalone it does nothing.
+        return {
+          ...base,
+          name: name ?? "OBS Center",
+          kind: "obs_center",
+          ...(a.center ? { obs_center: a.center } : {}),
           events: [],
         };
       }
@@ -548,6 +605,11 @@ export function compileAssignment(a: Assignment, name?: string): MacroFile | nul
         ? { hold_repeat }
         : {}),
     };
+  }
+  // The wheel-set playback speed rides in settings like the behavior options.
+  // Recorded macros carry theirs inside the imported file already.
+  if (compiled && a.speed && a.speed !== 1 && a.kind !== "recorded") {
+    compiled.settings = { ...compiled.settings, speed: a.speed };
   }
   // key logic (macro format v3): tap = the top-level events, double/hold
   // compiled as embedded variant files. Old firmware ignores `variants`
@@ -674,9 +736,17 @@ export function parseAssignment(m: MacroFile): Assignment {
   // override — surface it as the editable label. (Recorded macros carry
   // their name in the assignment itself.)
   if (m.name && a.kind !== "recorded" && a.kind !== "none" && compileAssignment(a)?.name !== m.name) {
-    a.label = m.name;
+    // A sound file saved before default-row labels existed carries the old
+    // auto-name ("Sound airhorn.mp3") — don't freeze that as a user label,
+    // or the grid keeps showing the file name over the new row name forever.
+    const legacySoundAuto = a.kind === "sound" && m.name === `Sound ${fileBaseName(a.file)}`;
+    if (!legacySoundAuto) a.label = m.name;
   }
   if (m.icon) a.icon = m.icon;
+  // Wheel-set playback speed survives an app-side re-save of the key.
+  if (m.settings?.speed && m.settings.speed !== 1 && a.kind !== "recorded") {
+    a.speed = m.settings.speed;
+  }
   return a;
 }
 
@@ -712,13 +782,26 @@ function parseAssignmentBase(m: MacroFile): Assignment {
     case "menu":
       return { kind: "menu", action: m.menu ?? "confirm", ...behavior };
     case "launch":
-      return { kind: "launch", target: m.target ?? "", ...behavior };
+      return {
+        kind: "launch",
+        target: m.target ?? "",
+        ...(m.targets?.length ? { targets: m.targets } : {}),
+        ...behavior,
+      };
     case "command":
-      return { kind: "command", command: m.command ?? "", ...behavior };
+      return {
+        kind: "command",
+        command: m.command ?? "",
+        ...(m.commands?.length ? { commands: m.commands } : {}),
+        ...behavior,
+      };
     case "sound":
       return {
         kind: "sound",
         file: m.sound ?? "",
+        ...(m.sounds?.length
+          ? { files: m.sounds.map((s) => ({ file: s.sound, ...(s.label ? { label: s.label } : {}) })) }
+          : {}),
         ...(m.sound_hold ? { holdAction: m.sound_hold } : {}),
         ...behavior,
       };
@@ -731,6 +814,7 @@ function parseAssignmentBase(m: MacroFile): Assignment {
         ...(m.webhook?.method ? { method: m.webhook.method } : {}),
         ...(m.webhook?.headers?.length ? { headers: m.webhook.headers } : {}),
         ...(m.webhook?.body ? { body: m.webhook.body } : {}),
+        ...(m.webhooks?.length ? { hooks: m.webhooks } : {}),
         ...behavior,
       };
     case "obs":
@@ -742,6 +826,12 @@ function parseAssignmentBase(m: MacroFile): Assignment {
         ...(m.obs?.sourceScene ? { sourceScene: m.obs.sourceScene } : {}),
         ...(m.obs?.sourceName ? { sourceName: m.obs.sourceName } : {}),
         ...(m.obs?.hotkeyName ? { hotkeyName: m.obs.hotkeyName } : {}),
+        ...behavior,
+      };
+    case "obs_center":
+      return {
+        kind: "obs_center",
+        ...(m.obs_center ? { center: m.obs_center } : {}),
         ...behavior,
       };
     case "sequence":
@@ -817,7 +907,8 @@ export function describeAssignment(a: Assignment): string {
     case "command":
       return `$ ${a.command.length > 20 ? a.command.slice(0, 20) + "…" : a.command}`;
     case "sound": {
-      const short = fileBaseName(a.file);
+      const label = a.files?.find((f) => f.file === a.file)?.label?.trim();
+      const short = label || fileBaseName(a.file);
       return `♪ ${short.length > 20 ? short.slice(0, 20) + "…" : short}`;
     }
     case "mic":
@@ -828,6 +919,8 @@ export function describeAssignment(a: Assignment): string {
     }
     case "obs":
       return `◉ ${obsActionName(a)}`;
+    case "obs_center":
+      return "◉ OBS Center";
     case "sequence":
       return `⧉ ${a.steps.length} step${a.steps.length === 1 ? "" : "s"}`;
   }

@@ -14,6 +14,7 @@
 import { Fb } from "./oled-fb";
 import { iconBytes } from "./oled-icons";
 import { OledScreens } from "./oled-screens";
+import type { ObsCenterState } from "./oled-screens";
 
 export const OLED_W = 128;
 export const OLED_H = 64;
@@ -51,6 +52,8 @@ export type WheelPreview =
       hold?: string;
     }
   | { screen: "toast"; title: string; line1?: string; line2?: string; ok?: boolean }
+  /** The OBS Center dashboard (kind "obs_center"). */
+  | { screen: "obscenter"; o: ObsCenterState }
   /** A single macro-grid tile: what the icon picker is really choosing. */
   | { screen: "cell"; name: string; icon?: string | null; selected?: boolean };
 
@@ -77,6 +80,8 @@ export function renderWheelScreen(p: WheelPreview): Fb {
     );
   } else if (p.screen === "toast") {
     o.show_toast(p.title, p.line1, p.line2, p.ok);
+  } else if (p.screen === "obscenter") {
+    o.show_obscenter(p.o);
   } else if (p.screen === "cell") {
     // One tile of a banded grid, in the first slot. Drawing the whole grid and
     // cropping keeps the cell's geometry honest: the same split_name, the same

@@ -93,6 +93,31 @@ const SCREENS: { name: string; lang: "en" | "tr"; paint: (o: OledScreens) => voi
   },
   { name: "obs", lang: "en", paint: (o) => o.show_obs(OBS) },
   { name: "obsrec", lang: "en", paint: (o) => o.show_obsrec({ ...OBS, keyNo: 2 }) },
+  {
+    name: "obscenter",
+    lang: "en",
+    paint: (o) =>
+      o.show_obscenter({
+        rec: true,
+        live: false,
+        blink: true,
+        mic: 64,
+        mute: false,
+        time: "00:42:10",
+        scene: "Gameplay",
+        cpu: 8,
+        fps: 60,
+        drop: 0,
+        focus: "mic",
+        klabels: ["MUTE", "CAM", "CLIP", "", "", "REC"],
+      }),
+  },
+  {
+    // only two widgets on and no quick keys: the reflow + 2x-timer branch
+    name: "obscenter_min",
+    lang: "en",
+    paint: (o) => o.show_obscenter({ time: "01:02:33", scene: "Intro" }),
+  },
   { name: "host", lang: "en", paint: (o) => o.show_host() },
   {
     // Turkish is not decoration here: the labels are wider, so this is the case

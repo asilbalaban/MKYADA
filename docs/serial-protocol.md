@@ -1,4 +1,33 @@
-# MKYADA serial protocol (v12)
+# MKYADA serial protocol (v13)
+
+v13 (firmware 0.26.0) is the **OBS Center** release. Three additions, all on
+the existing `mtype:"obs"` shape and all additive:
+
+- **`obsview:"center"`** — a third OBS view: the live dashboard a key of kind
+  `obs_center` opens. Optional new fields on the same `menu` message: `mute`
+  (bool — inverts the MIC label), `cpu` / `fps` / `drop` (ints — the health
+  row), `klabels` (list of ≤6 short strings — the quick-key row along the
+  bottom), and `focus` (`"mic"`|`"scene"` — which control row the wheel
+  drives, drawn as a frame around that row's label). **A field the app never
+  sends is a widget the device never draws**, and the enabled ones reflow
+  vertically — that is how the app's per-key widget toggles reach the glass
+  without a schema. On the center view a **held** CONFIRM sends
+  `menu_ev ev:"mode"` (a tap still sends `fire`); the app answers by cycling
+  `focus` — the device never owns the cycle.
+- **Sticky re-renders** — while an `mtype:"obs"` menu is open, a re-send
+  merges only the fields present in the message into the open menu (old
+  behavior rebuilt the whole state). The app can push a 40-byte delta
+  (`{"t":"menu","mtype":"obs","mic":42}`) between full re-asserts; the
+  device's copy keeps everything else. Full pushes every ~5 s heal any delta
+  lost during a repaint.
+- **Key swallowing** — while the center view is open the six keys do NOT play
+  their local macros. Their edges still stream as `btn` (as always), and the
+  app runs them as the dashboard's quick actions. BACK closes the view (the
+  usual `menu_ev ev:"close"`), and a transfer starting mid-session sends the
+  same `close` so the app tears the session down.
+
+Old apps never send `obsview:"center"` so old-vs-new pairings keep the exact
+v12 behavior.
 
 v12 (firmware 0.25.0) adds two things, both additive:
 
@@ -195,6 +224,7 @@ STANDALONE ──(host_enter)──► HOST ──(host_leave | CDC disconnect |
 | `{"t":"sysvol","percent":40}` | v9, Vision 6. The live system output volume (0–100); the device can't read it, so the app pushes it (on change) while connected. Volume-kind grid cells show the `%`. No reply. Cleared on disconnect |
 | `{"t":"menu","mtype":"list","key":3,"layer":"a","title":"SCENE","items":[["Intro","Intro",1],["Game","Game",0]],"sel":0,"action":"Pick"}` | v9, Vision 6. Render/update the open wheel menu. `mtype`: `card` (title + `big` hero line + optional `l1`/`l2` status + `hint` action), `slider` (`value`/`min`/`max`/`step`/`unit` + `action`), `list` (`items` = `[id,label,mark]`, `sel` cursor, `action`). Re-send to live-update; the device keeps the cursor and idle timer. Ignored unless a menu is open for `key` |
 | `{"t":"menu","mtype":"obs","key":2,"obsview":"rec","rec":true,"live":false,"mic":60,"time":"00:12","scene":"Intro","hint":"stop"}` | v11, Vision 6. A live OBS status screen instead of a chooser. `obsview`: `rec` (recorder card — one large timer) or `main` (full status: state chip, timer, scene pill, mic segments). `rec`/`live` drive the state chip, `mic` is 0–100, `time` is the elapsed string, `scene` the active scene. Push it as often as you like — there is no cursor to lose, so a re-render is pure data. The **blinking record dot is the device's own**, on a 0.6 s clock, so it keeps its rhythm when a push is late. CONFIRM sends `menu_ev ev:"fire"`, a wheel step sends `ev:"value"` with `v: ±1` |
+| `{"t":"menu","mtype":"obs","key":4,"layer":"a","obsview":"center","rec":true,"live":false,"time":"00:42:10","scene":"Gameplay","mic":64,"mute":false,"cpu":8,"fps":60,"drop":0,"focus":"mic","klabels":["MUTE","CAM","CLIP","","","REC"]}` | v13, Vision 6. The OBS Center dashboard (kind `obs_center`). Every field beyond `obsview` is optional: **an absent field is a widget the device never draws**, and the enabled ones reflow (the timer renders 2× unless everything is on at once). `mute` inverts the MIC label; `cpu`/`fps`/`drop` fill the health row; `klabels` (≤6 strings, ≤6 chars, drawn fitted to ~5) is the quick-key row; `focus` frames the control row the wheel drives (`mic`\|`scene`). **Re-sends merge**: only the fields present in the message change, so `{"t":"menu","mtype":"obs","mic":42}` is a legal 40-byte delta — push a full state every ~5 s to heal lost deltas. While this view is open the six keys don't play their macros (their `btn` edges are the app's quick actions), there is no idle timeout, a **held** CONFIRM sends `menu_ev ev:"mode"` (focus cycle), and BACK closes it |
 | `{"t":"menu_result","ok":true,"toast":["SCENE","Saved"],"changed":"/macros/key3-a.json"}` | v9, Vision 6. Close the open menu. `toast` (optional `[title,line]`) shows briefly; `changed` (optional path) invalidates that macro's cached label so the grid updates without a `reload`. `ok:false` shows the toast as an error |
 
 ## Device → Host
@@ -205,7 +235,7 @@ STANDALONE ──(host_enter)──► HOST ──(host_leave | CDC disconnect |
 | `{"t":"macro_changed","file":"/macros/key3-b.json","reason":"speed"}` | fw 0.7.0, Vision 6. The user edited that macro's `settings.speed` on the device (persisted into the file). The app should re-read the file / refresh its cache |
 | `{"t":"enc","d":1,"n":3}` | fw 0.7.0, Vision 6, host mode. Encoder detents (`d` = direction, `n` = count batched per poll) — lets the app run computer-side wheel actions |
 | `{"t":"btn","slot":"back","down":true}` | fw 0.7.0, Vision 6, host mode. Module buttons (`psh` \| `back` \| `confirm`) — the slot variant of `btn`, distinct from key events |
-| `{"t":"ctx","key":3,"layer":"a","kind":"obs","sub":"setScene","file":"/macros/key3-a.json"}` | v9, Vision 6. The wheel was pressed on a host-kind key (`kind` = `obs`/`webhook`/`command`/`launch`/`sound`/`mic`/`volume`; `sub` = the action detail, e.g. the OBS action or media usage; `file` = the exact macro path, profile-aware). The app answers with a `menu`. Only sent after `hostinfo` |
+| `{"t":"ctx","key":3,"layer":"a","kind":"obs","sub":"setScene","file":"/macros/key3-a.json"}` | v9, Vision 6. The wheel was pressed on a host-kind key (`kind` = `obs`/`obs_center` (v13)/`webhook`/`command`/`launch`/`sound`/`mic`/`volume`; `sub` = the action detail, e.g. the OBS action or media usage; `file` = the exact macro path, profile-aware). The app answers with a `menu`. Only sent after `hostinfo`. For `obs_center` a bare key press opens the menu too (like `volume`/`mic_level`) |
 | `{"t":"menu_ev","ev":"pick","id":"Intro"}` | v9, Vision 6. The user acted on the open menu: `pick` (a **tap** on a list item — use it live), `assign` (a **hold** on a list item — reassign the key to it), `fire` (a card's CONFIRM), `value` (`v` = a slider's new value, or ±1 on a card), `close` (BACK / idle / disconnect). The app performs it and usually replies `menu`/`menu_result` |
 | `{"t":"pin","pin":"GP13","down":true}` | fw 0.7.0. While `pin_detect` is armed: a watched GPIO changed — the wiring wizard assigns it to the key being probed |
 | `{"t":"btn","key":2,"phys":4,"layer":"a","edge":"down"}` | Every press/release. `key` = logical (after `key_map`), `phys` = GPIO number. Host mode: always; standalone: since v2, while an app is connected |

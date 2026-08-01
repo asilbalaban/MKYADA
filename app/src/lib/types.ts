@@ -196,6 +196,7 @@ export interface MacroFile {
     | "mic"
     | "webhook"
     | "obs"
+    | "obs_center"
     | "sequence";
   combo?: { mods: string[]; key: string };
   text?: string;
@@ -206,19 +207,41 @@ export interface MacroFile {
   menu?: MenuAction;
   /** launch kind: app path, file path or URL — performed by the desktop app */
   target?: string;
+  /** launch kind: the full target list when the key has more than one — the
+   * Vision 6 wheel lists them (tap = open once, hold = make it the default).
+   * `target` stays the default the key press opens; it is a member of this
+   * list. Absent when the key has a single target. */
+  targets?: string[];
   /** command kind: shell command line — performed by the desktop app */
   command?: string;
+  /** command kind: the full command list when the key has more than one —
+   * same wheel grammar as `targets`. `command` stays the default. */
+  commands?: { label?: string; command: string }[];
   /** sound kind: audio file path — played by the desktop app */
   sound?: string;
+  /** sound kind: the full sound list when the key has more than one — the
+   * wheel lists them (tap = play once, hold = make it the key's default).
+   * `sound` stays the default the key press plays; it is a member. Each entry
+   * may carry a display `label`; the wheel falls back to the file name. */
+  sounds?: { label?: string; sound: string }[];
   /** sound kind: what holding the key does (default "stop") */
   sound_hold?: SoundHoldAction;
   /** mic kind: what the key does to the system microphone (default "toggle") */
   mic_mode?: MicMode;
   /** webhook kind: HTTP request performed by the desktop app */
   webhook?: WebhookRequest;
+  /** webhook kind: ALTERNATIVE requests beyond the default `webhook` — the
+   * wheel lists the default first, then these (tap = send once, hold = swap
+   * it in as the default). Unlike sounds/targets, this list does NOT include
+   * the default: requests have no natural identity to match against. */
+  webhooks?: (WebhookRequest & { label?: string })[];
   /** obs kind: an OBS Studio action performed by the desktop app over
    * obs-websocket (scene switch, record/stream/mic toggle, …) */
   obs?: ObsRequest;
+  /** obs_center kind: the live OBS dashboard's per-key configuration —
+   * which widgets show, which audio input the mic widgets follow, what the
+   * encoder does and what the six keys fire while the dashboard is open */
+  obs_center?: ObsCenterConfig;
   /** sequence kind: the editable steps. Pure-HID sequences also compile
    * their steps into `events` (standalone); mixed ones leave `events` empty
    * and the desktop app orchestrates the steps. */
@@ -300,6 +323,55 @@ export interface ObsSnapshot {
   error?: string | null;
 }
 
+/** What the encoder does while the OBS Center dashboard is open. */
+export type ObsCenterEncoder = "mic" | "scene" | "off";
+
+/** One of the six quick-action keys while the OBS Center is open: an OBS
+ * action plus the short label the OLED's bottom row shows (≤5 chars). */
+export interface ObsQuickKey {
+  label: string;
+  action: ObsRequest;
+}
+
+/** The OBS Center (kind "obs_center") per-key configuration. Lives in the
+ * macro file so it travels with profiles and the standalone config. Every
+ * widget is individually toggleable; a widget the user turned off is simply
+ * never pushed to the device, which hides it (proto v13). */
+export interface ObsCenterConfig {
+  /** the audio input the mic VU / mute widget and the encoder fader follow */
+  micInput?: string;
+  /** default "mic": turn = input volume, press = mute toggle */
+  encoder?: ObsCenterEncoder;
+  widgets?: {
+    /** REC / LIVE / IDLE chip in the top bar */
+    status?: boolean;
+    /** record (or stream) elapsed timer */
+    timer?: boolean;
+    /** current program scene pill */
+    scene?: boolean;
+    /** mic VU meter + mute indicator */
+    mic?: boolean;
+    /** CPU % / dropped frames / FPS row */
+    health?: boolean;
+  };
+  /** exactly 6 entries, null = key unassigned (falls through to nothing) */
+  quickKeys?: (ObsQuickKey | null)[];
+}
+
+/** Live OBS session numbers pushed from the Rust client (`obs:live` event)
+ * while an OBS Center is open. Mirrors `obs::ObsLive`: every field optional,
+ * each event carries only what changed. */
+export interface ObsLive {
+  recSecs?: number;
+  streamSecs?: number;
+  cpu?: number;
+  fps?: number;
+  dropped?: number;
+  total?: number;
+  micPct?: number;
+  micMuted?: boolean;
+}
+
 /** An OBS key action: one action plus the fields that action needs. */
 export interface ObsRequest {
   action: ObsAction;
@@ -379,13 +451,15 @@ export type Assignment = (
   | { kind: "recorded"; name: string; macro: MacroFile }
   // performed by the desktop app (not HID): open an app/file/URL, run a
   // command, play a sound effect
-  | { kind: "launch"; target: string }
-  | { kind: "command"; command: string }
-  | { kind: "sound"; file: string; holdAction?: SoundHoldAction }
+  | { kind: "launch"; target: string; targets?: string[] }
+  | { kind: "command"; command: string; commands?: { label?: string; command: string }[] }
+  | { kind: "sound"; file: string; files?: { label?: string; file: string }[]; holdAction?: SoundHoldAction }
   | { kind: "mic"; mode?: MicMode }
-  | ({ kind: "webhook" } & WebhookRequest)
+  | ({ kind: "webhook" } & WebhookRequest & { hooks?: (WebhookRequest & { label?: string })[] })
   // control OBS Studio over obs-websocket (scene, record, stream, mic, …)
   | ({ kind: "obs" } & ObsRequest)
+  // open the live OBS dashboard on the Vision 6 screen (host + screen only)
+  | { kind: "obs_center"; center?: ObsCenterConfig }
   // Stream Deck-style multi action: run several actions with one press
   | { kind: "sequence"; steps: SequenceStep[] }
 ) & {
@@ -399,6 +473,11 @@ export type Assignment = (
    * Names are permanent, so extending the family cannot repoint this at a
    * different picture; an unknown name simply falls back to the default. */
   icon?: string;
+  /** Playback speed multiplier (the macro file's `settings.speed`). Edited on
+   * the Vision 6 wheel; round-tripped here so re-saving a key in the app does
+   * not silently drop a device-set speed. Recorded macros carry theirs inside
+   * `macro.settings` instead, so this stays unset for them. */
+  speed?: number;
 };
 
 /** One step of a sequence; `delayMs` is an extra pause AFTER the step. */

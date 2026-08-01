@@ -14,10 +14,19 @@ import { useDevice } from "./device";
 import { useProfiles } from "./profiles";
 import { ipc } from "./ipc";
 import { macroFileCache } from "./macro-cache";
-import { compileAssignment, obsActionToRequest, parseDeviceMacro } from "./macro-model";
+import { compileAssignment, obsActionToRequest, parseAssignment, parseDeviceMacro } from "./macro-model";
+import {
+  closeObsCenter,
+  isObsCenterOpen,
+  obsCenterBtn,
+  obsCenterFire,
+  obsCenterMode,
+  obsCenterValue,
+  openObsCenter,
+} from "./obs-center";
 import { serializeForDevice } from "./recorder-model";
 import { playSound } from "./sound";
-import type { Assignment, MacroFile, ObsSnapshot, Profile } from "./types";
+import type { Assignment, MacroFile, ObsSnapshot, Profile, WebhookRequest } from "./types";
 
 interface OpenMenu {
   key: number;
@@ -46,6 +55,28 @@ function basename(p?: string): string {
   if (!p) return "";
   const b = p.split(/[\\/]/).pop() ?? p;
   return b.length > 12 ? b.slice(0, 11) + "…" : b;
+}
+
+function trunc(s: string): string {
+  return s.length > 12 ? s.slice(0, 11) + "…" : s;
+}
+
+/** List label for a webhook entry: its label, else the URL's host. */
+function hookLabel(h: WebhookRequest & { label?: string }, i: number): string {
+  if (h.label) return trunc(h.label);
+  try {
+    return trunc(new URL(h.url).hostname.replace(/^www\./, ""));
+  } catch {
+    return trunc(h.url) || `#${i + 1}`;
+  }
+}
+
+/** The wheel list of a multi-value key: [id, label, marked] rows plus the
+ * cursor start. Null when the key has a single value (card instead). */
+function multiItems(all: string[] | null | undefined, def: string | undefined) {
+  if (!all || all.length < 2) return null;
+  const sel = Math.max(0, all.indexOf(def ?? ""));
+  return { items: all.map((p, i) => [String(i), basename(p), i === sel ? 1 : 0]), sel };
 }
 
 export function WheelMenuProvider({ children }: { children: ReactNode }) {
@@ -81,6 +112,7 @@ export function WheelMenuProvider({ children }: { children: ReactNode }) {
     const closeMenu = () => {
       stopPoll();
       stopObs();
+      closeObsCenter();
       openRef.current = null;
     };
     const sendMenu = (fields: Record<string, unknown>) => {
@@ -183,6 +215,9 @@ export function WheelMenuProvider({ children }: { children: ReactNode }) {
         const macro = compileAssignment(assignment);
         if (d && macro) await ipc.driveWrite(d.path, o.file, serializeForDevice(macro, protoRef.current)).catch(() => {});
       }
+      // the cached copy predates this rewrite — reopening the menu must re-read
+      const d = driveRef.current;
+      if (d) macroFileCache.invalidate(d.path, o.file);
       sendResult(true, toast, `/${o.file}`);
     };
 
@@ -208,24 +243,112 @@ export function WheelMenuProvider({ children }: { children: ReactNode }) {
         } else {
           await invoke("mic_action", { mode: id }).catch(() => {}); // do it now, stay open
         }
+      } else if (o.mf && (o.kind === "sound" || o.kind === "launch" || o.kind === "command" || o.kind === "webhook")) {
+        // multi-value lists: id is the row index. Tap = use it now (menu stays
+        // open); hold = make it the key's default, preserving the whole list.
+        const mf = o.mf;
+        const i = Number(id);
+        const a = parseAssignment(mf);
+        if (o.kind === "sound" && a.kind === "sound") {
+          const entry = mf.sounds?.[i];
+          if (!entry) return;
+          if (ev === "assign") {
+            await reassignKey(o, { ...a, file: entry.sound }, [
+              "SOUND",
+              entry.label ? trunc(entry.label) : basename(entry.sound),
+            ]);
+          } else void playSound(entry.sound).catch(() => {});
+        } else if (o.kind === "launch" && a.kind === "launch") {
+          const target = mf.targets?.[i];
+          if (!target) return;
+          if (ev === "assign") await reassignKey(o, { ...a, target }, ["OPEN", basename(target)]);
+          else await invoke("open_target", { target }).catch(() => {});
+        } else if (o.kind === "command" && a.kind === "command") {
+          const entry = mf.commands?.[i];
+          if (!entry) return;
+          if (ev === "assign") {
+            await reassignKey(o, { ...a, command: entry.command }, [
+              "COMMAND",
+              entry.label ? trunc(entry.label) : trunc(entry.command),
+            ]);
+          } else await invoke("run_command", { command: entry.command }).catch(() => {});
+        } else if (o.kind === "webhook" && a.kind === "webhook") {
+          const def: WebhookRequest & { label?: string } = {
+            url: a.url,
+            ...(a.method ? { method: a.method } : {}),
+            ...(a.headers?.length ? { headers: a.headers } : {}),
+            ...(a.body ? { body: a.body } : {}),
+          };
+          const all = [def, ...(a.hooks ?? [])];
+          const h = all[i];
+          if (!h?.url) return;
+          if (ev === "assign") {
+            if (i === 0) return sendResult(true, ["WEBHOOK", "default"]);
+            // swap: the chosen alternative becomes the default, the old
+            // default takes its slot in the list
+            const hooks = (a.hooks ?? []).map((x, k) => (k === i - 1 ? def : x));
+            await reassignKey(
+              o,
+              { ...a, url: h.url, method: h.method, headers: h.headers, body: h.body, hooks },
+              ["WEBHOOK", hookLabel(h, i)],
+            );
+          } else {
+            await invoke("http_request", {
+              url: h.url,
+              method: h.method ?? null,
+              headers: h.headers ?? null,
+              body: h.body ?? null,
+            }).catch(() => {});
+          }
+        }
       }
     };
 
     const buildMenu = async (o: OpenMenu) => {
       const mf = o.mf;
+      // Multi-value keys (several targets/commands/sounds/requests defined in
+      // the app) get a list: tap = use one now, hold = make it the default.
+      // Single-value keys keep their card, with a line pointing at the app.
       switch (o.kind) {
-        case "launch":
-          sendMenu({ mtype: "card", title: "OPEN", big: basename(mf?.target) || "OPEN", hint: "open" });
+        case "launch": {
+          const m = multiItems(mf?.targets, mf?.target);
+          if (m) sendMenu({ mtype: "list", title: "OPEN", items: m.items, sel: m.sel, action: "Open", hold: true });
+          else sendMenu({ mtype: "card", title: "OPEN", big: basename(mf?.target) || "OPEN", l1: "add more in app", hint: "open" });
           break;
-        case "command":
-          sendMenu({ mtype: "card", title: "COMMAND", big: "RUN", hint: "run" });
+        }
+        case "command": {
+          const cmds = mf?.commands;
+          if (cmds && cmds.length >= 2) {
+            const sel = Math.max(0, cmds.findIndex((c) => c.command === mf?.command));
+            const items = cmds.map((c, i) => [String(i), c.label ? trunc(c.label) : trunc(c.command), i === sel ? 1 : 0]);
+            sendMenu({ mtype: "list", title: "COMMAND", items, sel, action: "Run", hold: true });
+          } else sendMenu({ mtype: "card", title: "COMMAND", big: "RUN", l1: "add more in app", hint: "run" });
           break;
-        case "sound":
-          sendMenu({ mtype: "card", title: "SOUND", big: basename(mf?.sound) || "SOUND", hint: "play" });
+        }
+        case "sound": {
+          const snds = mf?.sounds;
+          if (snds && snds.length >= 2) {
+            // per-entry name when the user gave one, else the file name
+            const sel = Math.max(0, snds.findIndex((s) => s.sound === mf?.sound));
+            const items = snds.map((s, i) => [
+              String(i),
+              s.label ? trunc(s.label) : basename(s.sound),
+              i === sel ? 1 : 0,
+            ]);
+            sendMenu({ mtype: "list", title: "SOUND", items, sel, action: "Play", hold: true });
+          } else sendMenu({ mtype: "card", title: "SOUND", big: basename(mf?.sound) || "SOUND", l1: "add more in app", hint: "play" });
           break;
-        case "webhook":
-          sendMenu({ mtype: "card", title: "WEBHOOK", big: "SEND", hint: "run" });
+        }
+        case "webhook": {
+          const hooks = mf?.webhooks;
+          if (hooks?.length && mf?.webhook) {
+            // default first, then the alternatives
+            const all = [mf.webhook, ...hooks];
+            const items = all.map((h, i) => [String(i), hookLabel(h, i), i === 0 ? 1 : 0]);
+            sendMenu({ mtype: "list", title: "WEBHOOK", items, sel: 0, action: "Send", hold: true });
+          } else sendMenu({ mtype: "card", title: "WEBHOOK", big: "SEND", l1: "add more in app", hint: "run" });
           break;
+        }
         case "mic":
           buildMicList(o);
           break;
@@ -244,6 +367,11 @@ export function WheelMenuProvider({ children }: { children: ReactNode }) {
           else sendMenu({ mtype: "card", title: "OBS", big: action.replace(/([A-Z])/g, " $1").trim().toUpperCase().slice(0, 12) || "OBS", hint: "run" });
           break;
         }
+        case "obs_center":
+          // the live dashboard: obs-center.ts owns the session and pushes
+          // change-gated obsview:"center" updates through sendMenu
+          openObsCenter(mf, sendMenu);
+          break;
         default:
           sendMenu({ mtype: "card", title: "WHEEL", big: o.kind.toUpperCase(), hint: "run" });
       }
@@ -326,7 +454,11 @@ export function WheelMenuProvider({ children }: { children: ReactNode }) {
       if (!o) return;
       const ev = String(m.ev);
       if (ev === "close") closeMenu();
-      else if (ev === "fire") await onFire(o);
+      else if (o.kind === "obs_center") {
+        if (ev === "fire") obsCenterFire();
+        else if (ev === "mode") obsCenterMode();
+        else if (ev === "value") obsCenterValue(Number(m.v) || 0);
+      } else if (ev === "fire") await onFire(o);
       else if (ev === "pick" || ev === "assign") await onSelect(o, ev, String(m.id ?? ""));
       else if (ev === "value" && (o.kind === "volume" || o.kind === "mic_level")) {
         const pct = Math.max(0, Math.min(100, Number(m.v)));
@@ -339,6 +471,11 @@ export function WheelMenuProvider({ children }: { children: ReactNode }) {
     const un = onMsg((m) => {
       if (m.t === "ctx") void onCtx(m);
       else if (m.t === "menu_ev") void onEv(m);
+      else if (m.t === "btn" && isObsCenterOpen()) {
+        // dashboard quick actions: the firmware swallowed the local macro,
+        // this edge is the only thing that runs the key
+        obsCenterBtn(Number(m.key), String(m.edge));
+      }
     });
     return () => {
       un();

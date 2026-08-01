@@ -376,6 +376,17 @@ for lang in ("en", "tr"):
     o.show_obs({"rec": False, "live": True, "mic": 20, "time": "00:00",
                 "scene": "Game", "hint": "stop"})
 
+    o.show_obscenter({"rec": True, "live": False, "blink": True, "mic": 64,
+                      "mute": False, "time": "00:42:10", "scene": "Gameplay",
+                      "cpu": 8, "fps": 60, "drop": 0, "focus": "mic",
+                      "klabels": ["MUTE", "CAM", "CLIP", "", "", "REC"]})
+    check(tag + " obs center draws", band_of(o, 0, 64) > 0)
+    # widgets the app never pushed stay off the glass: no quick-key row means
+    # no hairline at y=52 either
+    o.show_obscenter({"time": "01:02:33", "scene": "Intro"})
+    check(tag + " obs center hides the quick-key row when off",
+          band_of(o, 52, 64) == 0)
+
     o.show_headless()
     check(tag + " headless draws", band_of(o, 0, 64) > 0)
     o.show_host()
@@ -534,6 +545,13 @@ for name, fn in (
     ("obsrec", lambda d: d.show_obsrec({"rec": True, "blink": True, "key": 2,
                                         "time": "01:35", "scene": "Intro",
                                         "hint": "stop"})),
+    ("obscenter", lambda d: d.show_obscenter(
+        {"rec": True, "live": False, "blink": True, "mic": 64, "mute": False,
+         "time": "00:42:10", "scene": "Gameplay", "cpu": 8, "fps": 60,
+         "drop": 0, "focus": "mic",
+         "klabels": ["MUTE", "CAM", "CLIP", "", "", "REC"]})),
+    ("obscenter_min", lambda d: d.show_obscenter(
+        {"time": "01:02:33", "scene": "Intro"})),
     ("host", lambda d: d.show_host()),
 ):
     d = make_oled()

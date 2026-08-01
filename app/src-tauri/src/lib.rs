@@ -1609,6 +1609,8 @@ pub fn run() {
             obs::obs_action,
             obs::obs_request,
             obs::obs_state,
+            obs::obs_live_start,
+            obs::obs_live_stop,
             read_local_bytes,
             check_update,
             read_local_file,

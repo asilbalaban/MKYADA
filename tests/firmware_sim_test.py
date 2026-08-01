@@ -644,7 +644,7 @@ app.proto.send = _orig_send
 app.proto.ser = None
 
 # --- serial "led" op (proto v2): app feedback override --------------------
-check("hello reports proto v12", app.hello()["proto"] == 12, str(app.hello()["proto"]))
+check("hello reports proto v13", app.hello()["proto"] == 13, str(app.hello()["proto"]))
 check("hello reports usb_drive", app.hello()["usb_drive"] == app.config["usb_drive"], str(app.hello()))
 
 # profile path resolution (issue #23): a profile is a full independent config —

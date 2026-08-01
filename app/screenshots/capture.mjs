@@ -50,7 +50,8 @@ const RECORDED_KEY = /Post the clip/;
 // firmware's own drawing code, so these are photographs of the device rather
 // than an artist's impression of it.
 const OLED_SHOTS = ["home", "grid", "speed", "settings", "about",
-  "wheel-scene", "wheel-status", "wheel-volume", "menu-tr", "transfer"];
+  "wheel-scene", "wheel-status", "wheel-volume", "obs-center", "menu-tr",
+  "transfer"];
 
 async function waitForServer(url, tries = 100) {
   for (let i = 0; i < tries; i++) {

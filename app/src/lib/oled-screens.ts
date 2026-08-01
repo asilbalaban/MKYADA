@@ -74,6 +74,23 @@ export type ObsState = {
   hint?: string;
   keyNo?: number;
 };
+/** OBS Center dashboard state. null/undefined = that widget is turned off
+ * (the app never pushed the field) and the screen reflows without it. */
+export type ObsCenterState = {
+  rec?: boolean | null;
+  live?: boolean | null;
+  blink?: boolean;
+  mic?: number | null;
+  time?: string | null;
+  scene?: string | null;
+  mute?: boolean | null;
+  cpu?: number | null;
+  fps?: number | null;
+  drop?: number | null;
+  klabels?: (string | null)[] | null;
+  /** which control row the wheel drives right now (framed on screen) */
+  focus?: "mic" | "scene" | null;
+};
 
 export function fmtSpeed(t: number): string {
   return `${(t / 10).toFixed(1)}x`;
@@ -624,6 +641,101 @@ export class OledScreens {
     fb.segbar(mx, 42, this.W - 6 - mx, 7, 14, Math.max(0, Math.trunc((o.mic ?? 0) * 14 / 100 + 0.5)));
     fb.hline(0, 51, this.W);
     if (o.hint) this._txt(f.fit(String(o.hint), 124), this.CX, 54);
+  }
+
+  /** OBS Center dashboard (proto v13). Every widget is optional — a None
+   * field means the app turned it off — and the enabled ones reflow top-down,
+   * vertically centred in whatever room the quick-key row leaves. The timer
+   * drops from 2x to 1x only when the stack would not fit, which is the
+   * everything-on + six-labels case. Mirrors oled.py show_obscenter. */
+  show_obscenter(o: ObsCenterState) {
+    const fb = this.fb;
+    const f = this.font;
+    this.clear();
+    fb.rect(0, 0, this.W, BAR_H);
+    this._txt("OBS", 2, 1, 0, true);
+    const rec = o.rec ?? null;
+    const live = o.live ?? null;
+    if (rec !== null || live !== null) {
+      const lab = rec ? upper(tr("rec_t")) : live ? upper(tr("live_t")) : upper(tr("idle_t"));
+      const dot = rec ? 5 : 0;
+      const bw = f.measure(lab) + 6 + dot;
+      const bx = this.W - 2 - bw;
+      fb.rfill(bx, 1, bw, 7, 0, 1);
+      if (rec && o.blink) fb.rect(bx + 3, 3, 3, 3);
+      this._txt(lab, bx + 3 + dot, 1, 0);
+    }
+    const t = o.time ?? null;
+    const sc = o.scene ?? null;
+    const mic = o.mic ?? null;
+    const cpu = o.cpu ?? null;
+    const fps = o.fps ?? null;
+    const drop = o.drop ?? null;
+    const health = cpu !== null || fps !== null || drop !== null;
+    const kl = o.klabels ?? null;
+    const bot = kl !== null ? 50 : 62;
+    const avail = bot - 11;
+    let th = 16;
+    let total =
+      (t !== null ? th + 2 : 0) +
+      (sc !== null ? 11 : 0) +
+      (mic !== null ? 9 : 0) +
+      (health ? 10 : 0);
+    if (total) total -= 2; // no gap after the last widget
+    if (t !== null && total > avail) {
+      total -= 8;
+      th = 8;
+    }
+    let y = 11 + Math.max(0, Math.trunc((avail - total) / 2));
+    if (t !== null) {
+      if (th === 16) this._hero(String(t || "00:00"), this.CX, y, 2, 0.5, 1, 124);
+      else this._txt(f.fit(String(t || "00:00"), 124), this.CX, y);
+      y += th + 2;
+    }
+    const focus = o.focus ?? null;
+    if (sc !== null) {
+      const sl = upper(tr("scene_t"));
+      const sx = Math.max(38, 2 + f.measure(sl) + 4);
+      this._txt(sl, 2, y + 1, 0);
+      if (focus === "scene") {
+        // the wheel drives this row now: a frame around its label
+        fb.frame(0, y, f.measure(sl) + 5, 9);
+      }
+      const sn = f.fit(String(sc), this.W - sx - 6);
+      fb.rfill(sx, y, f.measure(sn) + 6, 9, 1);
+      this._txt(sn, sx + 3, y + 1, 0, true);
+      y += 11;
+    }
+    if (mic !== null) {
+      const ml = upper(tr("mic_t"));
+      const mx = Math.max(24, 2 + f.measure(ml) + 4);
+      if (o.mute) {
+        // muted = the label itself lights up as a solid block
+        fb.rect(0, y, f.measure(ml) + 4, 7);
+        this._txt(ml, 2, y, 0, true);
+      } else {
+        this._txt(ml, 2, y, 0);
+      }
+      if (focus === "mic") {
+        // sits 1px proud of the row so it reads over a muted block
+        fb.frame(0, y - 1, f.measure(ml) + 6, 9);
+      }
+      fb.segbar(mx, y, this.W - 6 - mx, 7, 14, Math.max(0, Math.trunc((mic * 14) / 100 + 0.5)));
+      y += 9;
+    }
+    if (health) {
+      if (cpu !== null) this._txt(`CPU ${cpu}%`, 2, y, 0);
+      if (drop !== null) this._txt(`DROP ${drop}`, this.CX, y, 0.5);
+      if (fps !== null) this._txt(`${fps} FPS`, this.W - 2, y, 1);
+      y += 10;
+    }
+    if (kl !== null) {
+      fb.hline(0, 52, this.W);
+      for (let i = 0; i < 6; i++) {
+        const s = i < kl.length && kl[i] ? String(kl[i]) : "";
+        if (s) this._txt(f.fit(s, 20), 11 + i * 21, 55, 0.5);
+      }
+    }
   }
 
   /** The design's fault screen: a 2x warning icon with two lines beside it.

@@ -19,9 +19,19 @@
     document.documentElement.classList.add("js");
   })();
 </script>
-<link rel="preload" as="image" href="images/mkyada-topview-transparent.png">
 <link rel="stylesheet" href="styles.css">
 <script src="main.js" defer></script>
+<!-- hero demo reel: contour-line case + live OLED screens (progressive enhancement) -->
+<script src="oled-bundle.js" defer></script>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+<script type="module" src="hero-reel.js"></script>
 </head>
 <body>
 
@@ -94,39 +104,58 @@
 </nav>
 
 <header id="top" data-scrub>
-  <div class="orb orb-a" aria-hidden="true"></div>
-  <div class="orb orb-b" aria-hidden="true"></div>
-  <div class="wrap">
-    <div class="hero-img hero-img-top" data-scrub>
-      <div class="hero-3d">
-        <div class="hero-flat">
-          <div class="hero-still bare">
-            <div class="tilt-inner">
-              <img src="images/mkyada-topview-cropped.png" width="1941" height="1684" fetchpriority="high" alt="MKYADA macro keypad, top view">
+  <div class="hero-cine">
+    <canvas id="hero-reel" class="hero-reel" aria-hidden="true"></canvas>
+    <div class="hero-cine-overlay">
+      <h1 data-split><span lang="en">Every macro. One key away.</span><span lang="tr">Her makro. Tek tuş uzağında.</span></h1>
+      <p class="tagline">
+        <span lang="en">MKYADA is the macro keypad you always dream about, record anything, put it on a key, take it anywhere.</span>
+        <span lang="tr">MKYADA, hep hayalini kurduğunuz makro klavye, her şeyi kaydedin, bir tuşa atayın, yanınızda götürün.</span>
+      </p>
+      <div class="cta">
+        <a class="btn primary" href="https://github.com/asilbalaban/MKYADA/releases/latest">
+          <span lang="en">Download for macOS &amp; Windows</span><span lang="tr">macOS ve Windows için indir</span>
+        </a>
+        <a class="btn ghost" href="#build"><span lang="en">Build your own</span><span lang="tr">Kendininkini yap</span></a>
+      </div>
+      <p class="free-note">
+        <span lang="en">Free &amp; open source · MIT license · No account, no cloud, no subscription</span>
+        <span lang="tr">Ücretsiz ve açık kaynak · MIT lisansı · Hesap yok, bulut yok, abonelik yok</span>
+      </p>
+    </div>
+  </div>
+  <!-- mobile keeps the classic hero: still photo, no animation -->
+  <div class="hero-mobile">
+    <div class="wrap">
+      <div class="hero-img hero-img-top">
+        <div class="hero-3d">
+          <div class="hero-flat">
+            <div class="hero-still bare">
+              <div class="tilt-inner">
+                <img src="images/mkyada-topview-cropped.png" width="1941" height="1684" fetchpriority="high" alt="MKYADA macro keypad, top view">
+              </div>
             </div>
           </div>
         </div>
       </div>
+      <h1><span lang="en">Every macro. One key away.</span><span lang="tr">Her makro. Tek tuş uzağında.</span></h1>
+      <p class="tagline">
+        <span lang="en">MKYADA is the macro keypad you always dream about, record anything, put it on a key, take it anywhere.</span>
+        <span lang="tr">MKYADA, hep hayalini kurduğunuz makro klavye, her şeyi kaydedin, bir tuşa atayın, yanınızda götürün.</span>
+      </p>
+      <div class="cta">
+        <a class="btn primary" href="https://github.com/asilbalaban/MKYADA/releases/latest">
+          <span lang="en">Download for macOS &amp; Windows</span><span lang="tr">macOS ve Windows için indir</span>
+        </a>
+        <a class="btn ghost" href="#build"><span lang="en">Build your own</span><span lang="tr">Kendininkini yap</span></a>
+      </div>
+      <p class="free-note">
+        <span lang="en">Free &amp; open source · MIT license · No account, no cloud, no subscription</span>
+        <span lang="tr">Ücretsiz ve açık kaynak · MIT lisansı · Hesap yok, bulut yok, abonelik yok</span>
+      </p>
     </div>
-    <h1 data-split><span lang="en">Every macro. One key away.</span><span lang="tr">Her makro. Tek tuş uzağında.</span></h1>
-    <p class="tagline">
-      <span lang="en">MKYADA is the macro keypad you always dream about, record anything, put it on a key, take it anywhere.</span>
-      <span lang="tr">MKYADA, hep hayalini kurduğunuz makro klavye, her şeyi kaydedin, bir tuşa atayın, yanınızda götürün.</span>
-    </p>
-    <div class="cta">
-      <a class="btn primary" href="https://github.com/asilbalaban/MKYADA/releases/latest">
-        <span lang="en">Download for macOS &amp; Windows</span><span lang="tr">macOS ve Windows için indir</span>
-      </a>
-      <a class="btn ghost" href="#build"><span lang="en">Build your own</span><span lang="tr">Kendininkini yap</span></a>
-    </div>
-    <p class="free-note">
-      <span lang="en">Free &amp; open source · MIT license · No account, no cloud, no subscription</span>
-      <span lang="tr">Ücretsiz ve açık kaynak · MIT lisansı · Hesap yok, bulut yok, abonelik yok</span>
-    </p>
   </div>
 </header>
-
-<div class="divider"></div>
 
 <!-- ============ HARDWARE HID ============ -->
 <section id="features">

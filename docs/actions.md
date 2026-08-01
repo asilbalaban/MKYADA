@@ -31,13 +31,14 @@ Two families:
 
 | Action | What it does |
 |---|---|
-| **Launch** | Open an app, a file, or a URL. |
-| **Run command** | Run a shell command line. |
-| **Play sound** | Play an audio file; holding the key can stop, fade or restart it. |
+| **Launch** | Open an app, a file, or a URL. Up to 5 targets per key — the Vision 6 wheel lists them. |
+| **Run command** | Run a shell command line. Up to 5 commands per key (each with a wheel label). |
+| **Play sound** | Play an audio file; holding the key can stop, fade or restart it. Up to 5 sounds per key — a soundboard on one key. |
 | **Microphone** | Toggle / mute / unmute the system mic, or **push-to-talk** (unmute while held). |
 | **Microphone level** | Pressing the key opens a mic input-gain slider on the Vision 6 (needs the app; no standalone mic-gain control). |
-| **Webhook** | Any HTTP request, curl-style — smart lights, Home Assistant, Discord/Telegram, your own API. |
+| **Webhook** | Any HTTP request, curl-style — smart lights, Home Assistant, Discord/Telegram, your own API. Alternative requests ride on the same key via the wheel. |
 | **OBS Studio** | Control OBS over obs-websocket: switch scene, start/stop record & stream, toggle mic / virtual cam / replay buffer, trigger a hotkey. |
+| **OBS Center** | Vision 6 only: pressing the key opens a **live OBS dashboard** on the keypad screen — REC/LIVE chip, record/stream timer, active scene, mic level meter (with mute state) and a CPU / dropped-frames / FPS health row, every widget toggleable per key. The wheel drives the **framed control row**: on MIC it's a fader (press = mute toggle), on SCENE it browses (press = switch); **holding CONFIRM jumps between the rows**. No mic configured = OBS's default mic. The **six keys become OBS quick actions** with their labels along the bottom of the screen; BACK closes it. On a Core 6 (no screen) the key does nothing. |
 | **Sequence** | Stream Deck-style multi-action: run several of the above in order, with delays between steps. |
 
 ## Layer & off actions — both models
@@ -69,7 +70,7 @@ poor default for a volume key).
 
 | Action | Turn | Short press | Long press |
 |---|---|---|---|
-| Recorded macro / Text | Adjust playback/typing speed | Save the speed | — |
+| Recorded macro / Text / Sequence | Adjust playback/typing speed (step delays scale too) | Save the speed | — |
 | Keystroke / Shortcut | Fire the key repeatedly | Fire once | — |
 | Media key | Browse every media key | Use the highlighted one | Reassign the key to it |
 | **Volume level** | Set the % (slider) | Confirm & close | — *(press the key = open this)* |
@@ -77,10 +78,15 @@ poor default for a volume key).
 | Mouse scroll | Scroll in the assigned direction | One step | — |
 | OBS · switch scene | Browse scenes (live one marked) | **Switch OBS live** | **Reassign** the key to that scene |
 | OBS · record/stream/cam/replay | — | Toggle it live (status shown) | — |
+| **OBS Center** | Adjust the framed row: mic volume or scene browse | Framed row's action: mute toggle / switch to the browsed scene | **Move the frame** to the next control row (mic ↔ scene) |
 | Microphone (mute) | Browse toggle / mute / unmute | Do it now | Reassign the key to that mode |
-| Webhook / Command / Launch / Sound | — | Run it (result shown) | — |
+| Webhook / Command / Launch / Sound · one entry | — | Run it (result shown; a line points at the app for adding more) | — |
+| Webhook / Command / Launch / Sound · several entries | Browse the key's entries (default marked) | Use the highlighted one now | Make it the key's **default** |
 | Device menu (layer / nav) | Browse next/prev layer, jump to a layer, Home/Grid/Settings | Run the highlighted one | Reassign the key to it |
-| Sequence | — | Run it | — |
+
+A standalone volume key (app closed) still adjusts relatively over HID, but the
+card says the exact **%** needs the app — the keypad cannot read the system
+volume on its own.
 
 Host actions (OBS, mic, webhook…) show an **"app required"** reminder when the
 MKYADA app isn't connected. The app also shows a live mini-OLED preview of this

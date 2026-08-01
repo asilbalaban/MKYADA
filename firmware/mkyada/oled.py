@@ -793,6 +793,100 @@ class Oled:
             self._txt(f.fit(str(o["hint"]), 124), self.CX, 54)
         self.paint("obs")
 
+    def show_obscenter(self, o):
+        """OBS Center dashboard (proto v13). Every widget is optional — a
+        None field means the app turned it off — and the enabled ones reflow
+        top-down, vertically centred in whatever room the quick-key row
+        leaves. The timer drops from 2x to 1x only when the stack would not
+        fit, which is the everything-on + six-labels case."""
+        if not self._begin("obscenter"):
+            return
+        fb = self.fb
+        f = self.font
+        fb.rect(0, 0, self.W, BAR_H)
+        self._txt("OBS", 2, 1, 0.0, True)
+        rec = o.get("rec")
+        live = o.get("live")
+        if rec is not None or live is not None:
+            lab = upper(tr("rec_t")) if rec else (
+                upper(tr("live_t")) if live else upper(tr("idle_t")))
+            dot = 5 if rec else 0
+            bw = f.measure(lab) + 6 + dot
+            bx = self.W - 2 - bw
+            fb.rfill(bx, 1, bw, 7, 0, 1)
+            if rec and o.get("blink"):
+                fb.rect(bx + 3, 3, 3, 3)
+            self._txt(lab, bx + 3 + dot, 1, 0.0)
+        t = o.get("time")
+        sc = o.get("scene")
+        mic = o.get("mic")
+        cpu = o.get("cpu")
+        fps = o.get("fps")
+        drop = o.get("drop")
+        health = cpu is not None or fps is not None or drop is not None
+        kl = o.get("klabels")
+        bot = 50 if kl is not None else 62
+        avail = bot - 11
+        th = 16
+        total = ((th + 2) if t is not None else 0) \
+            + (11 if sc is not None else 0) \
+            + (9 if mic is not None else 0) \
+            + (10 if health else 0)
+        if total:
+            total -= 2  # no gap after the last widget
+        if t is not None and total > avail:
+            total -= 8
+            th = 8
+        y = 11 + max(0, (avail - total) // 2)
+        if t is not None:
+            if th == 16:
+                self._hero(str(t or "00:00"), self.CX, y, 2, fit=124)
+            else:
+                self._txt(f.fit(str(t or "00:00"), 124), self.CX, y)
+            y += th + 2
+        focus = o.get("focus")
+        if sc is not None:
+            sl = upper(tr("scene_t"))
+            sx = max(38, 2 + f.measure(sl) + 4)
+            self._txt(sl, 2, y + 1, 0.0)
+            if focus == "scene":
+                # the wheel drives this row now: a frame around its label
+                fb.frame(0, y, f.measure(sl) + 5, 9)
+            sn = f.fit(str(sc), self.W - sx - 6)
+            fb.rfill(sx, y, f.measure(sn) + 6, 9, 1)
+            self._txt(sn, sx + 3, y + 1, 0.0, True)
+            y += 11
+        if mic is not None:
+            ml = upper(tr("mic_t"))
+            mx = max(24, 2 + f.measure(ml) + 4)
+            if o.get("mute"):
+                # muted = the label itself lights up as a solid block
+                fb.rect(0, y, f.measure(ml) + 4, 7)
+                self._txt(ml, 2, y, 0.0, True)
+            else:
+                self._txt(ml, 2, y, 0.0)
+            if focus == "mic":
+                # sits 1px proud of the row so it reads over a muted block
+                fb.frame(0, y - 1, f.measure(ml) + 6, 9)
+            fb.segbar(mx, y, self.W - 6 - mx, 7, 14,
+                      max(0, int(mic * 14 / 100 + 0.5)))
+            y += 9
+        if health:
+            if cpu is not None:
+                self._txt("CPU %d%%" % cpu, 2, y, 0.0)
+            if drop is not None:
+                self._txt("DROP %d" % drop, self.CX, y, 0.5)
+            if fps is not None:
+                self._txt("%d FPS" % fps, self.W - 2, y, 1.0)
+            y += 10
+        if kl is not None:
+            fb.hline(0, 52, self.W)
+            for i in range(6):
+                s = str(kl[i]) if i < len(kl) and kl[i] else ""
+                if s:
+                    self._txt(f.fit(s, 20), 11 + i * 21, 55, 0.5)
+        self.paint("obscenter")
+
     def _alert(self, key, title, l1, l2=None, art=None):
         """The design's fault screen: a 2x warning icon with two lines beside
         it. Theirs sits high because an error code and a retry line follow; we

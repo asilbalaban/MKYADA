@@ -98,6 +98,26 @@ const CASES: [string, Assignment][] = [
     { kind: "obs", action: "sourceToggle", sourceScene: "Sahne 1", sourceName: "Webcam" },
   ],
   ["obs hotkey", { kind: "obs", action: "hotkey", hotkeyName: "OBSBasic.StartRecording" }],
+  ["obs center (bare)", { kind: "obs_center" }],
+  [
+    "obs center (full config)",
+    {
+      kind: "obs_center",
+      center: {
+        micInput: "Mic/Aux",
+        encoder: "scene",
+        widgets: { status: true, timer: true, scene: false, mic: true, health: false },
+        quickKeys: [
+          { label: "MUTE", action: { action: "micToggle", inputName: "Mic/Aux" } },
+          { label: "CAM", action: { action: "virtualCamToggle" } },
+          null,
+          null,
+          null,
+          { label: "REC", action: { action: "recordToggle" } },
+        ],
+      },
+    },
+  ],
   ["keystroke with restart", { kind: "keystroke", key: "a", behavior: { on_repress: "restart" } }],
   ["keystroke opted out of hold-repeat", { kind: "keystroke", key: "a", behavior: { hold_repeat: false } }],
   ["combo with hold_repeat", { kind: "combo", mods: ["ALT"], key: "tab", behavior: { hold_repeat: true } }],

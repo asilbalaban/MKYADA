@@ -24,11 +24,27 @@ use tokio_tungstenite::tungstenite::Message;
 /// enough for scene switches, mic mute, and record/stream/vcam/replay state.
 const EVENT_SUBS: u32 = (1 << 2) | (1 << 3) | (1 << 6);
 
+/// InputVolumeMeters is a "high-volume" event group OBS only sends when asked:
+/// ~20 frames/s of per-input levels. Subscribed only while an OBS Center
+/// session runs (obs_live_start), dropped again on obs_live_stop — nobody
+/// needs a 20Hz firehose to keep a Settings card green.
+const METER_SUB: u32 = 1 << 16;
+
 /// How long a single request waits for its RequestResponse before giving up.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(8);
 
 /// Delay between reconnection attempts while a connection is configured.
 const RECONNECT_DELAY: Duration = Duration::from_secs(3);
+
+/// How often the live session polls GetRecordStatus / GetStreamStatus /
+/// GetStats. The OLED health row quotes these numbers, and 2s matches the
+/// sysvol precedent for "live but not frantic".
+const LIVE_POLL: Duration = Duration::from_secs(2);
+
+/// Minimum gap between mic-level emits. OBS sends meter frames at ~20Hz; the
+/// OLED bar has 14 segments, so anything faster than ~3Hz is invisible and
+/// only costs serial lines on the far side.
+const METER_GAP: Duration = Duration::from_millis(330);
 
 /// The live OBS state pushed to the UI. Serialized as-is to the `obs:changed`
 /// event and returned by the `obs_state` command.
@@ -47,6 +63,30 @@ pub struct ObsSnapshot {
     pub error: Option<String>,
 }
 
+/// The live-session numbers pushed while an OBS Center is open, event
+/// `obs:live`. Every field is optional: each emit carries only what just
+/// changed (a meter frame is `{micPct}`, a stats tick is `{cpu,fps,...}`),
+/// and the frontend merges them into its own view of the session.
+#[derive(Clone, Default, serde::Serialize)]
+pub struct ObsLive {
+    #[serde(rename = "recSecs", skip_serializing_if = "Option::is_none")]
+    pub rec_secs: Option<u64>,
+    #[serde(rename = "streamSecs", skip_serializing_if = "Option::is_none")]
+    pub stream_secs: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cpu: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fps: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dropped: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total: Option<u64>,
+    #[serde(rename = "micPct", skip_serializing_if = "Option::is_none")]
+    pub mic_pct: Option<u32>,
+    #[serde(rename = "micMuted", skip_serializing_if = "Option::is_none")]
+    pub mic_muted: Option<bool>,
+}
+
 #[derive(Clone)]
 struct ObsConfig {
     host: String,
@@ -54,11 +94,17 @@ struct ObsConfig {
     password: String,
 }
 
-/// A request queued for the connection task.
-struct ObsCmd {
-    request_type: String,
-    request_data: Value,
-    reply: oneshot::Sender<Result<Value, String>>,
+/// Work queued for the connection task.
+enum ObsCmd {
+    /// An op-6 request whose response the caller awaits.
+    Request {
+        request_type: String,
+        request_data: Value,
+        reply: oneshot::Sender<Result<Value, String>>,
+    },
+    /// Re-Identify (op 3) with a new event-subscription mask — how the
+    /// InputVolumeMeters group is turned on and off mid-connection.
+    SetSubs(u32),
 }
 
 #[derive(Default)]
@@ -67,6 +113,10 @@ struct Shared {
     snapshot: ObsSnapshot,
     /// bumped on every connect/disconnect so stale supervisor loops stop
     generation: u64,
+    /// Some while an OBS Center session runs: which audio input the mic
+    /// widgets follow. Read by the connection task on every meter frame and
+    /// poll tick, and survives a reconnect (Identify re-applies METER_SUB).
+    live_input: Option<Option<String>>,
 }
 
 #[derive(Default)]
@@ -117,6 +167,121 @@ fn is_transitional(data: &Value) -> bool {
         .is_some_and(|s| s.ends_with("_STARTING") || s.ends_with("_STOPPING"))
 }
 
+/// Parse an obs-websocket `outputTimecode` ("HH:MM:SS.mmm") into whole
+/// seconds. Anything malformed reads as 0 rather than an error — the OLED
+/// timer restarting at zero is a visible bug report, a poisoned session isn't.
+fn parse_timecode(tc: &str) -> u64 {
+    let mut secs: u64 = 0;
+    for part in tc.split('.').next().unwrap_or("").split(':') {
+        match part.parse::<u64>() {
+            Ok(v) => secs = secs * 60 + v,
+            Err(_) => return 0,
+        }
+    }
+    secs
+}
+
+/// Map a meter multiplier (linear 0..1) to the 0..100 the OLED segment bar
+/// quantizes, over a -60dB..0dB window — the same window OBS's own mixer
+/// meters use, so the keypad bar moves like the one on screen.
+fn mul_to_pct(mul: f64) -> u32 {
+    if mul <= 0.0 {
+        return 0;
+    }
+    let db = 20.0 * mul.log10();
+    (((db + 60.0) / 60.0).clamp(0.0, 1.0) * 100.0).round() as u32
+}
+
+/// The audio input the live session follows, or None when no session runs.
+fn live_input(app: &AppHandle) -> Option<Option<String>> {
+    let mgr = app.state::<ObsManager>();
+    let shared = mgr.shared.lock().unwrap();
+    shared.live_input.clone()
+}
+
+/// Handle one InputVolumeMeters frame (op 5, high-volume group): pick the
+/// session's input, take the loudest channel's current level, and emit it —
+/// throttled and quantized to the 14 segments the OLED can actually show.
+fn on_meter_frame(app: &AppHandle, d: &Value, last: &mut (std::time::Instant, i64)) {
+    let Some(Some(want)) = live_input(app) else { return };
+    let inputs = d
+        .get("eventData")
+        .and_then(|e| e.get("inputs"))
+        .and_then(|v| v.as_array());
+    let Some(inputs) = inputs else { return };
+    let mut mul: f64 = 0.0;
+    for inp in inputs {
+        let name = inp.get("inputName").and_then(|v| v.as_str()).unwrap_or("");
+        if name != want {
+            continue;
+        }
+        if let Some(levels) = inp.get("inputLevelsMul").and_then(|v| v.as_array()) {
+            for ch in levels {
+                if let Some(cur) = ch.get(0).and_then(|v| v.as_f64()) {
+                    if cur > mul {
+                        mul = cur;
+                    }
+                }
+            }
+        }
+        break;
+    }
+    let pct = mul_to_pct(mul);
+    let seg = (pct as i64 * 14 + 50) / 100;
+    if seg == last.1 && last.0.elapsed() < Duration::from_secs(2) {
+        return; // the bar would not move
+    }
+    if last.0.elapsed() < METER_GAP {
+        return;
+    }
+    *last = (std::time::Instant::now(), seg);
+    let _ = app.emit(
+        "obs:live",
+        ObsLive {
+            mic_pct: Some(pct),
+            ..Default::default()
+        },
+    );
+}
+
+/// Seed / refresh the live-session numbers from a `live-` prefixed poll
+/// response (GetRecordStatus / GetStreamStatus / GetStats).
+fn on_live_response(app: &AppHandle, which: &str, data: &Value) {
+    let mut live = ObsLive::default();
+    match which {
+        "record" => {
+            let active = data
+                .get("outputActive")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            live.rec_secs = Some(if active {
+                parse_timecode(data.get("outputTimecode").and_then(|v| v.as_str()).unwrap_or(""))
+            } else {
+                0
+            });
+        }
+        "stream" => {
+            let active = data
+                .get("outputActive")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            live.stream_secs = Some(if active {
+                parse_timecode(data.get("outputTimecode").and_then(|v| v.as_str()).unwrap_or(""))
+            } else {
+                0
+            });
+            live.dropped = data.get("outputSkippedFrames").and_then(|v| v.as_u64());
+            live.total = data.get("outputTotalFrames").and_then(|v| v.as_u64());
+        }
+        "stats" => {
+            live.cpu = data.get("cpuUsage").and_then(|v| v.as_f64());
+            live.fps = data.get("activeFps").and_then(|v| v.as_f64());
+        }
+        _ => return,
+    }
+    let _ = app.emit("obs:live", live);
+}
+
 /// Handle one op-5 Event, updating the snapshot.
 fn on_event(app: &AppHandle, d: &Value) {
     let event_type = d
@@ -150,6 +315,28 @@ fn on_event(app: &AppHandle, d: &Value) {
         }
         "ReplayBufferStateChanged" => {
             update_snapshot(app, |s| s.replay_buffer = output_active(d, s.replay_buffer));
+        }
+        // Only relayed while an OBS Center session follows this input — the
+        // dashboard's MIC label inverts on mute, and a keypad-fired
+        // ToggleInputMute answers through this same event.
+        "InputMuteStateChanged" => {
+            let Some(Some(want)) = live_input(app) else { return };
+            let ed = d.get("eventData");
+            let name = ed
+                .and_then(|e| e.get("inputName"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            if name == want {
+                if let Some(m) = ed.and_then(|e| e.get("inputMuted")).and_then(|v| v.as_bool()) {
+                    let _ = app.emit(
+                        "obs:live",
+                        ObsLive {
+                            mic_muted: Some(m),
+                            ..Default::default()
+                        },
+                    );
+                }
+            }
         }
         _ => {}
     }
@@ -196,12 +383,19 @@ async fn connect_and_run(
         .map_err(|e| format!("connect failed: {e}"))?;
     let (mut write, mut read) = ws.split();
 
-    // op 0 Hello -> op 1 Identify -> op 2 Identified
+    // op 0 Hello -> op 1 Identify -> op 2 Identified. A reconnect while an
+    // OBS Center session runs re-applies the meter subscription here, so the
+    // dashboard's VU bar survives an OBS restart without a new live_start.
+    let subs = if live_input(app).is_some() {
+        EVENT_SUBS | METER_SUB
+    } else {
+        EVENT_SUBS
+    };
     let hello = next_json(&mut read)
         .await
         .ok_or_else(|| "no Hello from OBS".to_string())?;
     let hello_d = &hello["d"];
-    let mut ident = json!({ "rpcVersion": 1, "eventSubscriptions": EVENT_SUBS });
+    let mut ident = json!({ "rpcVersion": 1, "eventSubscriptions": subs });
     if let Some(auth) = hello_d.get("authentication") {
         let salt = auth.get("salt").and_then(|v| v.as_str()).unwrap_or("");
         let challenge = auth.get("challenge").and_then(|v| v.as_str()).unwrap_or("");
@@ -244,6 +438,10 @@ async fn connect_and_run(
 
     let mut pending: HashMap<String, oneshot::Sender<Result<Value, String>>> = HashMap::new();
     let mut next_id: u64 = 0;
+    // meter throttle: (last emit, last quantized segment)
+    let mut meter_last = (std::time::Instant::now() - METER_GAP, -1i64);
+    let mut live_tick = tokio::time::interval(LIVE_POLL);
+    live_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
     loop {
         tokio::select! {
@@ -257,7 +455,17 @@ async fn connect_and_run(
                     Message::Text(txt) => {
                         let Ok(v) = serde_json::from_str::<Value>(&txt) else { continue };
                         match v.get("op").and_then(|o| o.as_u64()) {
-                            Some(5) => on_event(app, &v["d"]),
+                            Some(5) => {
+                                let et = v["d"].get("eventType")
+                                    .and_then(|t| t.as_str()).unwrap_or("");
+                                if et == "InputVolumeMeters" {
+                                    // high-volume: handled with local throttle
+                                    // state, never reaches on_event
+                                    on_meter_frame(app, &v["d"], &mut meter_last);
+                                } else {
+                                    on_event(app, &v["d"]);
+                                }
+                            }
                             Some(7) => on_response(app, &v["d"], &mut pending),
                             _ => {}
                         }
@@ -267,16 +475,52 @@ async fn connect_and_run(
                     _ => {}
                 }
             }
+            _ = live_tick.tick() => {
+                if live_input(app).is_some() {
+                    for (id, req) in [
+                        ("live-record", "GetRecordStatus"),
+                        ("live-stream", "GetStreamStatus"),
+                        ("live-stats", "GetStats"),
+                    ] {
+                        let frame = request_frame(id, req, &json!({}));
+                        if write.send(Message::Text(frame.to_string())).await.is_err() {
+                            break;
+                        }
+                    }
+                }
+            }
             cmd = cmd_rx.recv() => {
                 let Some(cmd) = cmd else { break };
-                next_id += 1;
-                let id = format!("r{next_id}");
-                let frame = request_frame(&id, &cmd.request_type, &cmd.request_data);
-                if write.send(Message::Text(frame.to_string())).await.is_err() {
-                    let _ = cmd.reply.send(Err("OBS connection lost".to_string()));
-                    break;
+                match cmd {
+                    ObsCmd::Request { request_type, request_data, reply } => {
+                        next_id += 1;
+                        let id = format!("r{next_id}");
+                        let frame = request_frame(&id, &request_type, &request_data);
+                        if write.send(Message::Text(frame.to_string())).await.is_err() {
+                            let _ = reply.send(Err("OBS connection lost".to_string()));
+                            break;
+                        }
+                        pending.insert(id, reply);
+                    }
+                    ObsCmd::SetSubs(mask) => {
+                        let frame = json!({ "op": 3, "d": { "eventSubscriptions": mask } });
+                        if write.send(Message::Text(frame.to_string())).await.is_err() {
+                            break;
+                        }
+                        if mask & METER_SUB != 0 {
+                            // a session just started: pull the first numbers
+                            // now instead of waiting out the poll interval
+                            for (id, req) in [
+                                ("live-record", "GetRecordStatus"),
+                                ("live-stream", "GetStreamStatus"),
+                                ("live-stats", "GetStats"),
+                            ] {
+                                let frame = request_frame(id, req, &json!({}));
+                                let _ = write.send(Message::Text(frame.to_string())).await;
+                            }
+                        }
+                    }
                 }
-                pending.insert(id, cmd.reply);
             }
         }
     }
@@ -315,6 +559,12 @@ fn on_response(
     if let Some(which) = request_id.strip_prefix("init-") {
         if ok {
             on_init_response(app, which, &response_data);
+        }
+        return;
+    }
+    if let Some(which) = request_id.strip_prefix("live-") {
+        if ok {
+            on_live_response(app, which, &response_data);
         }
         return;
     }
@@ -365,7 +615,7 @@ async fn send_request(
             .ok_or_else(|| "OBS is not connected".to_string())?
     };
     let (reply_tx, reply_rx) = oneshot::channel();
-    tx.send(ObsCmd {
+    tx.send(ObsCmd::Request {
         request_type,
         request_data,
         reply: reply_tx,
@@ -470,9 +720,62 @@ pub fn obs_state(mgr: State<'_, ObsManager>) -> ObsSnapshot {
     mgr.shared.lock().unwrap().snapshot.clone()
 }
 
+/// Start an OBS Center live session: subscribe to InputVolumeMeters (for
+/// `input_name`, when given) and arm the 2s status/stats poll. Idempotent —
+/// reopening the dashboard just replaces the followed input.
+#[tauri::command]
+pub fn obs_live_start(mgr: State<'_, ObsManager>, input_name: Option<String>) {
+    let tx = {
+        let mut shared = mgr.shared.lock().unwrap();
+        shared.live_input = Some(input_name);
+        shared.cmd_tx.clone()
+    };
+    if let Some(tx) = tx {
+        let _ = tx.send(ObsCmd::SetSubs(EVENT_SUBS | METER_SUB));
+    }
+}
+
+/// End the live session: drop the meter subscription and stop polling.
+#[tauri::command]
+pub fn obs_live_stop(mgr: State<'_, ObsManager>) {
+    let tx = {
+        let mut shared = mgr.shared.lock().unwrap();
+        if shared.live_input.is_none() {
+            return; // never started (or already stopped): nothing to undo
+        }
+        shared.live_input = None;
+        shared.cmd_tx.clone()
+    };
+    if let Some(tx) = tx {
+        let _ = tx.send(ObsCmd::SetSubs(EVENT_SUBS));
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::auth_response;
+    use super::{auth_response, mul_to_pct, parse_timecode};
+
+    #[test]
+    fn timecode_parses() {
+        assert_eq!(parse_timecode("00:00:00.000"), 0);
+        assert_eq!(parse_timecode("00:00:07.499"), 7);
+        assert_eq!(parse_timecode("01:02:33.123"), 3753);
+        assert_eq!(parse_timecode("12:00:00"), 43200);
+        // malformed reads as zero, never an error
+        assert_eq!(parse_timecode(""), 0);
+        assert_eq!(parse_timecode("garbage"), 0);
+        assert_eq!(parse_timecode("1:xx:00"), 0);
+    }
+
+    #[test]
+    fn meter_multiplier_maps_to_percent() {
+        assert_eq!(mul_to_pct(0.0), 0);
+        assert_eq!(mul_to_pct(-1.0), 0);
+        assert_eq!(mul_to_pct(1.0), 100); // 0dB = full scale
+        assert_eq!(mul_to_pct(0.001), 0); // -60dB = floor
+        let mid = mul_to_pct(0.0316); // ~-30dB
+        assert!((45..=55).contains(&mid), "got {mid}");
+    }
 
     #[test]
     fn auth_matches_reference() {

@@ -98,9 +98,21 @@ const next =
 
 const kb = (block.length / 1024).toFixed(1);
 
+// The landing page's hero animation draws the same OLED screens, but it is a
+// module script and cannot share simulator.html's inline block — so the same
+// bundle also lands as a standalone file, committed and checked the same way.
+const BUNDLE_FILE = path.join(ROOT, "docs", "oled-bundle.js");
+const bundleOut = block + "\n";
+
 if (process.argv.includes("--check")) {
   if (next !== html) {
     die("docs/simulator.html kaynakla uyuşmuyor — " +
+        "node scripts/build-demo.mjs çalıştırın");
+  }
+  let cur = "";
+  try { cur = fs.readFileSync(BUNDLE_FILE, "utf8"); } catch {}
+  if (cur !== bundleOut) {
+    die("docs/oled-bundle.js kaynakla uyuşmuyor — " +
         "node scripts/build-demo.mjs çalıştırın");
   }
   console.log(`[demo] güncel — ${kb} KB paket, fw ${FW}`);
@@ -108,4 +120,5 @@ if (process.argv.includes("--check")) {
 }
 
 fs.writeFileSync(PAGE, next);
-console.log(`[demo] yazıldı — ${kb} KB paket, fw ${FW} -> docs/simulator.html`);
+fs.writeFileSync(BUNDLE_FILE, bundleOut);
+console.log(`[demo] yazıldı — ${kb} KB paket, fw ${FW} -> docs/simulator.html + docs/oled-bundle.js`);

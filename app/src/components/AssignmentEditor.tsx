@@ -3,7 +3,7 @@
 
 import { ReactNode, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, ChevronRight, FolderOpen, Keyboard, Mic, Play, Plus, Send, Trash2, Volume2 } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, ChevronRight, FolderOpen, Keyboard, Mic, Play, Plus, Send, Star, Trash2, Volume2 } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { SOUND_EXTENSIONS, playSound } from "../lib/sound";
 import { readTextFile } from "../lib/fs";
@@ -239,6 +239,7 @@ export function AssignmentEditor({
               else if (kind === "mic") onChange({ kind: "mic", mode: "toggle" });
               else if (kind === "webhook") onChange({ kind: "webhook", url: "" });
               else if (kind === "obs") onChange({ kind: "obs", action: "setScene", sceneName: "" });
+              else if (kind === "obs_center") onChange({ kind: "obs_center", center: { encoder: "mic" } });
               else if (kind === "sequence")
                 onChange({ kind: "sequence", steps: [{ a: { kind: "keystroke", key: "" }, delayMs: 0 }] });
               else importMacro();
@@ -466,82 +467,229 @@ export function AssignmentEditor({
         </ControlField>
       )}
 
-      {value.kind === "launch" && (
-        <Field label="URL or file/app path">
-          <div className="flex gap-2">
-            <Input
-              className="flex-1"
-              value={value.target}
-              placeholder={IS_MAC ? "https://… or /Applications/Google Chrome.app" : "https://… or C:\\Program Files\\…\\app.exe"}
-              onChange={(e) => onChange({ ...value, target: e.target.value })}
-            />
-            <Button
-              onClick={async () => {
-                const picked = await open({
-                  defaultPath: IS_MAC ? "/Applications" : undefined,
-                  title: "Choose an app or file to open",
-                });
-                if (picked) onChange({ ...value, target: picked as string });
-              }}
-            >
-              <FolderOpen size={14} aria-hidden /> Browse…
-            </Button>
-          </div>
-          <p className="text-fg-faint text-xs mt-1">
-            Pressing the key opens this on the computer. Works while the MKYADA app is
-            running (also minimized) — the keypad alone can't open apps.
-          </p>
-        </Field>
-      )}
+      {value.kind === "launch" && (() => {
+        const targets = value.targets?.length ? value.targets : [value.target];
+        const defIdx = Math.max(0, targets.indexOf(value.target));
+        const commit = (next: string[], def: number) =>
+          onChange({
+            ...value,
+            target: next[def] ?? next[0] ?? "",
+            targets: next.length > 1 ? next : undefined,
+          });
+        return (
+          <Field label={targets.length > 1 ? "URLs or file/app paths (★ = key default)" : "URL or file/app path"}>
+            <div className="flex flex-col gap-2">
+              {targets.map((t, i) => (
+                <div key={i} className="flex gap-2">
+                  {targets.length > 1 && (
+                    <DefaultStar on={i === defIdx} onClick={() => commit(targets, i)} />
+                  )}
+                  <Input
+                    className="flex-1"
+                    aria-label={`Target ${i + 1}`}
+                    value={t}
+                    placeholder={IS_MAC ? "https://… or /Applications/Google Chrome.app" : "https://… or C:\\Program Files\\…\\app.exe"}
+                    onChange={(e) =>
+                      commit(targets.map((x, k) => (k === i ? e.target.value : x)), defIdx)
+                    }
+                  />
+                  <Button
+                    onClick={async () => {
+                      const picked = await open({
+                        defaultPath: IS_MAC ? "/Applications" : undefined,
+                        title: "Choose an app or file to open",
+                      });
+                      if (picked) commit(targets.map((x, k) => (k === i ? (picked as string) : x)), defIdx);
+                    }}
+                  >
+                    <FolderOpen size={14} aria-hidden /> Browse…
+                  </Button>
+                  {targets.length > 1 && (
+                    <Button
+                      variant="danger"
+                      title="Remove this target"
+                      onClick={() =>
+                        commit(targets.filter((_, k) => k !== i), i === defIdx ? 0 : defIdx > i ? defIdx - 1 : defIdx)
+                      }
+                    >
+                      <Trash2 size={13} aria-hidden />
+                    </Button>
+                  )}
+                </div>
+              ))}
+              {targets.length < 5 && (
+                <Button className="self-start" onClick={() => commit([...targets, ""], defIdx)}>
+                  <Plus size={14} aria-hidden /> Add target
+                </Button>
+              )}
+            </div>
+            <p className="text-fg-faint text-xs mt-1">
+              Pressing the key opens the ★ default on the computer. Works while the MKYADA app is
+              running (also minimized) — the keypad alone can't open apps.
+              {targets.length > 1
+                ? " The Vision 6 wheel lists all of them: tap to open one, hold to make it the default."
+                : " Add more targets to pick between them on the Vision 6 wheel."}
+            </p>
+          </Field>
+        );
+      })()}
 
-      {value.kind === "command" && (
-        <Field label="Terminal command">
-          <Input
-            value={value.command}
-            placeholder={IS_MAC ? 'e.g. say "hello" or open ~/Downloads' : "e.g. explorer.exe %USERPROFILE%\\Downloads"}
-            onChange={(e) => onChange({ ...value, command: e.target.value })}
-          />
-          <p className="text-fg-faint text-xs mt-1">
-            Runs {IS_MAC ? "in your shell" : "via cmd"} on this computer when the key is
-            pressed. Works while the MKYADA app is running (also minimized).
-          </p>
-        </Field>
-      )}
+      {value.kind === "command" && (() => {
+        const entries = value.commands?.length
+          ? value.commands
+          : [{ command: value.command } as { label?: string; command: string }];
+        const defIdx = Math.max(0, entries.findIndex((e) => e.command === value.command));
+        const commit = (next: { label?: string; command: string }[], def: number) =>
+          onChange({
+            ...value,
+            command: next[def]?.command ?? next[0]?.command ?? "",
+            commands: next.length > 1 ? next : undefined,
+          });
+        return (
+          <Field label={entries.length > 1 ? "Terminal commands (★ = key default)" : "Terminal command"}>
+            <div className="flex flex-col gap-2">
+              {entries.map((c, i) => (
+                <div key={i} className="flex gap-2">
+                  {entries.length > 1 && (
+                    <DefaultStar on={i === defIdx} onClick={() => commit(entries, i)} />
+                  )}
+                  {entries.length > 1 && (
+                    <Input
+                      className="w-36"
+                      aria-label={`Command ${i + 1} label`}
+                      value={c.label ?? ""}
+                      placeholder="Wheel label"
+                      onChange={(e) =>
+                        commit(entries.map((x, k) => (k === i ? { ...x, label: e.target.value } : x)), defIdx)
+                      }
+                    />
+                  )}
+                  <Input
+                    className="flex-1"
+                    aria-label={`Command ${i + 1}`}
+                    value={c.command}
+                    placeholder={IS_MAC ? 'e.g. say "hello" or open ~/Downloads' : "e.g. explorer.exe %USERPROFILE%\\Downloads"}
+                    onChange={(e) =>
+                      commit(entries.map((x, k) => (k === i ? { ...x, command: e.target.value } : x)), defIdx)
+                    }
+                  />
+                  {entries.length > 1 && (
+                    <Button
+                      variant="danger"
+                      title="Remove this command"
+                      onClick={() =>
+                        commit(entries.filter((_, k) => k !== i), i === defIdx ? 0 : defIdx > i ? defIdx - 1 : defIdx)
+                      }
+                    >
+                      <Trash2 size={13} aria-hidden />
+                    </Button>
+                  )}
+                </div>
+              ))}
+              {entries.length < 5 && (
+                <Button className="self-start" onClick={() => commit([...entries, { command: "" }], defIdx)}>
+                  <Plus size={14} aria-hidden /> Add command
+                </Button>
+              )}
+            </div>
+            <p className="text-fg-faint text-xs mt-1">
+              Pressing the key runs the ★ default {IS_MAC ? "in your shell" : "via cmd"} on this
+              computer. Works while the MKYADA app is running (also minimized).
+              {entries.length > 1
+                ? " The Vision 6 wheel lists all of them: tap to run one, hold to make it the default."
+                : " Add more commands to pick between them on the Vision 6 wheel."}
+            </p>
+          </Field>
+        );
+      })()}
 
-      {value.kind === "sound" && (
-        <Field label="Sound file">
-          <div className="flex gap-2 items-center">
-            <Input
-              className="flex-1"
-              value={value.file}
-              placeholder="e.g. ~/Sounds/applause.mp3"
-              onChange={(e) => onChange({ ...value, file: e.target.value })}
-            />
-            <Button
-              onClick={async () => {
-                const picked = await open({
-                  filters: [{ name: "Audio", extensions: SOUND_EXTENSIONS }],
-                  title: "Choose a sound file",
-                });
-                if (picked) onChange({ ...value, file: picked as string });
-              }}
-            >
-              <FolderOpen size={14} aria-hidden /> Browse…
-            </Button>
-            <Button
-              disabled={!value.file}
-              title="Preview the sound"
-              onClick={() => void playSound(value.file).catch((e) => setImportError(String(e)))}
-            >
-              <Volume2 size={14} aria-hidden /> Play
-            </Button>
-          </div>
-          <p className="text-fg-faint text-xs mt-1">
-            Tap the key to play it on this computer's speakers — sounds can overlap.
-            Works while the MKYADA app is running (also minimized).
-          </p>
-        </Field>
-      )}
+      {value.kind === "sound" && (() => {
+        const files = value.files?.length
+          ? value.files
+          : [{ file: value.file } as { label?: string; file: string }];
+        const defIdx = Math.max(0, files.findIndex((f) => f.file === value.file));
+        const commit = (next: { label?: string; file: string }[], def: number) =>
+          onChange({
+            ...value,
+            file: next[def]?.file ?? next[0]?.file ?? "",
+            files: next.length > 1 ? next : undefined,
+          });
+        return (
+          <Field label={files.length > 1 ? "Sound files (★ = key default)" : "Sound file"}>
+            <div className="flex flex-col gap-2">
+              {files.map((f, i) => (
+                <div key={i} className="flex gap-2 items-center">
+                  {files.length > 1 && (
+                    <DefaultStar on={i === defIdx} onClick={() => commit(files, i)} />
+                  )}
+                  {files.length > 1 && (
+                    <Input
+                      className="w-36"
+                      aria-label={`Sound ${i + 1} name`}
+                      value={f.label ?? ""}
+                      placeholder="Wheel name"
+                      onChange={(e) =>
+                        commit(files.map((x, k) => (k === i ? { ...x, label: e.target.value } : x)), defIdx)
+                      }
+                    />
+                  )}
+                  <Input
+                    className="flex-1"
+                    aria-label={`Sound ${i + 1}`}
+                    value={f.file}
+                    placeholder="e.g. ~/Sounds/applause.mp3"
+                    onChange={(e) =>
+                      commit(files.map((x, k) => (k === i ? { ...x, file: e.target.value } : x)), defIdx)
+                    }
+                  />
+                  <Button
+                    onClick={async () => {
+                      const picked = await open({
+                        filters: [{ name: "Audio", extensions: SOUND_EXTENSIONS }],
+                        title: "Choose a sound file",
+                      });
+                      if (picked)
+                        commit(files.map((x, k) => (k === i ? { ...x, file: picked as string } : x)), defIdx);
+                    }}
+                  >
+                    <FolderOpen size={14} aria-hidden /> Browse…
+                  </Button>
+                  <Button
+                    disabled={!f.file}
+                    title="Preview the sound"
+                    onClick={() => void playSound(f.file).catch((e) => setImportError(String(e)))}
+                  >
+                    <Volume2 size={14} aria-hidden /> Play
+                  </Button>
+                  {files.length > 1 && (
+                    <Button
+                      variant="danger"
+                      title="Remove this sound"
+                      onClick={() =>
+                        commit(files.filter((_, k) => k !== i), i === defIdx ? 0 : defIdx > i ? defIdx - 1 : defIdx)
+                      }
+                    >
+                      <Trash2 size={13} aria-hidden />
+                    </Button>
+                  )}
+                </div>
+              ))}
+              {files.length < 5 && (
+                <Button className="self-start" onClick={() => commit([...files, { file: "" }], defIdx)}>
+                  <Plus size={14} aria-hidden /> Add sound
+                </Button>
+              )}
+            </div>
+            <p className="text-fg-faint text-xs mt-1">
+              Tap the key to play the ★ default on this computer's speakers — sounds can overlap.
+              Works while the MKYADA app is running (also minimized).
+              {files.length > 1
+                ? " The Vision 6 wheel lists all of them by name (or file name): tap to play one, hold to make it the key's default."
+                : " Add more sounds to pick between them on the Vision 6 wheel."}
+            </p>
+          </Field>
+        );
+      })()}
 
       {value.kind === "sound" && (
         <ControlField label="Holding the key for 1 second">
@@ -582,6 +730,8 @@ export function AssignmentEditor({
       {value.kind === "webhook" && <WebhookFields value={value} onChange={onChange} />}
 
       {value.kind === "obs" && <ObsFields value={value} onChange={onChange} />}
+
+      {value.kind === "obs_center" && <ObsCenterFields value={value} onChange={onChange} />}
 
       {value.kind === "recorded" && (
         <div className="flex items-center gap-2 text-sm">
@@ -837,7 +987,99 @@ function WebhookFields({
           <span className={`text-xs ${test.ok ? "text-success" : "text-danger"}`}>{test.text}</span>
         )}
       </div>
+
+      <Field label="Alternative requests (Vision 6 wheel list)">
+        <div className="flex flex-col gap-2">
+          {(value.hooks ?? []).map((h, i) => (
+            <div key={i} className="flex gap-2">
+              <DefaultStar
+                on={false}
+                title="Make this the key's default (swaps it with the request above)"
+                onClick={() => {
+                  const hooks = value.hooks ?? [];
+                  // swap: the alternative moves up into the main form, the
+                  // current default takes its place in the list
+                  const old = {
+                    url: value.url,
+                    ...(value.method ? { method: value.method } : {}),
+                    ...(value.headers?.length ? { headers: value.headers } : {}),
+                    ...(value.body ? { body: value.body } : {}),
+                  };
+                  onChange({
+                    ...value,
+                    url: h.url,
+                    method: h.method,
+                    headers: h.headers,
+                    body: h.body,
+                    hooks: hooks.map((x, k) => (k === i ? old : x)),
+                  });
+                }}
+              />
+              <Input
+                className="w-36"
+                aria-label={`Alternative ${i + 1} label`}
+                value={h.label ?? ""}
+                placeholder="Wheel label"
+                onChange={(e) =>
+                  onChange({
+                    ...value,
+                    hooks: (value.hooks ?? []).map((x, k) => (k === i ? { ...x, label: e.target.value } : x)),
+                  })
+                }
+              />
+              <Input
+                className="flex-1"
+                aria-label={`Alternative ${i + 1} URL`}
+                value={h.url}
+                placeholder="https://…"
+                onChange={(e) =>
+                  onChange({
+                    ...value,
+                    hooks: (value.hooks ?? []).map((x, k) => (k === i ? { ...x, url: e.target.value } : x)),
+                  })
+                }
+              />
+              <Button
+                variant="danger"
+                title="Remove this alternative"
+                onClick={() =>
+                  onChange({ ...value, hooks: (value.hooks ?? []).filter((_, k) => k !== i) })
+                }
+              >
+                <Trash2 size={13} aria-hidden />
+              </Button>
+            </div>
+          ))}
+          {(value.hooks?.length ?? 0) < 4 && (
+            <Button
+              className="self-start"
+              onClick={() => onChange({ ...value, hooks: [...(value.hooks ?? []), { url: "" }] })}
+            >
+              <Plus size={14} aria-hidden /> Add alternative
+            </Button>
+          )}
+        </div>
+        <p className="text-fg-faint text-xs mt-1">
+          The key press sends the request above; the Vision 6 wheel lists it with these —
+          tap to send one, hold to make it the default. To edit an alternative's method,
+          headers or body, star it into the main form first.
+        </p>
+      </Field>
     </>
+  );
+}
+
+/** The ★ that marks which entry a key press uses (sound / target / command
+ * lists). Filled = current default; clicking promotes the row. */
+function DefaultStar({ on, onClick, title }: { on: boolean; onClick: () => void; title?: string }) {
+  return (
+    <Button
+      title={title ?? (on ? "The key press uses this one" : "Make this the key's default")}
+      aria-pressed={on}
+      onClick={onClick}
+    >
+      <Star size={13} aria-hidden {...(on ? { fill: "currentColor" } : {})} />
+    </Button>
   );
 }
 
@@ -975,6 +1217,192 @@ function ObsFields({
           <span className={`text-xs ${test.ok ? "text-success" : "text-danger"}`}>{test.text}</span>
         )}
       </div>
+    </>
+  );
+}
+
+const CENTER_WIDGETS: { id: "status" | "timer" | "scene" | "mic" | "health"; label: string }[] = [
+  { id: "status", label: "REC/LIVE chip" },
+  { id: "timer", label: "Timer" },
+  { id: "scene", label: "Scene" },
+  { id: "mic", label: "Mic meter" },
+  { id: "health", label: "CPU/DROP/FPS" },
+];
+
+/** Default OLED label for a quick-action key, filled when the user picks an
+ * action and hasn't typed their own (≤5 chars — a 21px column at ~4px/char). */
+const QUICK_LABEL_SUGGEST: Partial<Record<ObsAction, string>> = {
+  recordToggle: "REC",
+  recordStart: "REC",
+  recordStop: "STOP",
+  streamToggle: "LIVE",
+  streamStart: "LIVE",
+  streamStop: "STOP",
+  micToggle: "MUTE",
+  virtualCamToggle: "CAM",
+  replayBufferToggle: "CLIP",
+  setScene: "SCENE",
+  sourceToggle: "SRC",
+  hotkey: "KEY",
+};
+
+function ObsCenterFields({
+  value,
+  onChange,
+}: {
+  value: Extract<Assignment, { kind: "obs_center" }>;
+  onChange: (a: Assignment) => void;
+}) {
+  const [scenes, setScenes] = useState<string[]>([]);
+  const [inputs, setInputs] = useState<string[]>([]);
+
+  // Best-effort live suggestions, like ObsFields: free text when OBS is away.
+  useEffect(() => {
+    void invoke<{ scenes?: { sceneName: string }[] }>("obs_request", {
+      requestType: "GetSceneList",
+      requestData: {},
+    })
+      .then((r) => setScenes((r.scenes ?? []).map((s) => s.sceneName)))
+      .catch(() => {});
+    void invoke<{ inputs?: { inputName: string }[] }>("obs_request", {
+      requestType: "GetInputList",
+      requestData: {},
+    })
+      .then((r) => setInputs((r.inputs ?? []).map((i) => i.inputName)))
+      .catch(() => {});
+  }, []);
+
+  const c = value.center ?? {};
+  const set = (patch: Partial<typeof c>) => onChange({ ...value, center: { ...c, ...patch } });
+  const w = c.widgets ?? {};
+  const quick = [...(c.quickKeys ?? [])];
+  while (quick.length < 6) quick.push(null);
+  const setQuick = (i: number, q: (typeof quick)[number]) => {
+    const next = [...quick];
+    next[i] = q;
+    set({ quickKeys: next });
+  };
+
+  return (
+    <>
+      <Field label="Widgets on the dashboard">
+        <div className="flex flex-wrap gap-2">
+          {CENTER_WIDGETS.map((wd) => {
+            const on = w[wd.id] !== false;
+            return (
+              <Button
+                key={wd.id}
+                variant={on ? "primary" : "default"}
+                role="switch"
+                aria-checked={on}
+                onClick={() => set({ widgets: { ...w, [wd.id]: !on } })}
+              >
+                {wd.label}
+              </Button>
+            );
+          })}
+        </div>
+        <p className="text-fg-faint text-xs mt-1">
+          The screen reflows around what you turn off — fewer widgets means a bigger timer.
+        </p>
+      </Field>
+
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Audio input (mic widgets & fader)">
+          <Input
+            list="obsc-input-list"
+            value={c.micInput ?? ""}
+            placeholder="auto (OBS default mic)"
+            onChange={(e) => set({ micInput: e.target.value || undefined })}
+          />
+        </Field>
+        <Field label="Wheel starts on">
+          <Select
+            value={c.encoder ?? "mic"}
+            onChange={(e) => set({ encoder: e.target.value as "mic" | "scene" | "off" })}
+          >
+            <option value="mic">Mic (turn = volume, press = mute)</option>
+            <option value="scene">Scene (turn = browse, press = switch)</option>
+            <option value="off">Wheel does nothing</option>
+          </Select>
+        </Field>
+      </div>
+      <p className="text-fg-faint text-xs -mt-1">
+        On the dashboard the wheel drives the framed row; <b>hold CONFIRM</b> to jump between
+        the mic and scene rows. Leaving the input empty follows OBS's default mic.
+      </p>
+
+      <Field label="Quick-action keys while the dashboard is open">
+        <div className="flex flex-col gap-2">
+          {quick.map((q, i) => (
+            <div key={i} className="flex items-center gap-2">
+              <span className="text-fg-faint w-7 shrink-0 text-xs">K{i + 1}</span>
+              <Select
+                className="min-w-0 flex-1"
+                aria-label={`Key ${i + 1} OBS action`}
+                value={q?.action.action ?? ""}
+                onChange={(e) => {
+                  const act = e.target.value as ObsAction | "";
+                  if (!act) return setQuick(i, null);
+                  setQuick(i, {
+                    label: q?.label || QUICK_LABEL_SUGGEST[act] || "OBS",
+                    action: { ...(q?.action ?? {}), action: act },
+                  });
+                }}
+              >
+                <option value="">— key does nothing —</option>
+                {(Object.keys(OBS_ACTION_LABELS) as ObsAction[]).map((a) => (
+                  <option key={a} value={a}>
+                    {OBS_ACTION_LABELS[a]}
+                  </option>
+                ))}
+              </Select>
+              {q?.action.action === "setScene" && (
+                <Input
+                  className="w-32"
+                  list="obsc-scene-list"
+                  value={q.action.sceneName ?? ""}
+                  placeholder="Scene"
+                  onChange={(e) => setQuick(i, { ...q, action: { ...q.action, sceneName: e.target.value } })}
+                />
+              )}
+              {q?.action.action === "micToggle" && (
+                <Input
+                  className="w-32"
+                  list="obsc-input-list"
+                  value={q.action.inputName ?? c.micInput ?? ""}
+                  placeholder="Input"
+                  onChange={(e) => setQuick(i, { ...q, action: { ...q.action, inputName: e.target.value } })}
+                />
+              )}
+              <Input
+                className="w-20"
+                aria-label={`Key ${i + 1} screen label`}
+                maxLength={5}
+                value={q?.label ?? ""}
+                placeholder="label"
+                disabled={!q}
+                onChange={(e) => q && setQuick(i, { ...q, label: e.target.value.toUpperCase() })}
+              />
+            </div>
+          ))}
+        </div>
+        <p className="text-fg-faint text-xs mt-1">
+          While the dashboard is open the six physical keys run these instead of their normal
+          assignments; the labels show along the bottom of the screen. BACK closes it.
+        </p>
+      </Field>
+
+      <datalist id="obsc-scene-list">
+        {scenes.map((s) => (
+          <option key={s} value={s} />
+        ))}
+      </datalist>
+      <datalist id="obsc-input-list">
+        {inputs.map((i) => (
+          <option key={i} value={i} />
+        ))}
+      </datalist>
     </>
   );
 }

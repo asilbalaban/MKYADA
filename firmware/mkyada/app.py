@@ -103,7 +103,14 @@ gc.collect()  # the display stack litters the heap; start the app compacted
 
 DEBOUNCE_S = 0.02
 PING_TIMEOUT_S = 5.0
-PROTO_VERSION = 12 # v12: "icon" may also be the picture itself — "px:" + 16 hex
+PROTO_VERSION = 13 # v13: OBS Center — mtype:"obs" grows obsview:"center" plus
+                   # optional mute/cpu/fps/drop/klabels fields, re-sends merge
+                   # into the open menu's ctx in place (delta pushes), and while
+                   # the center view owns the screen the six keys stop playing
+                   # their local macros (the app runs them as OBS quick actions
+                   # off the existing btn stream). All additive: old apps never
+                   # send obsview:"center", old firmware ignores the new fields.
+                   # v12: "icon" may also be the picture itself — "px:" + 16 hex
                    # is eight packed rows drawn by hand in the app, decoded in
                    # icons.py get() rather than looked up. hello also reports
                    # wheel_layers so the app can offer that switch.
@@ -1479,6 +1486,11 @@ class App:
             return
         if self.mode == "host":
             return
+        # While the OBS Center owns the screen the six keys are the app's
+        # quick actions: the btn line above already carried the edge, so the
+        # local macro must NOT also play — that would be a double execution.
+        if self.obs_center_active():
+            return
         if c["layer_key"] == key_no:
             if pressed:
                 self.set_layer_idx((self.layer + 1) % c["layer_count"])
@@ -1499,6 +1511,15 @@ class App:
             return False
         try:
             return self.ui.wants_press_menu(key_no)
+        except Exception:
+            return False
+
+    def obs_center_active(self):
+        """Whether the OBS Center dashboard owns the keypad. Safe on core6."""
+        if not self.ui:
+            return False
+        try:
+            return self.ui.obs_center_active()
         except Exception:
             return False
 

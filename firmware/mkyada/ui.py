@@ -116,7 +116,14 @@ KIND_ICON = {"keystroke": "keyboard", "combo": "keyboard", "text": "text",
              "scroll": "scroll-v", "menu": "layers", "sequence": "sequence",
              "launch": "rocket", "command": "terminal", "sound": "music",
              "mic": "mic", "mic_level": "mic", "webhook": "webhook",
-             "obs": "camera"}
+             "obs": "camera", "obs_center": "camera"}
+
+# mtype:"obs" menu fields the app may push (proto v13): a re-send while the
+# menu is open merges only the fields present in the message into the open
+# ctx, so the app can push tiny deltas ({"mic": 42}) between full re-asserts.
+# A field the app never sends stays None and its widget is simply not drawn.
+OBS_FIELDS = ("obsview", "rec", "live", "mic", "time", "scene",
+              "mute", "cpu", "fps", "drop", "klabels", "focus")
 
 (SET_TMO, SET_LANG, SET_BAND_LAYER, SET_BAND_PROFILE, SET_WHEEL_LAYERS,
  SET_KEYTEST, SET_PIXTEST, SET_ABOUT, SET_REBOOT) = range(9)
@@ -938,9 +945,10 @@ class Ui:
         except Exception:
             return "K%d" % (k0 + 1)
 
-    # kinds whose whole point is the wheel menu (a continuous slider), so
-    # pressing the physical key should open the menu, not "run" a poor default
-    PRESS_MENU_KINDS = ("volume", "mic_level")
+    # kinds whose whole point is the wheel menu (a continuous slider or the
+    # OBS dashboard), so pressing the physical key should open the menu, not
+    # "run" a poor default
+    PRESS_MENU_KINDS = ("volume", "mic_level", "obs_center")
 
     def wants_press_menu(self, key_no):
         """True if pressing key `key_no` should open its wheel menu (slider
@@ -966,7 +974,10 @@ class Ui:
         k0 = self.sel_key
         kind, sub = self.kind_sub(l, k0)
         path = self.app.macro_path_for(k0 + 1, l)
-        if kind in (None, "recorded", "text"):
+        # Speed-editing kinds: recorded / typed text / multi-step sequences
+        # (their delays scale) / legacy files. Playback obeys settings.speed
+        # both here and host-side.
+        if kind in (None, "recorded", "text", "sequence"):
             self._enter_speed()
             return
         name = self._cell_name(l, k0)
@@ -982,34 +993,34 @@ class Ui:
             self._enter_optlist("media", path, MEDIA_OPTS, sub, tr("media"))
         elif kind == "volume":
             # app running -> absolute % slider (host reads/sets system volume);
-            # app closed -> a relative HID volume knob (press mutes)
+            # app closed -> a relative HID volume knob (press mutes), with a
+            # line explaining why there is no percent without the app
             if self.app.proto.connected and self.app.host_menus:
                 self._ctx_host(kind, sub, path, k0, l)
             else:
                 self._card_state("adjust", path, tr("volume"), name,
                                  tr("hint_vol"), up="volume_up",
-                                 down="volume_down", conf="mute")
+                                 down="volume_down", conf="mute",
+                                 line=tr("vol_app_note"))
         elif kind == "menu":
             # layer / navigation keys: browse the whole family (next/prev layer,
             # jump to a specific layer, Home/Grid/Settings), tap to run it live,
             # hold to reassign — all standalone, the device rewrites the file
             self._enter_optlist("menu", path, self._menu_opts(), sub,
                                  tr("menu_t"))
-        elif kind == "sequence":
-            self._card_state("fire", path, tr("run_t"), name, tr("run"))
         elif kind in ("launch", "command", "sound", "mic", "mic_level",
-                      "webhook", "obs"):
+                      "webhook", "obs", "obs_center"):
             self._ctx_host(kind, sub, path, k0, l)
         else:
             self._enter_speed()
 
     def _card_state(self, mode, path, title, big, hint,
-                    up=None, down=None, conf=None):
+                    up=None, down=None, conf=None, line=None):
         self.ctx = {"mode": mode, "path": path, "up": up, "down": down,
                     "conf": conf}
         self.state = S_CTX
         self.activity_at = time.monotonic()
-        self.oled.show_card(title, big[:12], None, hint)
+        self.oled.show_card(title, big[:12], line, hint)
 
     def _menu_opts(self):
         """The layer/nav actions the menu-kind browser offers on this device:
@@ -1129,12 +1140,42 @@ class Ui:
                                  "layer": LAYER_NAMES[l], "kind": kind,
                                  "sub": sub, "file": path})
             self.ctx = {"mode": "wait", "key": k0 + 1, "layer": LAYER_NAMES[l],
+                        "kind": kind,
                         "deadline": time.monotonic() + CTX_WAIT_S}
             self.state = S_CTX
             self.activity_at = time.monotonic()
             self.oled.show_card(tr("wheel"), "...", None, None)
         else:
             self._toast(tr("wheel"), tr("app_needed"), tr("open_app"))
+
+    def _obs_val(self, f, v):
+        """Coerce one mtype:"obs" field. None passes through untouched — it
+        means "the app disabled this widget", and the screen skips it."""
+        if v is None:
+            return None
+        if f in ("rec", "live", "mute"):
+            return bool(v)
+        if f in ("mic", "cpu", "fps", "drop"):
+            return int(v)
+        if f == "klabels":
+            try:
+                return [str(x)[:6] for x in v[:6]]
+            except (TypeError, IndexError):
+                return None
+        return str(v)
+
+    def obs_center_active(self):
+        """True while the OBS Center dashboard owns the keypad: the six keys
+        are the app's quick actions, so App.on_edge must swallow the local
+        play (the btn stream already carried the edge to the app)."""
+        if self.state != S_CTX or not self.ctx:
+            return False
+        c = self.ctx
+        mode = c.get("mode")
+        if mode == "wait":
+            return c.get("kind") == "obs_center"
+        return (mode == "host" and c.get("mtype") == "obs"
+                and c.get("obsview") == "center")
 
     def on_menu(self, msg):
         """The app rendered/updated the open wheel menu (host-fed list, slider
@@ -1147,6 +1188,16 @@ class Ui:
         # a live re-render of the same menu (REC timer, external volume) keeps
         # the user's cursor and doesn't reset the idle timer
         prev = self.ctx if self.ctx.get("mode") == "host" else None
+        if prev is not None and prev.get("mtype") == "obs" \
+                and (msg.get("mtype") or "card") == "obs":
+            # Sticky re-render (proto v13): merge only the fields present in
+            # the message into the open ctx — the app pushes tiny deltas
+            # between 5s full re-asserts, and nothing is rebuilt per push.
+            for f in OBS_FIELDS:
+                if f in msg:
+                    prev[f] = self._obs_val(f, msg[f])
+            self._draw_host_menu()
+            return
         items = msg.get("items") or []
         sel_in = msg.get("sel")
         sel = int(sel_in) if sel_in is not None else (prev["sel"] if prev else 0)
@@ -1168,13 +1219,20 @@ class Ui:
                     # mtype "obs" (proto v11): a live OBS status screen. These
                     # carry no cursor, so a re-render is pure data — which is
                     # the point, the app pushes one twice a second while the
-                    # recorder runs.
+                    # recorder runs. Since v13 an absent field stays None so
+                    # the center view can hide that widget entirely.
                     "obsview": str(msg.get("obsview") or "main"),
-                    "rec": bool(msg.get("rec")),
-                    "live": bool(msg.get("live")),
-                    "mic": int(msg.get("mic") or 0),
-                    "time": str(msg.get("time") or ""),
-                    "scene": str(msg.get("scene") or "")}
+                    "rec": self._obs_val("rec", msg.get("rec")),
+                    "live": self._obs_val("live", msg.get("live")),
+                    "mic": self._obs_val("mic", msg.get("mic")),
+                    "time": self._obs_val("time", msg.get("time")),
+                    "scene": self._obs_val("scene", msg.get("scene")),
+                    "mute": self._obs_val("mute", msg.get("mute")),
+                    "cpu": self._obs_val("cpu", msg.get("cpu")),
+                    "fps": self._obs_val("fps", msg.get("fps")),
+                    "drop": self._obs_val("drop", msg.get("drop")),
+                    "klabels": self._obs_val("klabels", msg.get("klabels")),
+                    "focus": self._obs_val("focus", msg.get("focus"))}
         if prev is None:
             self.activity_at = time.monotonic()
             # Start the record dot lit: leaving _blink_at at zero makes the
@@ -1236,8 +1294,20 @@ class Ui:
             self.oled.show_adjust(c["title"], "%d%s" % (v, c["unit"]), frac,
                                   c.get("action") or tr("save"))
         elif mt == "obs":
-            o = {"rec": c["rec"], "live": c["live"], "mic": c["mic"],
-                 "time": c["time"] or "00:00", "scene": c["scene"],
+            if c["obsview"] == "center":
+                # The dashboard: None fields are widgets the app turned off,
+                # show_obscenter reflows around them.
+                o = {"rec": c["rec"], "live": c["live"], "mic": c["mic"],
+                     "time": c["time"], "scene": c["scene"],
+                     "mute": c.get("mute"), "cpu": c.get("cpu"),
+                     "fps": c.get("fps"), "drop": c.get("drop"),
+                     "klabels": c.get("klabels"),
+                     "focus": c.get("focus"), "blink": self._blink_on}
+                self.oled.show_obscenter(o)
+                return
+            o = {"rec": bool(c["rec"]), "live": bool(c["live"]),
+                 "mic": c["mic"] or 0,
+                 "time": c["time"] or "00:00", "scene": c["scene"] or "",
                  "blink": self._blink_on, "key": c.get("key"),
                  "hint": c.get("hint")}
             # "rec" is the recorder card (one big timer); "main" is the full
@@ -1361,9 +1431,15 @@ class Ui:
         elif mt == "obs":
             # A status screen, not a chooser: CONFIRM fires the key's action
             # (start/stop the recorder), the wheel reports a step so the app can
-            # ride the mic level with it.
+            # ride the mic level with it. On the center view a HOLD instead
+            # moves the wheel's focus to the next control row (mic <-> scene) —
+            # the app owns the cycle and answers with a new "focus" push.
             if press in (K_PSH, K_CONFIRM):
-                send({"t": "menu_ev", "ev": "fire"})
+                if c.get("obsview") == "center" and \
+                        self._resolve_hold(press) == "hold":
+                    send({"t": "menu_ev", "ev": "mode"})
+                else:
+                    send({"t": "menu_ev", "ev": "fire"})
             elif d:
                 send({"t": "menu_ev", "ev": "value", "v": 1 if d > 0 else -1})
             elif press == K_BACK:
@@ -1383,7 +1459,10 @@ class Ui:
             elif press == K_BACK:
                 self._close_host_menu()
         if (press is None and not d
-                and now - self.activity_at > self.idle_secs):
+                and now - self.activity_at > self.idle_secs
+                and not (mt == "obs" and c.get("obsview") == "center")):
+            # the center view is a dashboard, not a chooser: it stays up
+            # until BACK (or a transfer / the app leaving) closes it
             self._close_host_menu()
 
     def _toast(self, title, line1, line2=""):
@@ -1703,6 +1782,12 @@ class Ui:
         if active:
             if self.state in (S_XFER, S_PLAYING):
                 return
+            if self.state == S_CTX and self.ctx \
+                    and self.ctx.get("mode") in ("host", "wait"):
+                # the app owns a live menu session (OBS Center keeps a poll
+                # running behind it): tell it the menu is gone so the session
+                # tears down instead of leaking behind the transfer screen
+                self.app.proto.send({"t": "menu_ev", "ev": "close"})
             self._drain_inputs()
             self.state = S_XFER
             self.oled.show_transfer()
