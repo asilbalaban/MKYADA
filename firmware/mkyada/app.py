@@ -705,7 +705,19 @@ class App:
                     return self.fs_err("bootloader", "unsupported")
             microcontroller.reset()
         elif t in ("fs_list", "fs_read", "fs_write", "fs_delete"):
-            self.begin_xfer()
+            # Only mutating ops raise the locked transfer screen. A read or a
+            # list is served inline in this handler — the app is blocked on
+            # the reply, nothing else arrives meanwhile, and the request line
+            # itself is tiny — so the screen's FIFO-protection buys nothing
+            # there. It cost plenty: the app answers a wheel-menu ctx by
+            # reading that key's macro file, and on a cold cache that single
+            # read flashed "app is writing files" for 3+ seconds and tore the
+            # menu down under the user. Reads that arrive mid-save still feed
+            # the screen's idle timer so a write/read mix can't drop it early.
+            if t in ("fs_write", "fs_delete"):
+                self.begin_xfer()
+            elif self.xfer:
+                self.xfer_at = time.monotonic()
             # An fs op that OOMs (fragmented heap right after a connect's
             # display churn) must answer "oom" — an escaped MemoryError would
             # hit run()'s fatal handler and hard-RESET the board, and a

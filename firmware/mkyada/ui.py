@@ -73,8 +73,10 @@ TEST_EXIT_HOLD_S = 3.0
 # the whole point, and Auto-return goes as low as 3 seconds.
 TEST_IDLE_MIN_S = 15
 # how long the device waits for the app to answer a host-kind CONFIRM with a
-# `menu` before giving up and showing the "app required" toast
-CTX_WAIT_S = 1.5
+# `menu` before giving up and showing the "app required" toast. Long enough
+# for the app's cold-cache path: the first open of a key's menu reads its
+# macro file over serial (with retries if the link is busy) before answering.
+CTX_WAIT_S = 3.0
 
 (S_HOME, S_SELECT, S_SPEED, S_SAVED, S_SET_MENU, S_TIMEOUT,
  S_PLAYING, S_HOST, S_TOAST, S_LANG, S_TEST, S_ABOUT, S_CTX,
