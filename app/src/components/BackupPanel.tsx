@@ -7,10 +7,11 @@
 // captures the whole thing is the difference between configuring one keypad
 // and configuring twenty.
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { getVersion } from "@tauri-apps/api/app";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { Download, Upload } from "lucide-react";
+import { onWriteProgress } from "../lib/ipc";
 import type { Backup } from "../lib/backup";
 import {
   BACKUP_FORMAT,
@@ -36,6 +37,23 @@ export function BackupPanel() {
   const toast = useToast();
   const confirm = useConfirm();
   const [busy, setBusy] = useState("");
+  // Live byte counter of the file currently moving over the link (issue #43):
+  // the drive:progress events both reads and writes now stream. A 300 KB
+  // recorded macro takes visible seconds — the bar must move DURING it, not
+  // only between files.
+  const [fileProg, setFileProg] = useState<{ file: string; kb: number } | null>(null);
+  const busyRef = useRef(false);
+  busyRef.current = !!busy;
+  useEffect(() => {
+    const un = onWriteProgress((p) => {
+      if (!busyRef.current) return;
+      setFileProg({ file: p.file.split("/").pop() ?? p.file, kb: p.written / 1024 });
+    });
+    return () => void un.then((f) => f());
+  }, []);
+  useEffect(() => {
+    if (!busy) setFileProg(null);
+  }, [busy]);
 
   const model = hello ? deviceModel(hello) : null;
 
@@ -147,7 +165,13 @@ export function BackupPanel() {
           await ipc.driveDelete(drive.path, `macros/${file}`).catch(() => {});
         }
       }
-      const names = Object.keys(backup.macros);
+      // meta.json goes LAST: the firmware clears a stem's sidecar overrides
+      // whenever that macro's body is written (proto v14 clear-on-write), so
+      // restoring the sidecar before the bodies would lose the restored
+      // speeds/icons again.
+      const names = Object.keys(backup.macros).sort((a, b) =>
+        a === "meta.json" ? 1 : b === "meta.json" ? -1 : 0,
+      );
       for (const [i, file] of names.entries()) {
         setBusy(`Writing macros… (${i + 1}/${names.length})`);
         await ipc.driveWrite(drive.path, `macros/${file}`, backup.macros[file]);
@@ -209,6 +233,11 @@ export function BackupPanel() {
             {busy && (
               <span className="text-xs text-fg-muted flex items-center gap-1.5">
                 <Spinner size={12} /> {busy}
+                {fileProg && (
+                  <span className="text-fg-faint">
+                    {fileProg.file} · {fileProg.kb < 1 ? "<1" : Math.round(fileProg.kb)} KB
+                  </span>
+                )}
               </span>
             )}
           </div>

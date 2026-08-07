@@ -10,6 +10,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { META_PROTO } from "./device-meta";
 import { ipc, onDeviceDisconnected, onDeviceMsg, onDeviceStatus } from "./ipc";
 import { keysCache } from "./keys-cache";
 import { loadKeysToCache } from "./keys-loader";
@@ -40,6 +41,9 @@ interface DeviceState {
   linkWedged: boolean;
   /** The connect-time keys load is still in flight (non-blocking banner). */
   keysLoading: boolean;
+  /** Live progress of that load (issue #44): read files vs listed files.
+   * Null until the listing is known. */
+  keysProgress: { done: number; total: number } | null;
   /** A firmware update is running: every other device interaction (profile
    * pings, label pushes, macro saves) must stand down until it finishes. */
   updating: boolean;
@@ -50,6 +54,12 @@ interface DeviceState {
   send: (msg: Record<string, unknown>) => Promise<void>;
   /** Write a file to the drive and tell the firmware to reload its config. */
   writeAndReload: (files: { path: string; content: string }[]) => Promise<void>;
+  /** Patch display-level config fields (layer names, band toggles, timeout,
+   * lang) WITHOUT dropping the keys cache or forcing a cold reload
+   * (issue #45). Uses the serial set_cfg on proto v14; falls back to a
+   * config.json merge + reload on older firmware / mounted drives — but
+   * even then the cache survives, because these fields can't move keys. */
+  setCfg: (patch: Record<string, unknown>) => Promise<void>;
   onBtn: (cb: (e: BtnEvent) => void) => () => void;
   onMsg: (cb: (m: Record<string, unknown>) => void) => () => void;
 }
@@ -91,6 +101,7 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
   // Connect-time keys load into keysCache — true while the first read is in
   // flight so the shell can show a non-blocking "Loading keys…" banner.
   const [keysLoading, setKeysLoading] = useState(false);
+  const [keysProgress, setKeysProgress] = useState<{ done: number; total: number } | null>(null);
   // Monotonic id of the newest load; an older load noticing a newer id (or a
   // disconnect bump) aborts, and only the newest may clear the banner.
   const loadSeq = useRef(0);
@@ -146,6 +157,10 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
                 // timeout mirrors the on-device Settings menu (firmware
                 // ≥ 0.14.0 rewrites config.json + announces it)
                 ...(typeof c.timeout === "number" ? { timeout: c.timeout } : {}),
+                // layer nicknames ride the same announcement (set_cfg, v14)
+                ...("layer_names" in msg
+                  ? { layer_names: (msg as { layer_names?: (string | null)[] | null }).layer_names }
+                  : {}),
               }
             : h,
         );
@@ -385,20 +400,30 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
     // Skip in rescue mode: the main firmware is down, so there are no keys to
     // load — fs_* there is for repair, not the config/macros this reads.
     if (!d || !hello || hello.mode === "rescue") return;
-    if (keysCache.get(d)) return; // already warm
+    if (keysCache.get(d)?.complete) return; // already warm
     const seq = ++loadSeq.current; // supersede any older load
     const isCurrent = () => loadSeq.current === seq && portRef.current !== null;
     setKeysLoading(true);
+    setKeysProgress(null);
     void (async () => {
       try {
         // handshake first — no file traffic until the link answers a ping
         if (await waitForReady(isCurrent)) {
           // whole-load retries: an incomplete load (some file kept failing)
-          // must end in a complete cache, not a silently half-blank keypad
+          // must end in a complete cache, not a silently half-blank keypad.
+          // Each retry RESUMES — files already streamed in stay cached.
           let warm = false;
           for (let round = 0; round < 4 && isCurrent() && !warm; round++) {
             if (round) await new Promise((r) => setTimeout(r, 1500));
-            warm = await loadKeysToCache(d, isCurrent);
+            warm = await loadKeysToCache(
+              d,
+              isCurrent,
+              (done, total) => {
+                if (isCurrent()) setKeysProgress({ done, total });
+              },
+              uid,
+              hello.proto ?? 0,
+            );
           }
           // Nickname sync piggybacks on the now-ready link (was a connect race).
           if (isCurrent() && uid) await syncNameWithDevice(d, uid).catch(() => {});
@@ -414,7 +439,10 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
       } finally {
         // only the newest load owns the banner; a superseded one leaves it to
         // its successor (this is what used to strand the spinner forever)
-        if (loadSeq.current === seq) setKeysLoading(false);
+        if (loadSeq.current === seq) {
+          setKeysLoading(false);
+          setKeysProgress(null);
+        }
       }
     })();
   }, [drive, hello, waitForReady, reconnect]);
@@ -445,6 +473,37 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
       await ipc.deviceSend({ t: "reload" }).catch(() => {});
     },
     [drive],
+  );
+
+  const setCfg = useCallback(
+    async (patch: Record<string, unknown>) => {
+      if (!drive) throw new Error("No CIRCUITPY drive found for this device");
+      if ((hello?.proto ?? 0) >= META_PROTO && isSerialDrive(drive)) {
+        // hidden-drive board on v14: the firmware applies + persists the
+        // patch live and announces the fresh config (folded into hello
+        // above) — no reboot, no cache drop, no re-read of anything
+        await ipc.deviceSend({ t: "set_cfg", patch });
+        keysCache.patchConfig(drive.path, patch as never);
+        return;
+      }
+      // mounted drive (host owns the filesystem) or old firmware: merge into
+      // config.json ourselves. The cache still survives — these fields can't
+      // change the key/layer topology — and the reload just repaints.
+      let cfg: Record<string, unknown> = {};
+      try {
+        cfg = JSON.parse(await ipc.driveRead(drive.path, "config.json"));
+      } catch {
+        // fresh board without a config — the firmware defaults the rest
+      }
+      await ipc.driveWrite(
+        drive.path,
+        "config.json",
+        JSON.stringify({ ...cfg, ...patch }, null, 2),
+      );
+      keysCache.patchConfig(drive.path, patch as never);
+      await ipc.deviceSend({ t: "reload" }).catch(() => {});
+    },
+    [drive, hello],
   );
 
   const onBtn = useCallback((cb: (e: BtnEvent) => void) => {
@@ -483,6 +542,7 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
         status,
         linkWedged,
         keysLoading,
+        keysProgress,
         updating,
         setUpdating,
         scan,
@@ -490,6 +550,7 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
         disconnect,
         send,
         writeAndReload,
+        setCfg,
         onBtn,
         onMsg,
       }}

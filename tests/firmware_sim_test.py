@@ -644,7 +644,7 @@ app.proto.send = _orig_send
 app.proto.ser = None
 
 # --- serial "led" op (proto v2): app feedback override --------------------
-check("hello reports proto v13", app.hello()["proto"] == 13, str(app.hello()["proto"]))
+check("hello reports proto v14", app.hello()["proto"] == 14, str(app.hello()["proto"]))
 check("hello reports usb_drive", app.hello()["usb_drive"] == app.config["usb_drive"], str(app.hello()))
 
 # profile path resolution (issue #23): a profile is a full independent config —
@@ -728,6 +728,11 @@ def fs_section():
     fs_rel = fs_dir.lstrip("/")
     outbox.clear()
     app.proto.send = lambda obj: (outbox.append(obj), True)[1]
+    # meta.json (proto v14) lives next to the macros; point the module there
+    # so the manifest-upkeep checks below see the real file
+    import mkyada.meta as metamod
+    _meta_path_orig = metamod.PATH
+    metamod.PATH = fs_dir + "/macros/meta.json"
 
     # chunked write: two chunks + eof, lands atomically via .part + rename
     payload = b'{"format":"mkyada-macro","version":2,"events":[]}' * 50
@@ -742,6 +747,25 @@ def fs_section():
     with open(fs_dir + "/macros/key1.json", "rb") as f:
         check("fs_write content intact", f.read() == payload)
     check("fs_write .part cleaned", not os.path.exists(fs_dir + "/macros/key1.json.part"))
+
+    # proto v14: the eof write maintains the meta.json manifest — crc+size
+    # land in the entry, and any stale override is cleared (the body written
+    # over serial carries the truth now)
+    with open(metamod.PATH) as f:
+        man = json.load(f)["entries"]
+    want_crc = binascii.crc32(payload) & 0xFFFFFFFF
+    check("fs_write updates manifest",
+          man.get("key1", {}).get("c") == want_crc
+          and man["key1"].get("z") == len(payload), str(man))
+    metamod.update("key1", fields={"s": 55})
+    app.meta_ov["key1"] = {"s": 55}
+    app.handle_msg({"t": "fs_write", "path": fs_rel + "/macros/key1.json",
+                    "seq": 0, "data": b64(payload), "eof": True})
+    with open(metamod.PATH) as f:
+        man = json.load(f)["entries"]
+    check("fs_write clears stale overrides",
+          "s" not in man.get("key1", {}) and "key1" not in app.meta_ov,
+          str(man))
 
     # out-of-order chunk -> bad_seq error, upload discarded
     app.handle_msg({"t": "fs_write", "path": fs_rel + "/x.bin", "seq": 0,
@@ -816,6 +840,9 @@ def fs_section():
     app.handle_msg({"t": "fs_delete", "path": fs_rel + "/macros/key1.json"})
     check("fs_delete ok", outbox[-1].get("re") == "fs_delete" and outbox[-1].get("t") == "ok", str(outbox[-1:]))
     check("fs_delete removed", not os.path.exists(fs_dir + "/macros/key1.json"))
+    with open(metamod.PATH) as f:
+        check("fs_delete drops manifest entry",
+              "key1" not in json.load(f)["entries"])
 
     # path traversal is refused
     outbox.clear()
@@ -829,6 +856,7 @@ def fs_section():
     check("fs busy during playback", outbox[-1].get("code") == "busy", str(outbox[-1:]))
 
     app.proto.send = _orig_send
+    metamod.PATH = _meta_path_orig
     shutil.rmtree(fs_dir, ignore_errors=True)
 
 
@@ -988,43 +1016,79 @@ check("narrow letters pack tighter than wide ones",
       and ui._split_name("WWWWWWWWWWWWW")[1] != "")
 check("split hard cut", ui._split_name("abcdefghijklmnop") == ("abcdefghij", "klmnop"))
 
+# proto v14: a speed edit writes /macros/meta.json, never the macro body —
+# the old whole-file rewrite could out-run the watchdog on a long recording
+import mkyada.meta as metamod  # noqa: E402
+
+metamod.PATH = os.path.join(mac_dir, "meta.json")
+with open(vpath(1, 0), "rb") as f:
+    v_before = f.read()
 res = ui.persist_speed(0, 0, 30)
-with open(vpath(1, 0)) as f:
-    vlines = f.read().strip().split("\n")
-vhdr = json.loads(vlines[0])
-check("persist stream ok", res == "ok")
-check("persist header speed 3.0", vhdr["settings"]["speed"] == 3.0 and vhdr.get("stream"))
-check("persist events intact", len(vlines) == 3, str(len(vlines)))
+check("persist speed ok", res == "ok")
+with open(vpath(1, 0), "rb") as f:
+    check("persist leaves macro bytes untouched", f.read() == v_before)
+with open(metamod.PATH) as f:
+    vmeta = json.load(f)
+check("meta sidecar format", vmeta.get("format") == "mkyada-meta")
+check("meta speed entry", vmeta["entries"]["key1"]["s"] == 30, str(vmeta))
 check("persist announces macro_changed",
       any(m.get("t") == "macro_changed" and m.get("reason") == "speed" for m in voutbox),
       str(voutbox))
 check("persist cache updated", ui.speed_tenths(0, 0) == 30)
+check("persist resident override", vapp.meta_ov.get("key1", {}).get("s") == 30)
 check("persist missing file", ui.persist_speed(0, 4, 10) == "missing")
 res2 = ui.persist_speed(0, 1, 5)
 with open(vpath(2, 0)) as f:
     vdata2 = json.load(f)
-check("persist whole-file speed 0.5", res2 == "ok" and vdata2["settings"]["speed"] == 0.5)
-check("persist keeps name", vdata2["name"] == "mute")
+check("persist whole-file body untouched",
+      res2 == "ok" and vdata2["settings"]["speed"] == 2.0)
+with open(metamod.PATH) as f:
+    check("meta second entry", json.load(f)["entries"]["key2"]["s"] == 5)
 
-# per-profile speed (issue #23): under an active profile the speed editor
-# copy-on-writes into the PROFILE's file, leaving the standalone macro alone.
-def vprof_key_path(k):
+# a fresh boot re-reads only the override fields, and the layer cache
+# re-applies them after an invalidate
+check("load_overrides picks up sidecar",
+      metamod.load_overrides().get("key1") == {"s": 30})
+ui.invalidate_labels()
+check("speed override survives cache drop", ui.speed_tenths(0, 0) == 30)
+
+# playback resolves the override too (meta_ov beats the header's 1.5)
+_played = {}
+_orig_engine_play = vapp.engine.play
+
+
+def _spy_play(events, **kw):
+    _played.update(kw)
+
+
+vapp.engine.play = _spy_play
+vapp.play_file(vpath(1, 0))
+vapp.engine.play = _orig_engine_play
+check("play_file uses meta speed", _played.get("speed") == 3.0,
+      str(_played.get("speed")))
+
+# per-profile speed (issue #23): the override keys on the PROFILE's stem —
+# no copy-on-write of the whole file anymore. A key without a profile file
+# is unassigned in that profile, so its speed edit reports missing.
+def vprof_path(k, l):
     return os.path.join(mac_dir, "p_test_key%d.json" % k)
 
 
+_vpath_std = vapp.macro_path_for
 vapp.profile_id = "p_test"
-vapp.profile_key_path = vprof_key_path
-res_cow = ui.persist_speed(0, 0, 40)  # key1: no profile file yet -> seed it
-check("profile speed cow ok", res_cow == "ok")
-check("profile file created", os.path.exists(vprof_key_path(1)))
-with open(vprof_key_path(1)) as f:
-    cow_lines = f.read().strip().split("\n")
-check("profile speed 4.0", json.loads(cow_lines[0])["settings"]["speed"] == 4.0)
-check("profile cow kept events", len(cow_lines) == 3, str(len(cow_lines)))
-with open(vpath(1, 0)) as f:  # standalone macro untouched (still 3.0)
-    check("standalone speed untouched",
-          json.loads(f.readline())["settings"]["speed"] == 3.0)
+vapp.macro_path_for = vprof_path  # what the real one resolves under a profile
+check("profile speed missing without file", ui.persist_speed(0, 0, 40) == "missing")
+shutil.copyfile(vpath(1, 0), vprof_path(1, 0))
+check("profile speed ok", ui.persist_speed(0, 0, 40) == "ok")
+with open(metamod.PATH) as f:
+    ventries = json.load(f)["entries"]
+check("profile override on profile stem",
+      ventries.get("p_test_key1", {}).get("s") == 40
+      and ventries["key1"]["s"] == 30, str(ventries))
+with open(vpath(1, 0), "rb") as f:  # standalone macro still untouched
+    check("standalone macro untouched", f.read() == v_before)
 vapp.profile_id = None
+vapp.macro_path_for = _vpath_std
 ui._speeds.clear()  # drop the profile-scoped cache before the slot tests
 
 with open(vapp.slot_path("enc-cw", 0), "w") as f:  # custom encoder slot
@@ -1971,6 +2035,59 @@ check("persist_lang applied", i18nmod.get_lang() == "tr")
 i18nmod.set_lang("en")
 vapp.config["lang"] = "en"
 shutil.rmtree(_lang_dir, ignore_errors=True)
+
+# set_cfg (proto v14): the app patches display prefs live over serial —
+# config.json is rewritten, ok + config go out, nothing needs a reload
+_sc_dir = tempfile.mkdtemp()
+_sc_cfg = os.path.join(_sc_dir, "config.json")
+with open(_sc_cfg, "w") as f:
+    json.dump({"model": "vision6", "layer_count": 1}, f)
+
+
+def _sc_open(path, *a, **k):
+    p = str(path)
+    if p.startswith("/config.json"):
+        return _real_open(_sc_cfg + p[len("/config.json"):], *a, **k)
+    return _real_open(path, *a, **k)
+
+
+def _sc_map(p):
+    p = str(p)
+    return _sc_cfg + p[len("/config.json"):] if p.startswith("/config.json") else p
+
+
+os.remove = lambda p: _orig_os_remove(_sc_map(p))
+os.rename = lambda a, b: _orig_os_rename(_sc_map(a), _sc_map(b))
+_b.open = _sc_open
+voutbox.clear()
+vapp.handle_msg({"t": "set_cfg",
+                 "patch": {"layer_names": ["  Oyun  "], "show_layer": True}})
+vapp.handle_msg({"t": "set_cfg", "patch": {"key_count": 8}})
+vapp.handle_msg({"t": "set_cfg", "patch": {"timeout": 999}})
+_b.open = _real_open
+os.remove, os.rename = _orig_os_remove, _orig_os_rename
+with open(_sc_cfg) as f:
+    _sc_data = json.load(f)
+check("set_cfg ok reply",
+      any(m.get("t") == "ok" and m.get("re") == "set_cfg" for m in voutbox),
+      str(voutbox))
+check("set_cfg wrote trimmed names",
+      _sc_data.get("layer_names") == ["Oyun"] and _sc_data.get("show_layer") is True,
+      str(_sc_data))
+check("set_cfg live config", vapp.config["layer_names"] == ["Oyun"]
+      and vapp.config["show_layer"] is True)
+check("set_cfg announces config",
+      any(m.get("t") == "config" and m.get("layer_names") == ["Oyun"] for m in voutbox),
+      str([m.get("t") for m in voutbox]))
+check("set_cfg structural field refused",
+      any(m.get("t") == "err" and m.get("re") == "set_cfg"
+          and m.get("code") == "bad_field" for m in voutbox), str(voutbox))
+check("set_cfg bad timeout refused",
+      any(m.get("t") == "err" and m.get("re") == "set_cfg"
+          and m.get("code") == "bad_value" for m in voutbox), str(voutbox))
+vapp.config["layer_names"] = None
+vapp.config["show_layer"] = False
+shutil.rmtree(_sc_dir, ignore_errors=True)
 
 # NVM prefs roundtrip (magic 0x4F: idle timeout, last layer). The magic moved
 # from 0x4E when the font byte left the layout, so a board written by older

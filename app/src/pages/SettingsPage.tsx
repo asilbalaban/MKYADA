@@ -301,7 +301,7 @@ type ScreenToggle = "show_layer" | "show_profile" | "wheel_layers";
 
 /** Device-level settings that live in the keypad's own config.json. */
 function KeypadCard() {
-  const { hello, drive, send, disconnect, writeAndReload } = useDevice();
+  const { hello, drive, send, disconnect, setCfg } = useDevice();
   const toast = useToast();
   const confirm = useConfirm();
   const [busy, setBusy] = useState(false);
@@ -330,20 +330,13 @@ function KeypadCard() {
   // is both correct and self-explanatory.
   const prefsSupported = hello?.timeout !== undefined;
 
-  /** Merge one field into the keypad's config.json and reload the firmware. */
+  /** Patch one display field on the keypad — set_cfg on proto v14 (live, no
+   * reload, keys cache untouched — issue #45), config merge + reload before. */
   async function setKeypadField(key: string, value: unknown) {
     if (!hello || !drive) return;
     setFieldBusy(key);
     try {
-      let cfg: Record<string, unknown> = {};
-      try {
-        cfg = JSON.parse(await ipc.driveRead(drive.path, "config.json"));
-      } catch {
-        // fresh board without a config — the firmware defaults the rest
-      }
-      await writeAndReload([
-        { path: "config.json", content: JSON.stringify({ ...cfg, [key]: value }, null, 2) },
-      ]);
+      await setCfg({ [key]: value });
     } catch (e) {
       toast.error("Could not change the screen setting", String(e));
     } finally {
@@ -351,21 +344,12 @@ function KeypadCard() {
     }
   }
 
-  /** Flip a screen toggle in the keypad's config.json and reload the firmware. */
+  /** Flip a screen toggle on the keypad — same live set_cfg path. */
   async function setBand(key: ScreenToggle, value: boolean) {
     if (!hello || !drive) return;
     setBandBusy(key);
     try {
-      // merge into the stored config so key/layer setup survives the toggle
-      let cfg: Record<string, unknown> = {};
-      try {
-        cfg = JSON.parse(await ipc.driveRead(drive.path, "config.json"));
-      } catch {
-        // fresh board without a config — the firmware defaults the rest
-      }
-      await writeAndReload([
-        { path: "config.json", content: JSON.stringify({ ...cfg, [key]: value }, null, 2) },
-      ]);
+      await setCfg({ [key]: value });
     } catch (e) {
       toast.error("Could not change the screen setting", String(e));
     } finally {

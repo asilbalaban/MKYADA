@@ -31,7 +31,7 @@ identically.
 | `combo` / `text` / `seq` … | no | UI metadata matching `kind` |
 | `sounds` / `targets` / `commands` / `webhooks` | no | Multi-value host keys (app ≥ 0.38.0): the key's full sound/target/command list (`sound`/`target`/`command` stays the default the press uses and is a member), or the webhook's **alternative** requests (the default stays in `webhook`). `sounds` entries are `{label?, sound}` and `commands` entries `{label?, command}` — the wheel shows the label when given, else the file name / command line; `targets` are plain strings (the file name is the label). The Vision 6 wheel lists them — tap uses one now, hold makes it the default (the app rewrites this file). Old firmware/app versions ignore the extra fields and just use the default. |
 | `screen` | for mouse macros | Capture resolution; absolute coordinates are rescaled from it (`x * 32767 / (width-1)`). |
-| `settings.speed` | no | Playback speed multiplier (default `1.0`; `2` = half the run time). On the Vision 6 the on-device speed editor rewrites this field in place and announces `macro_changed` (fw ≥ 0.7.0). The wheel offers it for recorded, text and sequence keys; sequences scale their step delays with it, host-side too. |
+| `settings.speed` | no | Playback speed multiplier (default `1.0`; `2` = half the run time). The wheel offers it for recorded, text and sequence keys; sequences scale their step delays with it, host-side too. **Since proto v14 (fw ≥ 0.27.0) this field is only the fallback**: a speed set on the device (or a speed-only edit on a big file in the app) lands in the [`meta.json` sidecar](#meta-sidecar--macrosmetajson-proto-v14) and shadows it — the macro body is never rewritten for a speed change. Older firmware keeps rewriting this field in place (`macro_changed`, fw ≥ 0.7.0). |
 | `settings.repeat` | no | Repeat count. **`0` = loop until the key is pressed again.** Default `1`. |
 | `settings.on_repress` | no | What pressing the macro's own key does while it plays: `"stop"` (default) or `"restart"` (play again from the top). |
 | `settings.hold_repeat` | no | Holding the physical key repeats the macro, like holding a letter key. **Default `true` for plain single-key macros** (one key down + its up, `kind` absent or `"keystroke"`) — the firmware then simply keeps the HID key down and the host OS's typematic repeat produces the stream at the user's own keyboard rate. Default `false` for everything else (those replay the file per pass). `false` opts a single key back into play-once. Ignored when `variants` exist. |
@@ -173,6 +173,40 @@ No app needed: drop a file with the right name onto the drive and press the key.
 Vision 6 slot files follow the same layer-suffix rule; a layer without its own
 slot file falls back to the layer-A one. The `name` field is what the Vision 6
 grid shows for each key (two lines, split at a word gap).
+
+## Meta sidecar — `macros/meta.json` (proto v14)
+
+One small file next to the macros carries per-stem overrides and a
+firmware-maintained manifest (fw ≥ 0.27.0, `mkyada/meta.py`):
+
+```json
+{"format": "mkyada-meta", "version": 1,
+ "entries": {
+   "key3":        {"s": 25, "c": 3735928559, "z": 812340},
+   "key1-b":      {"i": "px:183c7effc3c30000", "n": "Boss key"},
+   "p_ab12_key3": {"s": 15}
+ }}
+```
+
+The key is the macro file's stem (`key3` → `macros/key3.json`). Fields, all
+optional: `s` speed in integer tenths (25 = 2.5×), `i` icon, `n` name — these
+**shadow the macro header** on both the device and in the app; `c` (CRC32 of
+the file's bytes) and `z` (size) are the manifest the firmware keeps current
+on every write/delete so the app can skip re-reading unchanged files.
+
+Why: a speed or icon edit used to rewrite the whole macro on flash. On a long
+recording that write could exceed the 8 s hardware watchdog — a reset
+mid-write corrupts the FAT and CircuitPython reformats the drive (total data
+loss, seen in the field). Small edits now touch only this small file. Rules:
+
+- Override wins over header; a missing entry means "header is the truth".
+- A serial write of a macro body clears that stem's overrides (the writer
+  baked current values in) — this also keeps older apps correct.
+- The app writes overrides only for **big** files (≥ 32 KB serialized);
+  small files still get their header edited directly, keeping the sidecar
+  and the firmware's resident override dict tiny.
+- Deleting `meta.json` is always safe: speeds/icons fall back to the
+  headers, and the app re-reads everything once to rebuild the manifest.
 
 ## Size guidance
 

@@ -21,6 +21,7 @@ import {
   type Tab,
 } from "../components/ui";
 import { defaultConfig, macroSlots } from "../lib/macro-model";
+import { keysCache } from "../lib/keys-cache";
 import type { DeviceConfig } from "../lib/types";
 import { MODEL_META, assignablePins, defaultPins, deviceModel } from "../lib/types";
 import { Keypad } from "../components/Keypad";
@@ -99,11 +100,21 @@ export function SetupPage({ onDone }: { onDone: () => void }) {
   );
 
   // If the drive already holds a config, show the tabs instead of the wizard.
+  // The central keys loader has usually read config.json already (issue #44 /
+  // #45) — hydrate from its cache and skip our own drive read entirely, so
+  // Setup (and the key test in it) opens instantly instead of queueing a read
+  // behind the macro load.
   useEffect(() => {
     let cancelled = false;
     (async () => {
       if (!drive) {
         setView("wizard");
+        return;
+      }
+      const snap = keysCache.get(drive.path);
+      if (snap) {
+        setCfg((c) => ({ ...c, ...snap.config }));
+        setView("tabs");
         return;
       }
       try {

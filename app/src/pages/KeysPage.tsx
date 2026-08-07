@@ -29,6 +29,16 @@ import {
   SLOT_BUILTIN_ACTION,
 } from "../lib/macro-model";
 import { serializeForDevice } from "../lib/recorder-model";
+import {
+  META_PROTO,
+  applyMetaOverrides,
+  metaFastFields,
+  metaStem,
+  readMacroWithMeta,
+  readMetaEntries,
+  writeMetaOverrides,
+} from "../lib/device-meta";
+import type { MetaEntry } from "../lib/device-meta";
 import { keysCache, slotKey } from "../lib/keys-cache";
 import { macroFileCache } from "../lib/macro-cache";
 import { stashRecorderEdit } from "../lib/recorder-handoff";
@@ -140,7 +150,7 @@ const SLOT_BUILTINS: Record<SlotContext, Record<ModuleSlot, string>> = {
 };
 
 export function KeysPage() {
-  const { hello, drive, send, onMsg, writeAndReload } = useDevice();
+  const { hello, drive, send, onMsg, setCfg: setDeviceCfg } = useDevice();
   const nav = useNav();
   const toast = useToast();
   const { writeToKeypad } = useWriteGate();
@@ -204,16 +214,56 @@ export function KeysPage() {
   // Every macro reaches the keypad through this app, so a snapshot taken
   // once stays valid across tab switches — entering the page again reuses it
   // instead of re-streaming everything (issue #14).
+  // Every slot the config implies — what "everything" means for the pending
+  // spinners while the central loader is still streaming macros in.
+  const allSlotKeys = useCallback((config: DeviceConfig): Set<string> => {
+    const out = new Set<string>();
+    const layers = effectiveLayers(config);
+    const vision6 = deviceModel(config) === "vision6";
+    for (let l = 0; l < layers; l++) {
+      for (let k = 1; k <= config.key_count; k++) {
+        if (config.layer_key !== k) out.add(slotKey(k, l));
+      }
+      if (vision6) for (const s of MODULE_SLOTS) out.add(slotKey(s, l));
+    }
+    if (vision6) {
+      for (const ctx of ["home", "menu"] as const) {
+        for (const s of MODULE_SLOTS) out.add(slotKey(s, 0, ctx));
+      }
+    }
+    return out;
+  }, []);
+
+  // Hydrate this page from a cache snapshot. A partial one (the central
+  // loader is still running, issue #44) shows everything already read and
+  // spins the rest; a complete one clears the spinners.
+  const hydrateFromCache = useCallback(
+    (snap: NonNullable<ReturnType<typeof keysCache.get>>) => {
+      setCfg(snap.config);
+      setAssignments(new Map(snap.assignments));
+      if (snap.complete) {
+        setPending(new Set());
+        setLoadTotal(0);
+      } else {
+        const rest = allSlotKeys(snap.config);
+        for (const k of snap.assignments.keys()) rest.delete(k);
+        setPending(rest);
+        setLoadTotal(rest.size + snap.assignments.size);
+      }
+    },
+    [allSlotKeys],
+  );
+
   const reload = useCallback(async (force = false) => {
     if (!drive) return;
     const seq = ++reloadSeq.current;
     if (!force) {
       const cached = keysCache.get(drive.path);
       if (cached) {
-        setCfg(cached.config);
-        setAssignments(new Map(cached.assignments));
-        setPending(new Set());
-        setLoadTotal(0);
+        // complete → open instantly; partial → mirror the central loader's
+        // progress (the onChange subscription keeps this page live) instead
+        // of starting a second read over the same link
+        hydrateFromCache(cached);
         return;
       }
     }
@@ -301,12 +351,23 @@ export function KeysPage() {
     setPending(new Set(slots.map((s) => keyOf(s.k, s.l, s.ctx))));
     setLoadTotal(slots.length);
     setStatus("");
+    // meta.json sidecar (proto v14): overrides shadow the macro headers,
+    // exactly like the firmware's own overlay. One tiny read.
+    let metaEntries: Record<string, MetaEntry> = {};
+    if (existing.has("meta.json")) metaEntries = await readMetaEntries(drive.path);
+    if (seq !== reloadSeq.current) return;
     const snapshot = new Map<string, Assignment>();
     const failed: string[] = [];
     for (const s of slots) {
       let a: Assignment | undefined;
       try {
-        a = parseAssignment(parseDeviceMacro(await ipc.driveRead(drive.path, s.file)));
+        const stem = metaStem(s.file);
+        a = parseAssignment(
+          applyMetaOverrides(
+            parseDeviceMacro(await ipc.driveRead(drive.path, s.file)),
+            stem ? metaEntries[stem] : undefined,
+          ),
+        );
       } catch {
         // The file is in the listing but couldn't be read/parsed. It is NOT
         // unassigned — say so instead of silently showing a blank key (a
@@ -341,11 +402,21 @@ export function KeysPage() {
     } else if (!snapshot.size) {
       setStatus("Still reading the keypad… if keys stay blank, press Refresh.");
     }
-  }, [drive, send]);
+  }, [drive, send, hydrateFromCache]);
 
   useEffect(() => {
     void reload();
   }, [reload]);
+
+  // Mirror the shared cache while the central loader streams macros in — the
+  // page fills key by key with zero extra link traffic (issue #44).
+  useEffect(() => {
+    if (!drive) return;
+    return keysCache.onChange(() => {
+      const snap = keysCache.get(drive.path);
+      if (snap) hydrateFromCache(snap);
+    });
+  }, [drive, hydrateFromCache]);
 
   // Re-read one slot from the drive (the device rewrote it) and fold the
   // fresh assignment into state + cache.
@@ -354,9 +425,7 @@ export function KeysPage() {
       if (!drive) return;
       let a: Assignment | null = null;
       try {
-        a = parseAssignment(
-          parseDeviceMacro(await ipc.driveRead(drive.path, fileFor(slot, l, ctx))),
-        );
+        a = parseAssignment(await readMacroWithMeta(drive.path, fileFor(slot, l, ctx)));
       } catch {
         a = null; // deleted or unreadable — treat as unassigned
       }
@@ -367,6 +436,35 @@ export function KeysPage() {
         return next;
       });
       keysCache.setAssignment(drive.path, keyOf(slot, l, ctx), a);
+    },
+    [drive],
+  );
+
+  // A device-side speed edit (macro_changed reason:"speed", proto v14) only
+  // touched the sidecar — fold the new speed in from meta.json (one tiny
+  // read) instead of re-reading a possibly huge recorded macro.
+  const refreshSlotSpeed = useCallback(
+    async (slot: SlotId, l: number, ctx: SlotContext = "grid") => {
+      if (!drive) return false;
+      const stem = metaStem(fileFor(slot, l, ctx));
+      if (!stem) return false;
+      const tenths = (await readMetaEntries(drive.path))[stem]?.s;
+      if (typeof tenths !== "number" || !isFinite(tenths)) return false;
+      const speed = tenths / 10;
+      const patch = (a: Assignment): Assignment =>
+        a.kind === "recorded"
+          ? { ...a, macro: { ...a.macro, settings: { ...a.macro.settings, speed } } }
+          : { ...a, speed };
+      setAssignments((prev) => {
+        const cur = prev.get(keyOf(slot, l, ctx));
+        if (!cur) return prev;
+        const next = new Map(prev);
+        const p = patch(cur);
+        next.set(keyOf(slot, l, ctx), p);
+        keysCache.setAssignment(drive.path, keyOf(slot, l, ctx), p);
+        return next;
+      });
+      return true;
     },
     [drive],
   );
@@ -397,9 +495,21 @@ export function KeysPage() {
           setChangedNotice(parsed);
           return;
         }
+        // A speed edit only touched the sidecar (proto v14): read meta.json,
+        // not the possibly huge macro body. Fallback to a full re-read when
+        // the sidecar has no entry (older firmware, or a real body change).
+        if (
+          (m as { reason?: string }).reason === "speed" &&
+          (hello?.proto ?? 0) >= META_PROTO
+        ) {
+          void refreshSlotSpeed(parsed.slot, parsed.layer, parsed.ctx).then((ok) => {
+            if (!ok) void refreshSlot(parsed.slot, parsed.layer, parsed.ctx);
+          });
+          return;
+        }
         void refreshSlot(parsed.slot, parsed.layer, parsed.ctx);
       }),
-    [onMsg, refreshSlot],
+    [onMsg, refreshSlot, refreshSlotSpeed, hello?.proto],
   );
 
   // The Keys tab is a key TEST screen (issue #33): while it's open and the
@@ -488,15 +598,9 @@ export function KeysPage() {
     );
     const value = names.some(Boolean) ? names : null;
     try {
-      let raw: Record<string, unknown> = {};
-      try {
-        raw = JSON.parse(await ipc.driveRead(drive.path, "config.json"));
-      } catch {
-        // no config yet — the firmware defaults the rest
-      }
-      await writeAndReload([
-        { path: "config.json", content: JSON.stringify({ ...raw, layer_names: value }, null, 2) },
-      ]);
+      // set_cfg (proto v14): the nickname lands live — no reload, no cache
+      // drop, no re-read of every macro (issue #45)
+      await setDeviceCfg({ layer_names: value });
       setCfg({ ...cfg, layer_names: value });
     } catch (e) {
       toast.error("Could not save the layer name", String(e));
@@ -511,6 +615,51 @@ export function KeysPage() {
     const macro = isSlot
       ? compileSlotAssignment(draft, SLOT_BUILTIN_ACTION[selected as ModuleSlot])
       : compileAssignment(draft);
+    // Fast path (proto v14): when only speed/icon/name changed on a big
+    // recorded macro, write the meta.json sidecar instead of re-uploading
+    // hundreds of KB — the edit lands in milliseconds and the long
+    // unattended flash write (the FAT-corruption window) never opens.
+    if (macro && (hello?.proto ?? 0) >= META_PROTO) {
+      const prev = current;
+      const prevMacro = prev
+        ? isSlot
+          ? compileSlotAssignment(prev, SLOT_BUILTIN_ACTION[selected as ModuleSlot])
+          : compileAssignment(prev)
+        : null;
+      const stem = metaStem(file);
+      if (prevMacro && stem) {
+        prevMacro.screen = cfg.screen;
+        const nextMacro = { ...macro, screen: cfg.screen };
+        const fields = metaFastFields(
+          serializeForDevice(prevMacro, hello!.proto),
+          serializeForDevice(nextMacro, hello!.proto),
+        );
+        if (fields) {
+          setSaving(true);
+          try {
+            await writeMetaOverrides(drive.path, stem, fields);
+            setSaving(false);
+            macroFileCache.invalidate(drive.path, file);
+            const next = new Map(assignments);
+            next.set(keyOf(selected, layer, ctx), draft);
+            setAssignments(next);
+            keysCache.setAssignment(drive.path, keyOf(selected, layer, ctx), draft);
+            setDraft(null);
+            setChangedNotice(null);
+            toast.success(
+              `${slotTitle(selected)} saved to the keypad`,
+              typeof selected === "number"
+                ? "Press the key (or ▶ Test) to try it."
+                : "Use the control on the device (or ▶ Test) to try it.",
+            );
+            return;
+          } catch {
+            setSaving(false);
+            // sidecar write failed — fall through to the normal full write
+          }
+        }
+      }
+    }
     setSaving(true);
     try {
       // The whole save runs under the blocking write modal (issue #15): the

@@ -319,8 +319,15 @@ async fn drive_read(app: AppHandle, drive: String, path: String) -> Result<Strin
         let t0 = Instant::now();
         let r = if serialfs::is_serial(&drive) {
             let mgr = app.state::<DeviceManager>();
-            serialfs::read_file(&mgr, &path)
-                .and_then(|bytes| String::from_utf8(bytes).map_err(|e| e.to_string()))
+            // reads stream drive:progress too (issue #43) — the device doesn't
+            // announce a size up front, so total stays 0 (indeterminate bar)
+            serialfs::read_file_with_progress(&mgr, &path, |received| {
+                let _ = app.emit(
+                    "drive:progress",
+                    serde_json::json!({ "file": path, "written": received, "total": 0 }),
+                );
+            })
+            .and_then(|bytes| String::from_utf8(bytes).map_err(|e| e.to_string()))
         } else {
             drive::read_file(&drive, &path)
         };

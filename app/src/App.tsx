@@ -48,7 +48,7 @@ function Shell() {
   const [settingsTab, setSettingsTab] = useState<{ id: string } | null>(null);
   const [update, setUpdate] = useState<UpdateInfo | null>(null);
   const [nickname, setNickname] = useState("");
-  const { hello, port, layer, status, linkWedged, keysLoading } = useDevice();
+  const { hello, port, layer, status, linkWedged, keysLoading, keysProgress } = useDevice();
   // key labels everywhere show what they type on the user's real keyboard
   // layout; re-render the tree when that map loads or changes
   useLayoutVersion();
@@ -185,7 +185,13 @@ function Shell() {
           {keysLoading && !linkWedged && (
             <div className="flex items-center gap-2 bg-info-bg border-b border-info-line px-4 py-2 text-sm">
               <Spinner />
-              <span className="text-fg">Loading keys from the keypad…</span>
+              <span className="text-fg">
+                Loading keys from the keypad…
+                {keysProgress && keysProgress.total > 0
+                  ? ` (${keysProgress.done}/${keysProgress.total})`
+                  : ""}
+                {" "}— everything else is usable meanwhile.
+              </span>
             </div>
           )}
           {/* The Recorder is a full-bleed Photoshop-style workspace (its own

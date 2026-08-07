@@ -1,4 +1,46 @@
-# MKYADA serial protocol (v13)
+# MKYADA serial protocol (v14)
+
+v14 (firmware 0.27.0) is the **meta sidecar** release. One new on-device
+file, `/macros/meta.json`, managed by `mkyada/meta.py` — no new commands,
+everything rides the existing `fs_*` ops:
+
+```json
+{"format": "mkyada-meta", "version": 1,
+ "entries": {"key3": {"s": 25, "c": 3735928559, "z": 812340}}}
+```
+
+- **Per-stem override fields** — `s` (speed, integer tenths: 25 = 2.5×),
+  `i` (icon name or `px:` picture), `n` (name). They shadow the macro
+  header's `settings.speed` / `icon` / `name`. A device-side speed edit now
+  writes this small file and never rewrites the macro body — the old
+  whole-file rewrite could out-run the 8 s hardware watchdog on a long
+  recording and corrupt the FAT mid-write (the field incident that
+  reformatted a board). The app applies the same overlay when it reads
+  macros, and uses the sidecar itself for header-only edits on big files
+  (a recorded macro's speed/icon/name), so a 300 KB body never re-uploads
+  for a one-field change. Per-profile speed keys on the profile's stem
+  (`p_<id>_key3`) — the copy-on-write of the whole macro file is gone.
+- **CRC manifest** — `c` (CRC32/IEEE of the macro file's bytes) and `z`
+  (size), maintained by the firmware on every `fs_write` eof (it already
+  accumulates the CRC for transfer verification), every `fs_delete`, and
+  every wheel-menu reassign. This is what lets the app skip re-reading
+  unchanged files at connect (per-UID cache diff). A file written by the
+  rescue console has a stale/absent entry and is simply re-read — the
+  manifest is advisory, never trusted over a mismatch.
+- **Clear-on-write** — a serial write of a macro body drops that stem's
+  override fields: the writer baked current values into the header, so a
+  stale override must never shadow them. This single rule is also the
+  old-app compatibility story: an old app's whole-file speed edit lands in
+  the header and works, because the override it doesn't know about is
+  cleared by its own write.
+- `macro_changed reason:"speed"` is unchanged on the wire, but on proto ≥ 14
+  the app answers it by re-reading the small sidecar, not the macro body.
+- **`set_cfg`** — the one new command: live patches for display-level config
+  fields (layer names, band toggles, timeout, lang) with no reload — see the
+  Host → Device table.
+
+Old firmware never creates the sidecar (the app then uses full writes, as
+before); old apps never read it (clear-on-write keeps them correct).
 
 v13 (firmware 0.26.0) is the **OBS Center** release. Three additions, all on
 the existing `mtype:"obs"` shape and all additive:
@@ -210,6 +252,7 @@ STANDALONE ──(host_enter)──► HOST ──(host_leave | CDC disconnect |
 | `{"t":"stop"}` | Abort current playback |
 | `{"t":"keys","mods":["CTRL","SHIFT"],"key":"s"}` | Tap a combo directly (no file) |
 | `{"t":"get_config"}` | Reply with `config` |
+| `{"t":"set_cfg","patch":{"layer_names":["Oyun"],"show_layer":true}}` | v14. Patch display-level config fields LIVE — applied, persisted into config.json and repainted with **no reload** (issue: a layer rename used to cold-restart the board and re-read every macro). Whitelist: `layer_names`, `show_layer`, `show_profile`, `wheel_layers`, `timeout`, `lang`. Values are validated/normalized like `load_config` does. Replies `ok` + a fresh `config` announcement; unknown fields → `err bad_field`, bad values → `err bad_value`. Structural fields (key_count, layers, pins, model, usb_drive, enc_swap) stay on the config-write + `reload` path on purpose |
 | `{"t":"reload"}` | Re-read `config.json` (send after writing files); resets layer to A; replies `ok` + fresh `hello` |
 | `{"t":"set_layer","layer":"b"}` | Force the active layer |
 | `{"t":"led","mode":"solid","rgb":[255,0,0]}` | v2. Override the status LED with a feedback color (`mode`: `solid` \| `blink` \| `off`). Playback blinks still win; the override auto-clears when the app disconnects, so the standalone LED grammar is untouched. |

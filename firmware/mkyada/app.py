@@ -78,6 +78,7 @@ if MODELS[MODEL]["display"]:
         OLED = None
 
 from mkyada import led as ledmod
+from mkyada import meta
 from mkyada.engine import Engine, StopPlayback
 from mkyada.led import Led
 from mkyada.proto import Proto
@@ -103,7 +104,17 @@ gc.collect()  # the display stack litters the heap; start the app compacted
 
 DEBOUNCE_S = 0.02
 PING_TIMEOUT_S = 5.0
-PROTO_VERSION = 13 # v13: OBS Center — mtype:"obs" grows obsview:"center" plus
+PROTO_VERSION = 14 # v14: /macros/meta.json sidecar (mkyada/meta.py) — per-stem
+                   # override fields (s=speed tenths, i=icon, n=name) plus a
+                   # firmware-maintained CRC manifest (c=crc32, z=size) updated
+                   # on every fs_write/fs_delete/wheel-assign. A device speed
+                   # edit now writes this small file instead of rewriting the
+                   # whole macro (the old path could out-run the 8s watchdog on
+                   # a long recording and corrupt the FAT mid-write); the app
+                   # skips re-reading files whose c/z match its per-UID cache.
+                   # Overrides are cleared when the macro body is rewritten
+                   # over serial, which keeps old apps correct. All additive.
+                   # v13: OBS Center — mtype:"obs" grows obsview:"center" plus
                    # optional mute/cpu/fps/drop/klabels fields, re-sends merge
                    # into the open menu's ctx in place (delta pushes), and while
                    # the center view owns the screen the six keys stop playing
@@ -322,6 +333,9 @@ class App:
         self.led = Led()
         self.config = dict(DEFAULT_CONFIG)
         self.load_config()
+        # Resident meta overrides (speed/icon/name per stem) — the manifest
+        # half of meta.json (c/z) is for the app and never held in RAM.
+        self.meta_ov = meta.load_overrides()
         self.buttons = KeyMatrix(resolve_pins(self.key_pin_names()))
         self.layer = 0
         self.mode = "standalone"
@@ -608,6 +622,81 @@ class App:
         cfg["t"] = "config"
         self.proto.send(cfg)
 
+    def persist_cfg(self, updates):
+        """Merge updates into config.json (and the live config) so the app
+        always sees the same values. Returns "ok" | "readonly" | "error".
+        Lives on App (not Ui) so serial set_cfg works on core6 too."""
+        path = "/config.json"
+        tmp = path + ".part"
+        try:
+            with open(path) as f:
+                data = json.load(f)
+            if not isinstance(data, dict):
+                data = {}
+        except (OSError, ValueError, MemoryError):
+            data = {}
+        data.update(updates)
+        try:
+            with open(tmp, "w") as f:
+                json.dump(data, f)
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+            os.rename(tmp, path)
+        except OSError as e:
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+            return "readonly" if (e.args and e.args[0] == 30) else "error"
+        self.config.update(updates)
+        self.send_config()  # a connected app refreshes its view
+        return "ok"
+
+    # set_cfg (proto v14): the fields the app may patch live, without a
+    # reload. Display prefs and nicknames only — anything structural
+    # (key_count, layers, pins, model) still goes through a config write +
+    # reload, where re-init is the point. enc_swap stays out: it re-creates
+    # the encoder, which only boot does.
+    SET_CFG_FIELDS = ("layer_names", "show_layer", "show_profile",
+                      "wheel_layers", "timeout", "lang")
+
+    def set_cfg(self, msg):
+        patch = msg.get("patch")
+        if not isinstance(patch, dict) or not patch:
+            return self.fs_err("set_cfg", "bad_patch", "patch must be a dict")
+        unknown = [k for k in patch if k not in self.SET_CFG_FIELDS]
+        if unknown:
+            return self.fs_err("set_cfg", "bad_field", ",".join(unknown))
+        upd = {}
+        for k, v in patch.items():
+            if k == "layer_names":
+                if isinstance(v, list):
+                    clean = [s.strip()[:20] if isinstance(s, str) and s.strip()
+                             else None
+                             for s in v[:self.config["layer_count"]]]
+                    upd[k] = clean if any(clean) else None
+                else:
+                    upd[k] = None
+            elif k in ("show_layer", "show_profile", "wheel_layers"):
+                upd[k] = v is True
+            elif k == "timeout":
+                if not (isinstance(v, int) and 3 <= v <= 60):
+                    return self.fs_err("set_cfg", "bad_value", "timeout")
+                upd[k] = v
+            elif k == "lang":
+                if v not in i18n.LANGS:
+                    return self.fs_err("set_cfg", "bad_value", "lang")
+                upd[k] = v
+        res = self.persist_cfg(upd)
+        if res != "ok":
+            return self.fs_err("set_cfg", res, "config write failed")
+        if "lang" in upd:
+            i18n.set_lang(upd["lang"])
+        self.ui_call("on_cfg_patch", upd)
+        self.proto.send({"t": "ok", "re": "set_cfg"})
+
     # --- serial ---
     def hello(self):
         c = self.config
@@ -769,6 +858,8 @@ class App:
         elif t == "keys":
             self.engine.tap_combo(msg.get("mods"), str(msg.get("key", "")))
             self.proto.send({"t": "ok", "re": "keys"})
+        elif t == "set_cfg":
+            self.set_cfg(msg)
         elif t == "get_config":
             self.send_config()
         elif t == "reload":
@@ -1077,7 +1168,8 @@ class App:
             except OSError as e:
                 code = "readonly" if (e.args and e.args[0] == 30) else "io"
                 return self.fs_err("fs_write", code, e)
-            self.upload = {"path": path, "tmp": tmp, "f": f, "seq": 0, "crc": 0}
+            self.upload = {"path": path, "tmp": tmp, "f": f, "seq": 0,
+                           "crc": 0, "n": 0}
         up = self.upload
         if not up or up["path"] != path or seq != up["seq"]:
             self.close_upload(discard=True)
@@ -1089,6 +1181,7 @@ class App:
                 raw = a2b_base64(data)
                 up["f"].write(raw)
                 up["crc"] = crc32(raw, up["crc"])
+                up["n"] += len(raw)
                 if self.updating:
                     self.update_done += len(raw)
                     self.show_update()
@@ -1124,7 +1217,21 @@ class App:
             return self.fs_err("fs_write", "io", e)
         self.proto.send({"t": "ok", "re": "fs_write", "seq": seq, "eof": True,
                          "crc": got})
-        if path.startswith("/macros/"):
+        if path == meta.PATH:
+            # the app rewrote the sidecar itself: refresh the resident
+            # overrides and drop every layer's caches (an override can touch
+            # any stem)
+            self.meta_ov = meta.load_overrides()
+            self.ui_call("invalidate_labels", None)
+        elif "/macros/" in path:
+            stem = meta.stem_of(path)
+            if stem:
+                # manifest upkeep is what lets the app skip this file next
+                # connect; clear_overrides because the body now carries the
+                # truth
+                meta.update(stem, crc=got, size=up["n"],
+                            clear_overrides=True)
+                self.meta_ov.pop(stem, None)
             self.ui_call("invalidate_labels", path)
 
     def fs_mkparents(self, path):
@@ -1146,6 +1253,14 @@ class App:
         except OSError as e:
             code = "readonly" if (e.args and e.args[0] == 30) else "not_found"
             return self.fs_err("fs_delete", code, e)
+        if path == meta.PATH:
+            self.meta_ov = {}
+            self.ui_call("invalidate_labels", None)
+        elif "/macros/" in path:
+            stem = meta.stem_of(path)
+            if stem:
+                meta.remove(stem)
+                self.meta_ov.pop(stem, None)
         self.proto.send({"t": "ok", "re": "fs_delete", "path": path})
 
     def set_mode(self, mode):
@@ -1354,7 +1469,16 @@ class App:
 
         settings = data.get("settings") or {}
         if speed is None:
-            speed = settings.get("speed", 1.0)
+            # meta.json override first (proto v14): a device-side speed edit
+            # lands there, never in the macro body
+            ov = self.meta_ov.get(meta.stem_of(path))
+            if ov and "s" in ov:
+                try:
+                    speed = int(ov["s"]) / 10.0
+                except (TypeError, ValueError):
+                    speed = settings.get("speed", 1.0)
+            else:
+                speed = settings.get("speed", 1.0)
         if repeat is None:
             repeat = settings.get("repeat", 1)
         loop = int(repeat) == 0

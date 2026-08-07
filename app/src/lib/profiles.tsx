@@ -74,6 +74,8 @@ import {
 import { macroFileCache } from "./macro-cache";
 import { keysCache } from "./keys-cache";
 import { serializeForDevice } from "./recorder-model";
+import { crc32Text, utf8Length } from "./crc32";
+import { META_PROTO, metaStem, readMetaEntries } from "./device-meta";
 
 /** Perform a computer-side key action (Stream Deck style): open an
  *  app/file/URL, run a shell command, play a sound or call a webhook. HID
@@ -615,7 +617,11 @@ export function ProfilesProvider({ children }: { children: ReactNode }) {
         // device's fallback timeout ("the volume slider never shows").
         const snap = driveRef.current ? keysCache.get(driveRef.current.path) : undefined;
         const cachedA = snap?.assignments.get(`${slot}:${layerIndex}`);
-        if (snap) {
+        // Trust the snapshot when it's complete, or when it already holds
+        // this key. A PARTIAL snapshot missing the key (connect load still
+        // streaming, issue #44) must not read as "unassigned" — fall through
+        // to the old on-press read instead.
+        if (snap && (snap.complete || cachedA)) {
           const a = cachedA;
           if (!a || a.kind === "none") return; // unassigned or truly blank
           // key logic: the firmware resolves tap/double/hold itself and
@@ -723,7 +729,11 @@ export function ProfilesProvider({ children }: { children: ReactNode }) {
     void store.set("enabled", on).then(() => store.save());
   }, []);
 
-  /** Persist profiles and sync their compiled macros to the device drive. */
+  /** Persist profiles and sync their compiled macros to the device drive.
+   * On proto v14 boards this DIFFS against the device's meta.json manifest
+   * (per-file crc+size) first: a file whose bytes are already on the keypad
+   * is skipped, so the connect-time re-sync of an unchanged profile set
+   * writes nothing at all instead of re-uploading every macro. */
   const saveProfiles = useCallback(
     async (next: Profile[]) => {
       setProfiles(next);
@@ -734,13 +744,28 @@ export function ProfilesProvider({ children }: { children: ReactNode }) {
       // connect time those repeated full-directory listings saturated the
       // serial link alongside the keys load (device OOM, blank keys).
       const existing = await ipc.driveList(drive.path, "macros").catch(() => [] as string[]);
+      const onDevice = new Set(existing);
+      const metaEntries =
+        (hello?.proto ?? 0) >= META_PROTO ? await readMetaEntries(drive.path) : {};
+      const alreadyThere = (file: string, content: string) => {
+        const e = metaEntries[metaStem(file) ?? ""];
+        return (
+          !!e &&
+          typeof e.c === "number" &&
+          e.c === crc32Text(content) &&
+          e.z === utf8Length(content)
+        );
+      };
+      let skipped = 0;
       for (const p of next) {
         for (const [keyNo, a] of Object.entries(p.keys)) {
           const macro = compileAssignment(a as Assignment);
           const file = profileMacroFileName(p.id, profileKeySlot(keyNo));
           if (macro) {
-            await ipc.driveWrite(drive.path, file, serializeForDevice(macro, hello?.proto ?? 0));
-          } else {
+            const content = serializeForDevice(macro, hello?.proto ?? 0);
+            if (alreadyThere(file, content)) skipped++;
+            else await ipc.driveWrite(drive.path, file, content);
+          } else if (onDevice.has(file.split("/").pop()!)) {
             await ipc.driveDelete(drive.path, file).catch(() => {});
           }
           // auxiliary files: mixed-sequence steps + key-logic variants the
@@ -750,7 +775,9 @@ export function ProfilesProvider({ children }: { children: ReactNode }) {
             ...compileVariantParts(a as Assignment, file),
           ];
           for (const part of parts) {
-            await ipc.driveWrite(drive.path, part.path, serializeForDevice(part.file, hello?.proto ?? 0));
+            const content = serializeForDevice(part.file, hello?.proto ?? 0);
+            if (alreadyThere(part.path, content)) skipped++;
+            else await ipc.driveWrite(drive.path, part.path, content);
           }
           const stem = file.split("/").pop()!.replace(/\.json$/, ".");
           const keep = new Set(parts.map((part) => part.path.split("/").pop()));
@@ -760,6 +787,9 @@ export function ProfilesProvider({ children }: { children: ReactNode }) {
             }
           }
         }
+      }
+      if (skipped) {
+        void invoke("debug_log", { msg: `profiles: sync skipped ${skipped} unchanged files` }).catch(() => {});
       }
     },
     [drive, hello],

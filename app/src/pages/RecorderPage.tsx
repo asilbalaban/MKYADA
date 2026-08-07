@@ -32,7 +32,8 @@ import {
   serializeForDevice,
   thinForDevice,
 } from "../lib/recorder-model";
-import { macroFileName, migrateMacro, parseAssignment } from "../lib/macro-model";
+import { compileAssignment, macroFileName, migrateMacro, parseAssignment } from "../lib/macro-model";
+import { META_PROTO, metaFastFields, metaStem, writeMetaOverrides } from "../lib/device-meta";
 import { keysCache, slotKey } from "../lib/keys-cache";
 import { useHistory } from "../lib/history";
 import { takeRecorderEdit } from "../lib/recorder-handoff";
@@ -369,6 +370,38 @@ export function RecorderPage({ active = true }: { active?: boolean }) {
   async function assignToKey() {
     if (!macro || !drive) return;
     const file = macroFileName(assignKey, assignLayer);
+    // Fast path (proto v14): re-assigning the same recording with only
+    // speed/icon/name changed (the "edit speed on an 800 KB macro" case)
+    // writes the meta.json sidecar instead of streaming the body again.
+    if ((hello?.proto ?? 0) >= META_PROTO) {
+      const prev = keysCache.get(drive.path)?.assignments.get(slotKey(assignKey, assignLayer));
+      const prevMacro = prev ? compileAssignment(prev) : null;
+      const stem = metaStem(file);
+      if (prevMacro && stem) {
+        const fields = metaFastFields(
+          serializeForDevice(prevMacro, hello!.proto),
+          serializeForDevice(macro, hello!.proto),
+        );
+        if (fields) {
+          try {
+            await writeMetaOverrides(drive.path, stem, fields);
+            keysCache.setAssignment(
+              drive.path,
+              slotKey(assignKey, assignLayer),
+              parseAssignment(macro),
+            );
+            setStatus(`Assigned to ${file}`);
+            toast.success(
+              `Macro saved to ${keyLabel}`,
+              "Only the changed settings were sent — the recording was already on the keypad.",
+            );
+            return;
+          } catch {
+            // sidecar write failed — fall through to the normal full write
+          }
+        }
+      }
+    }
     try {
       // Same blocking modal as the Keys page (issues #13/#15): the editor is
       // unusable while the macro streams to the keypad, and it closes only

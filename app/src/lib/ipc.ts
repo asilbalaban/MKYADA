@@ -2,6 +2,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
+import { fsEnqueue } from "./fs-queue";
 import type { DeviceInfo, DriveInfo, UpdateInfo } from "./types";
 
 export const ipc = {
@@ -11,12 +12,24 @@ export const ipc = {
   deviceSend: (msg: Record<string, unknown>) => invoke<void>("device_send", { msg }),
   connectedPort: () => invoke<string | null>("connected_port"),
   listDrives: () => invoke<DriveInfo[]>("list_drives"),
+  // drive ops pass the two-priority gate (fs-queue.ts): UI-initiated calls
+  // jump ahead of the connect-time background load instead of queueing
+  // behind ~90 serial reads on the Rust side's single-op mutex (issue #44)
   driveWrite: (drive: string, path: string, content: string) =>
-    invoke<void>("drive_write", { drive, path, content }),
+    fsEnqueue("ui", () => invoke<void>("drive_write", { drive, path, content })),
   driveWriteCancel: () => invoke<void>("drive_write_cancel"),
-  driveRead: (drive: string, path: string) => invoke<string>("drive_read", { drive, path }),
-  driveDelete: (drive: string, path: string) => invoke<void>("drive_delete", { drive, path }),
-  driveList: (drive: string, path: string) => invoke<string[]>("drive_list", { drive, path }),
+  driveRead: (drive: string, path: string) =>
+    fsEnqueue("ui", () => invoke<string>("drive_read", { drive, path })),
+  driveDelete: (drive: string, path: string) =>
+    fsEnqueue("ui", () => invoke<void>("drive_delete", { drive, path })),
+  driveList: (drive: string, path: string) =>
+    fsEnqueue("ui", () => invoke<string[]>("drive_list", { drive, path })),
+  /** Background-priority twins for the connect-time keys loader: they wait
+   * for any queued UI op before touching the link. */
+  driveReadBg: (drive: string, path: string) =>
+    fsEnqueue("bg", () => invoke<string>("drive_read", { drive, path })),
+  driveListBg: (drive: string, path: string) =>
+    fsEnqueue("bg", () => invoke<string[]>("drive_list", { drive, path })),
   driveEject: (drive: string) => invoke<void>("drive_eject", { drive }),
   checkUpdate: () => invoke<UpdateInfo>("check_update"),
   /** Boards in RPI-RP2 bootloader mode (BOOT held while plugging in). */

@@ -21,16 +21,22 @@
 # stays reachable via keys mapped to menu actions, or the app).
 #
 # NVM keeps only UI prefs: [magic, idle_secs, last_layer].
-# Macro speeds live in the macro files — single source of truth.
+# Macro speeds live in /macros/meta.json (proto v14, mkyada/meta.py): a
+# speed edit writes that small sidecar, never the macro body — the old
+# whole-file rewrite could out-run the watchdog on a long recording and
+# take the FAT with it. Headers keep settings.speed as the fallback.
 
 import gc
 import json
 import os
 import time
+from binascii import crc32
 
 import board
 import keypad
 import rotaryio
+
+from mkyada import meta
 
 try:
     import microcontroller
@@ -346,8 +352,21 @@ class Ui:
         labels = []
         chars = set()
         for k in range(1, 7):
-            name, t, kind, sub, icon = self._read_meta(
-                self.app.macro_path_for(k, l))
+            path = self.app.macro_path_for(k, l)
+            name, t, kind, sub, icon = self._read_meta(path)
+            # meta.json overrides (proto v14) shadow the header: a speed or
+            # icon edit on a big recorded macro lands there, not in the body
+            ov = self.app.meta_ov.get(meta.stem_of(path))
+            if ov:
+                if "s" in ov:
+                    try:
+                        t = clamp(int(ov["s"]), SPEED_MIN_T, SPEED_MAX_T)
+                    except (TypeError, ValueError):
+                        pass
+                if isinstance(ov.get("n"), str) and ov["n"]:
+                    name = ov["n"]
+                if isinstance(ov.get("i"), str) and ov["i"]:
+                    icon = ov["i"]
             self._speeds[(l, k - 1)] = t
             self._kinds[(l, k - 1)] = (kind, sub)
             self._icons[(l, k - 1)] = icon
@@ -446,78 +465,32 @@ class Ui:
 
     # --- speed persistence ---
     def persist_speed(self, l, key0, tenths):
-        """Rewrite settings.speed inside the key's macro file. Returns
+        """Write the key's speed override into /macros/meta.json. Returns
         "ok" | "missing" | "readonly" | "error".
 
-        Under an active profile the new speed lands in the PROFILE's file
-        (copy-on-write from the standalone macro the first time), so a
-        per-app speed never touches the shared standalone config (issue #23).
+        The macro body is never touched — the old whole-file rewrite could
+        out-run the 8s watchdog on a long recording and corrupt the FAT
+        mid-write (the incident that reformatted a board). Under an active
+        profile the override keys on the profile's stem, so a per-app speed
+        never shadows the shared standalone macro (issue #23) — and the
+        copy-on-write of the whole file is gone with the rewrite.
         """
-        read_path = self.app.macro_path_for(key0 + 1, l)  # profile file or std
-        if self.app.profile_id:
-            path = self.app.profile_key_path(key0 + 1)  # write target (profile)
-        else:
-            path = read_path
-        tmp = path + ".part"
-        speed = tenths / 10.0
-        gc.collect()  # a big recorded macro gets rewritten below; start clean
+        path = self.app.macro_path_for(key0 + 1, l)  # profile file or std
         try:
-            f = open(read_path, "rb")
+            os.stat(path)
         except OSError:
             return "missing"
-        try:
-            line = f.readline()
-            try:
-                data = json.loads(line)
-                stream = isinstance(data, dict) and data.get("stream")
-            except ValueError:
-                data = None
-                stream = False
-            if data is None:
-                try:
-                    size = os.stat(path)[6]
-                    if size > META_MAX_WHOLE:
-                        return "error"
-                    f.seek(0)
-                    data = json.load(f)
-                except (ValueError, MemoryError, OSError):
-                    return "error"
-            if not isinstance(data, dict):
-                return "error"
-            s = dict(data.get("settings") or {})
-            s["speed"] = speed
-            data["settings"] = s
-            try:
-                out = open(tmp, "wb")
-            except OSError as e:
-                return "readonly" if (e.args and e.args[0] == 30) else "error"
-            try:
-                out.write(json.dumps(data).encode("utf-8"))
-                if stream:
-                    out.write(b"\n")
-                    while True:
-                        chunk = f.read(1024)
-                        if not chunk:
-                            break
-                        out.write(chunk)
-            finally:
-                out.close()
-        except (OSError, MemoryError):
-            try:
-                os.remove(tmp)
-            except OSError:
-                pass
+        stem = meta.stem_of(path)
+        if not stem:
             return "error"
-        finally:
-            f.close()
-        try:
-            os.remove(path)
-        except OSError:
-            pass
-        try:
-            os.rename(tmp, path)
-        except OSError:
-            return "error"
+        res = meta.update(stem, fields={"s": tenths})
+        if res != "ok":
+            return res
+        ov = self.app.meta_ov.get(stem)
+        if not isinstance(ov, dict):
+            ov = {}
+            self.app.meta_ov[stem] = ov
+        ov["s"] = tenths
         self._speeds[(l, key0)] = tenths
         self.app.proto.send({"t": "macro_changed", "file": path,
                              "reason": "speed"})
@@ -1081,14 +1054,17 @@ class Ui:
         already the active target (macro_path_for)."""
         tmp = path + ".part"
         try:
-            with open(tmp, "w") as f:
-                json.dump(data, f)
-        except OSError as e:
+            raw = json.dumps(data).encode("utf-8")
+            with open(tmp, "wb") as f:
+                f.write(raw)
+        except (OSError, MemoryError) as e:
             try:
                 os.remove(tmp)
             except OSError:
                 pass
-            return "readonly" if (e.args and e.args[0] == 30) else "error"
+            if isinstance(e, OSError) and e.args and e.args[0] == 30:
+                return "readonly"
+            return "error"
         try:
             os.remove(path)
         except OSError:
@@ -1097,6 +1073,14 @@ class Ui:
             os.rename(tmp, path)
         except OSError:
             return "error"
+        # manifest upkeep (proto v14): the body changed on-device, so the
+        # app's cached copy must stop matching — and any stale override
+        # would shadow the fresh header
+        stem = meta.stem_of(path)
+        if stem:
+            meta.update(stem, crc=crc32(raw), size=len(raw),
+                        clear_overrides=True)
+            self.app.meta_ov.pop(stem, None)
         self.invalidate_labels(path)
         self.app.proto.send({"t": "macro_changed", "file": path,
                              "reason": "assign"})
@@ -2016,34 +2000,24 @@ class Ui:
 
     def persist_cfg(self, updates):
         """Merge updates into config.json (and the live config) so the app
-        always sees the same values. Returns "ok" | "readonly" | "error"."""
-        path = "/config.json"
-        tmp = path + ".part"
-        try:
-            with open(path) as f:
-                data = json.load(f)
-            if not isinstance(data, dict):
-                data = {}
-        except (OSError, ValueError, MemoryError):
-            data = {}
-        data.update(updates)
-        try:
-            with open(tmp, "w") as f:
-                json.dump(data, f)
-            try:
-                os.remove(path)
-            except OSError:
-                pass
-            os.rename(tmp, path)
-        except OSError as e:
-            try:
-                os.remove(tmp)
-            except OSError:
-                pass
-            return "readonly" if (e.args and e.args[0] == 30) else "error"
-        self.app.config.update(updates)
-        self.app.send_config()  # a connected app refreshes its view
-        return "ok"
+        always sees the same values. Returns "ok" | "readonly" | "error".
+        The file work lives on App now (serial set_cfg shares it)."""
+        return self.app.persist_cfg(updates)
+
+    def on_cfg_patch(self, upd):
+        """The app patched config live over serial (set_cfg, proto v14) —
+        apply what has device-side state and repaint the resting screens so
+        the band shows the new name/toggles without a reload."""
+        if "timeout" in upd and isinstance(upd["timeout"], int):
+            self.idle_secs = clamp(upd["timeout"], TMO_MIN, TMO_MAX)
+            self.tmo_val = self.idle_secs
+            self._nvm_save()
+        # lang is applied app-side (i18n.set_lang) before this hook; the
+        # repaint below redraws whatever static text is on the glass
+        if self.state == S_SELECT:
+            self._draw_grid()
+        elif self.state == S_HOME:
+            self._draw_home()
 
     def persist_lang(self, lang):
         """Rewrite config.json "lang" so the app sees the same choice.

@@ -397,15 +397,30 @@ fn write_once(
 }
 
 pub fn read_file(mgr: &DeviceManager, path: &str) -> Result<Vec<u8>, String> {
+    read_file_with_progress(mgr, path, |_| {})
+}
+
+/// Like `read_file`, but reporting bytes-received per chunk — what feeds the
+/// backup/restore progress UI (issue #43). The device doesn't announce a
+/// file's size up front, so the callback carries only the running byte count.
+pub fn read_file_with_progress(
+    mgr: &DeviceManager,
+    path: &str,
+    progress: impl Fn(usize),
+) -> Result<Vec<u8>, String> {
     let path = rel(path)?;
     // Retry the whole read on transient errors: on a screen model a big
     // recorded macro can momentarily exhaust the fragmented heap ("oom"),
     // and the device recovers on the next attempt. Without this the read
     // fails and the app would show the key as unassigned.
-    with_recovery(mgr, false, |mgr| read_once(mgr, path))
+    with_recovery(mgr, false, |mgr| read_once(mgr, path, &progress))
 }
 
-fn read_once(mgr: &DeviceManager, path: &str) -> Result<Vec<u8>, String> {
+fn read_once(
+    mgr: &DeviceManager,
+    path: &str,
+    progress: &impl Fn(usize),
+) -> Result<Vec<u8>, String> {
     let op = Op::begin(mgr)?;
     op.send(&json!({"t": "fs_read", "path": path}))?;
     let mut out = Vec::new();
@@ -416,6 +431,7 @@ fn read_once(mgr: &DeviceManager, path: &str) -> Result<Vec<u8>, String> {
                 if let Some(data) = v.get("data").and_then(Value::as_str) {
                     if !data.is_empty() {
                         out.extend(B64.decode(data).map_err(|e| e.to_string())?);
+                        progress(out.len());
                     }
                 }
                 if v.get("eof").and_then(Value::as_bool).unwrap_or(false) {
