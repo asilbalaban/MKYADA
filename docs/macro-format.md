@@ -27,7 +27,7 @@ identically.
 | `version` | yes | `2`, or `3` when the file carries key-logic `variants` |
 | `name` | no | Display name |
 | `created` | no | ISO 8601 timestamp |
-| `kind` | no | UI metadata: `"combo"` \| `"keystroke"` \| `"text"` \| `"media"` \| `"volume"` \| `"mic_level"` \| `"scroll"` \| `"recorded"` \| `"launch"` \| `"command"` \| `"sound"` \| `"mic"` \| `"webhook"` \| `"obs"` \| `"obs_center"` \| `"enc_module"` \| `"sequence"`. The app uses it to show and re-edit the assignment. Since firmware 0.18.0 the Vision 6 also reads `kind` to pick the [wheel menu](actions.md#wheel-menu-vision-6): `"volume"` (system-volume slider; press plays the `mute` consumer event so it still works standalone) and `"mic_level"` (mic input-gain slider, host-only, empty events) open on a bare key press; `"media"` becomes a browser (turn to pick a usage, hold to reassign — the device rewrites this file). |
+| `kind` | no | UI metadata: `"combo"` \| `"keystroke"` \| `"text"` \| `"media"` \| `"volume"` \| `"mic_level"` \| `"scroll"` \| `"recorded"` \| `"launch"` \| `"command"` \| `"sound"` \| `"mic"` \| `"webhook"` \| `"obs"` \| `"obs_center"` \| `"enc_module"` \| `"midi"` \| `"sequence"`. The app uses it to show and re-edit the assignment. Since firmware 0.18.0 the Vision 6 also reads `kind` to pick the [wheel menu](actions.md#wheel-menu-vision-6): `"volume"` (system-volume slider; press plays the `mute` consumer event so it still works standalone) and `"mic_level"` (mic input-gain slider, host-only, empty events) open on a bare key press; `"media"` becomes a browser (turn to pick a usage, hold to reassign — the device rewrites this file). |
 | `combo` / `text` / `seq` … | no | UI metadata matching `kind` |
 | `sounds` / `targets` / `commands` / `webhooks` | no | Multi-value host keys (app ≥ 0.38.0): the key's full sound/target/command list (`sound`/`target`/`command` stays the default the press uses and is a member), or the webhook's **alternative** requests (the default stays in `webhook`). `sounds` entries are `{label?, sound}` and `commands` entries `{label?, command}` — the wheel shows the label when given, else the file name / command line; `targets` are plain strings (the file name is the label). The Vision 6 wheel lists them — tap uses one now, hold makes it the default (the app rewrites this file). Old firmware/app versions ignore the extra fields and just use the default. |
 | `screen` | for mouse macros | Capture resolution; absolute coordinates are rescaled from it (`x * 32767 / (width-1)`). |
@@ -96,6 +96,10 @@ Every event has `delay` — milliseconds to wait **before** executing it.
 { "delay": 10,  "type": "scroll",   "dy": -1 }
 { "delay": 10,  "type": "scroll",   "dy": 0, "dx": 2 }
 { "delay": 15,  "type": "consumer", "usage": "volume_up" }
+{ "delay": 0,   "type": "midi",     "m": "note_on", "ch": 0, "d1": 60, "d2": 100 }
+{ "delay": 0,   "type": "midi",     "m": "note_off", "ch": 0, "d1": 60 }
+{ "delay": 0,   "type": "midi",     "m": "cc",  "ch": 0, "d1": 74, "d2": 64 }
+{ "delay": 0,   "type": "midi",     "m": "pc",  "ch": 3, "d1": 5 }
 { "delay": 500, "type": "wait" }
 ```
 
@@ -106,6 +110,13 @@ Every event has `delay` — milliseconds to wait **before** executing it.
   ticks (+right / −left, via the AC Pan channel added to the mouse descriptor
   in firmware ≥ 0.8.0). Each unit is one detent-sized report.
 - `consumer` usages: `play_pause`, `next_track`, `prev_track`, `stop`, `mute`, `volume_up`, `volume_down`, `brightness_up`, `brightness_down`.
+- `midi` (fw ≥ 0.29.0, proto v16): `m` is `note_on` | `note_off` | `cc` |
+  `pc`; `ch` is the channel 0-15 (DAWs show it 1-16); `d1`/`d2` are the two
+  MIDI data bytes — note+velocity, controller+value, or program (`pc` has no
+  `d2`). All four values are masked to their wire width on the device. Sent
+  only when the board's `midi` config key is on, which is decided at boot;
+  with MIDI off the event is a silent no-op. Firmware older than 0.29.0
+  skips the whole event type, so a `midi` macro degrades instead of failing.
 - `wait`: pure delay, no action.
 
 **`kind: "enc_module"`** — the Dial (fw ≥ 0.28.0, proto v15, screen models).
@@ -123,7 +134,8 @@ selected slot as plain HID — no app needed. The payload is `enc_module`:
     "b": {"t": "click"} },
   { "l": "VOL", "t": "consumer", "cw": "volume_up", "ccw": "volume_down", "m": 1,
     "b": {"t": "consumer", "u": "play_pause"} },
-  null, null ] }
+  { "l": "CUT", "t": "midi_cc", "cc": 74, "ch": 0, "mode": "rel_2c", "m": 1 },
+  null ] }
 ```
 
 - `slots`: exactly 6 entries; `null` = empty slot (that key is dead while the
@@ -137,7 +149,19 @@ selected slot as plain HID — no app needed. The payload is `enc_module`:
   DaVinci color wheels; optional `mods` are held through the gesture too,
   pressed before the button and released after it — Ctrl+Opt+drag is
   Photoshop's brush-size scrub, fw ≥ 0.28.1), `"consumer"` (`cw`/`ccw` are
-  consumer usages).
+  consumer usages), `"midi_cc"` (MIDI control change, fw ≥ 0.29.0 — see below).
+- `midi_cc` slots carry `cc` (controller 0–127), `ch` (channel 0–15) and
+  `mode`. `mode` defaults to `"rel_2c"` and decides what a detent sends:
+  `"rel_2c"` two's complement (1–63 up, 127–65 down — Reaper's Relative 1),
+  `"rel_bin"` binary offset (64 = no change — Relative 2), `"rel_sm"` sign
+  magnitude (sign in bit 6 — Relative 3), `"rel_mackie"` (Mackie V-Pot, the
+  same encoding as sign magnitude), or `"abs"`. The relative modes send a
+  **delta**, so the DAW's own value is the only one and the parameter can
+  never jump; `"abs"` counts the value on the device and *will* jump when the
+  two disagree. The absolute value lives only while the module is open — the
+  slot dict is never written back to. Unlike the other slot types a CC has no
+  per-turn cap: it is one 3-byte message with no sleep. Firmware older than
+  0.29.0 treats an unknown `t` as a dead slot, so this degrades quietly.
 - `m`: sensitivity 1–10 (units per detent, multiplied by the wheel's own
   velocity acceleration). `inv` flips the direction.
 - `b`: the encoder button while this slot is selected — absent = nothing,
@@ -147,6 +171,29 @@ selected slot as plain HID — no app needed. The payload is `enc_module`:
   in full when the module opens and drops it again on close. BACK closes; the
   module has no idle timeout. Mouse-drag slots ride the relative pointer
   report (id 5) added to the HID descriptor in the same release.
+
+**`kind: "midi"`** (fw ≥ 0.29.0, proto v16) — MIDI out, hardware like a
+keystroke. The keypad is its own USB MIDI device, so the key drives a DAW with
+no app in the middle. The payload mirrors the events:
+
+```json
+"midi": { "msg": "note", "ch": 0, "d1": 60, "d2": 100, "mode": "momentary" }
+"midi": { "msg": "cc", "ch": 0, "d1": 74, "d2": 64 }
+"midi": { "msg": "pc", "ch": 3, "d1": 5 }
+```
+
+- `msg`: `"note"` (compiles to a note-on/note-off pair), `"cc"`, `"pc"`.
+- `ch` 0–15, `d1`/`d2` 0–127. `pc` has no `d2`.
+- `mode` applies to notes only. **`"momentary"` (the default) is the important
+  one**: the firmware holds the note down for exactly as long as the physical
+  key is held and sends note-off on release, which is what Ableton's Looper
+  and drum-rack pads require — a note that only ever sends "on" reads as a
+  stuck key to them. `"tap"` plays the pair straight through for one-shot
+  samples. Both modes emit the same two events; `mode` is what tells the
+  firmware which way to run them, so it must survive in the payload.
+- The board only sends anything when its `midi` config key is on (boot-time —
+  see [serial protocol](serial-protocol.md)). A macro stopped mid-note is
+  silenced: the engine tracks sounding notes and sends note-off on release.
 
 **`kind: "menu"`** (screen models) has no HID events. `"menu"` is one of
 `left` / `right` / `confirm` / `back`, and the firmware feeds it to the

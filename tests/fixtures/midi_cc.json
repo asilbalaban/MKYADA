@@ -1,0 +1,22 @@
+{
+  "format": "mkyada-macro",
+  "version": 2,
+  "name": "CC 74 = 64 (ch 1)",
+  "kind": "midi",
+  "midi": {
+    "msg": "cc",
+    "ch": 0,
+    "d1": 74,
+    "d2": 64
+  },
+  "events": [
+    {
+      "delay": 0,
+      "type": "midi",
+      "m": "cc",
+      "ch": 0,
+      "d1": 74,
+      "d2": 64
+    }
+  ]
+}

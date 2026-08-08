@@ -55,6 +55,9 @@ class Engine:
         self.sw = 1919       # screen size - 1 for scaling
         self.sh = 1079
         self._last_poll = ticks_ms()
+        self._midi_tried = False
+        self._midi_port = None
+        self._midi_notes = []  # (channel, note) sounding right now
 
     def set_screen(self, width, height):
         self.sw = max(1, int(width) - 1)
@@ -203,10 +206,57 @@ class Engine:
         time.sleep(0.02)
         self.consumer.send_report(struct.pack("<H", 0))
 
+    # --- MIDI ---
+    # Lazy and optional, unlike the HID interfaces: usb_midi may be off at
+    # boot (config "midi": false, or boot.py's endpoint budget refused it)
+    # and the desktop simulator has no such module at all. A missing port is
+    # a silent no-op — _find_device's RuntimeError would be wrong here.
+    def _midi(self):
+        if not self._midi_tried:
+            self._midi_tried = True
+            try:
+                import usb_midi
+                self._midi_port = usb_midi.ports[1]
+            except (ImportError, IndexError, AttributeError):
+                self._midi_port = None
+        return self._midi_port
+
+    def midi_send(self, msg, ch=0, d1=0, d2=0):
+        """One MIDI message out. `msg` is note_on / note_off / cc / pc;
+        d1 and d2 are note+velocity, controller+value, or program (d2
+        unused). Held notes are tracked so release_all can silence them."""
+        port = self._midi()
+        if port is None:
+            return
+        ch = int(ch) & 0x0F
+        d1 = int(d1) & 0x7F
+        d2 = int(d2) & 0x7F
+        if msg == "note_on":
+            port.write(bytes([0x90 | ch, d1, d2]))
+            if (ch, d1) not in self._midi_notes:
+                self._midi_notes.append((ch, d1))
+        elif msg == "note_off":
+            port.write(bytes([0x80 | ch, d1, 0]))
+            if (ch, d1) in self._midi_notes:
+                self._midi_notes.remove((ch, d1))
+        elif msg == "cc":
+            port.write(bytes([0xB0 | ch, d1, d2]))
+        elif msg == "pc":
+            port.write(bytes([0xC0 | ch, d1]))
+
     def release_all(self):
         self.mods = 0
         self.keys = []
         self._kbd_report()
+        # A macro stopped mid-note must not leave the DAW sounding — the
+        # same contract as the key-up above, and the reason a note_on is
+        # tracked at all.
+        if self._midi_notes:
+            held, self._midi_notes = self._midi_notes, []
+            port = self._midi()
+            if port is not None:
+                for ch, note in held:
+                    port.write(bytes([0x80 | ch, note, 0]))
         # Only touch the mouse when there is a button to release: the pointer
         # report is absolute, so sending it "just in case" teleports the
         # cursor to the last macro position (screen center after boot) even
@@ -282,6 +332,9 @@ class Engine:
                     self.scroll(ev.get("dy", 0), ev.get("dx", 0))
                 elif t == "consumer":
                     self.consumer_tap(ev.get("usage", ""))
+                elif t == "midi":
+                    self.midi_send(ev.get("m", ""), ev.get("ch", 0),
+                                   ev.get("d1", 0), ev.get("d2", 0))
                 # "wait" and unknown types: delay already applied above
         finally:
             self.release_all()

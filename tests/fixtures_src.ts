@@ -39,6 +39,11 @@ export const CANONICAL: Record<string, Assignment> = {
     body: '{"on":true}',
   },
   obs_scene: { kind: "obs", action: "setScene", sceneName: "Kamera 2" },
+  midi_note_momentary: {
+    kind: "midi", msg: "note", ch: 0, d1: 60, d2: 100, mode: "momentary",
+  },
+  midi_cc: { kind: "midi", msg: "cc", ch: 0, d1: 74, d2: 64 },
+  midi_program_change: { kind: "midi", msg: "pc", ch: 3, d1: 5 },
   keystroke_restart_hold: {
     kind: "keystroke",
     key: "a",

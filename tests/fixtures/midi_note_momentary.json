@@ -1,0 +1,30 @@
+{
+  "format": "mkyada-macro",
+  "version": 2,
+  "name": "Note C3 (ch 1)",
+  "kind": "midi",
+  "midi": {
+    "msg": "note",
+    "ch": 0,
+    "d1": 60,
+    "d2": 100,
+    "mode": "momentary"
+  },
+  "events": [
+    {
+      "delay": 0,
+      "type": "midi",
+      "m": "note_on",
+      "ch": 0,
+      "d1": 60,
+      "d2": 100
+    },
+    {
+      "delay": 20,
+      "type": "midi",
+      "m": "note_off",
+      "ch": 0,
+      "d1": 60
+    }
+  ]
+}

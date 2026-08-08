@@ -28,6 +28,19 @@ usb_hid.devices = [FakeHidDevice(0x01, 0x06), FakeHidDevice(0x01, 0x02),
                    FakeHidDevice(0x0C, 0x01)]
 sys.modules["usb_hid"] = usb_hid
 
+sent_midi = []
+
+
+class FakeMidiPort:
+    def write(self, buf):
+        sent_midi.append(bytes(buf))
+
+
+# ports[0] is in (host->device), ports[1] is out — engine.py only writes.
+usb_midi = types.ModuleType("usb_midi")
+usb_midi.ports = [None, FakeMidiPort()]
+sys.modules["usb_midi"] = usb_midi
+
 usb_cdc = types.ModuleType("usb_cdc")
 usb_cdc.data = None
 sys.modules["usb_cdc"] = usb_cdc
@@ -189,6 +202,41 @@ check("vertical scroll no pan", all(m[1] == 0 for m in wheel), str(wheel))
 check("scroll sends no pointer report",
       not any(r[1] == 0x02 and len(r[2]) == 5 for r in sent_reports),
       str(sent_reports))
+
+# --- MIDI (proto v16) ---
+sent_midi.clear()
+sent_reports.clear()
+eng.play([{"delay": 0, "type": "midi", "m": "note_on", "ch": 0, "d1": 60, "d2": 100},
+          {"delay": 0, "type": "midi", "m": "note_off", "ch": 0, "d1": 60}],
+         screen=None)
+check("note on/off bytes", sent_midi[:2] == [b"\x90\x3c\x64", b"\x80\x3c\x00"],
+      str(sent_midi))
+# release_all's empty keyboard report bookends every macro; what must NOT
+# happen is a mouse or consumer report, which would move the cursor or fire a
+# media key alongside the note
+check("midi touches no mouse or consumer device",
+      all(r[0] == 0x01 and r[1] == 0x06 for r in sent_reports), str(sent_reports))
+
+sent_midi.clear()
+eng.play([{"delay": 0, "type": "midi", "m": "cc", "ch": 2, "d1": 74, "d2": 64},
+          {"delay": 0, "type": "midi", "m": "pc", "ch": 15, "d1": 5}], screen=None)
+check("cc carries its channel", sent_midi[0] == b"\xb2\x4a\x40", str(sent_midi))
+check("pc is two bytes", sent_midi[1] == b"\xcf\x05", str(sent_midi))
+
+# out-of-range values are masked, never sent raw (a 7-bit field with the top
+# bit set would read as a status byte and desync the DAW's parser)
+sent_midi.clear()
+eng.midi_send("note_on", 99, 200, 300)
+check("midi values masked to 7 bits",
+      sent_midi == [b"\x93\x48\x2c"], str(sent_midi))
+
+# a macro that ends mid-note must not leave the DAW sounding
+sent_midi.clear()
+eng.play([{"delay": 0, "type": "midi", "m": "note_on", "ch": 1, "d1": 64, "d2": 100}],
+         screen=None)
+check("hanging note silenced by release_all", sent_midi[-1] == b"\x81\x40\x00",
+      str(sent_midi))
+check("no note left tracked", eng._midi_notes == [], str(eng._midi_notes))
 
 sent_reports.clear()
 eng.play([{"delay": 0, "type": "scroll", "dy": 0, "dx": -2}], screen=None)
@@ -464,6 +512,50 @@ check("hold: released on key-up", kbd and 0x04 not in kbd[-1][2:], str(kbd))
 check("hold: held across ticks", ticks["n"] >= 3, str(ticks))
 check("hold: no replay loop", runs["n"] == 0, str(runs))
 
+# A momentary MIDI note rides the same hold path with a different transport:
+# note_on on press, note_off on release. This is the mode Ableton's Looper and
+# drum-rack pads need — a note that only ever sends "on" reads as stuck.
+_midi_note = tempfile.NamedTemporaryFile("w", suffix=".json", delete=False)
+json.dump({"format": "mkyada-macro", "version": 2, "kind": "midi",
+           "midi": {"msg": "note", "ch": 0, "d1": 60, "d2": 100,
+                    "mode": "momentary"},
+           "events": [
+               {"delay": 0, "type": "midi", "m": "note_on", "ch": 0,
+                "d1": 60, "d2": 100},
+               {"delay": 0, "type": "midi", "m": "note_off", "ch": 0,
+                "d1": 60}]}, _midi_note)
+_midi_note.close()
+sent_midi.clear()
+runs["n"] = 0
+app.buttons.stable[0] = True
+ticks["n"] = 0
+app.led.tick = _release_after_3_ticks
+app.play_file(_midi_note.name, trigger=0)
+check("momentary: note on then off around the hold",
+      sent_midi == [b"\x90\x3c\x64", b"\x80\x3c\x00"], str(sent_midi))
+check("momentary: held across ticks, never replayed",
+      ticks["n"] >= 3 and runs["n"] == 0, "ticks=%s runs=%s" % (ticks, runs))
+
+# "tap" mode is the same two events, so only the payload tells them apart:
+# it must go through normal playback instead of the hold path
+_midi_tap = tempfile.NamedTemporaryFile("w", suffix=".json", delete=False)
+json.dump({"format": "mkyada-macro", "version": 2, "kind": "midi",
+           "midi": {"msg": "note", "ch": 0, "d1": 60, "d2": 100,
+                    "mode": "tap"},
+           "events": [
+               {"delay": 0, "type": "midi", "m": "note_on", "ch": 0,
+                "d1": 60, "d2": 100},
+               {"delay": 20, "type": "midi", "m": "note_off", "ch": 0,
+                "d1": 60}]}, _midi_tap)
+_midi_tap.close()
+sent_midi.clear()
+runs["n"] = 0
+app.buttons.stable[0] = True
+ticks["n"] = 0
+app.play_file(_midi_tap.name, trigger=0)
+check("tap: plays straight through, no hold", runs["n"] == 1, str(runs))
+# leave app.engine.play / led.tick stubbed: the checks below still count runs
+
 # "hold_repeat": false opts a single key back into play-once
 path_once = macro_file({"hold_repeat": False})
 app.led.tick = _orig_tick
@@ -676,7 +768,17 @@ app.proto.send = _orig_send
 app.proto.ser = None
 
 # --- serial "led" op (proto v2): app feedback override --------------------
-check("hello reports proto v15", app.hello()["proto"] == 15, str(app.hello()["proto"]))
+check("hello reports proto v16", app.hello()["proto"] == 16, str(app.hello()["proto"]))
+# hello reports the PORT, not the config key: boot.py can refuse MIDI (a
+# visible drive, or key 1 held at power-on) while config still says true, and
+# an "On" switch over a board that cannot send anything is a lie.
+check("hello reports the live midi port", app.hello()["midi"] is True,
+      str(app.hello().get("midi")))
+_saved_ports = usb_midi.ports
+usb_midi.ports = ()
+check("hello reports midi off when boot.py refused it",
+      app.hello()["midi"] is False, str(app.hello().get("midi")))
+usb_midi.ports = _saved_ports
 check("hello reports usb_drive", app.hello()["usb_drive"] == app.config["usb_drive"], str(app.hello()))
 
 # profile path resolution (issue #23): a profile is a full independent config —
@@ -1798,6 +1900,65 @@ ui.nav.events.queue.append(FakeKeyEvent(uimod.K_BACK, False))
 ui.tick(_t2.monotonic())
 check("dial: BACK returns to the grid", ui.state == uimod.S_SELECT
       and not ui.enc_module_active(), "state=%d" % ui.state)
+
+# --- Dial midi_cc slots (proto v16) ----------------------------------------
+# One slot per encoding. The relative ones send a DELTA so the DAW's value is
+# the only one that matters; absolute counts on the device and can jump.
+_write_key1({
+    "name": "Mixer", "kind": "enc_module",
+    "enc_module": {"slots": [
+        {"l": "2C", "t": "midi_cc", "cc": 74, "ch": 0, "mode": "rel_2c", "m": 1},
+        {"l": "BIN", "t": "midi_cc", "cc": 74, "ch": 0, "mode": "rel_bin", "m": 1},
+        {"l": "SM", "t": "midi_cc", "cc": 74, "ch": 0, "mode": "rel_sm", "m": 1},
+        {"l": "MCU", "t": "midi_cc", "cc": 74, "ch": 0, "mode": "rel_mackie", "m": 1},
+        {"l": "ABS", "t": "midi_cc", "cc": 74, "ch": 0, "mode": "abs", "m": 1},
+        None]}})
+ui._enter_grid()
+ui.open_key_menu(1)
+check("dial: a midi_cc module opens",
+      ui.state == uimod.S_CTX and ui.ctx["mode"] == "encmod", "ctx=%s" % (ui.ctx,))
+
+
+def _dial_turn(key_no, delta):
+    """Select a slot, turn one detent, return the MIDI bytes it sent."""
+    vapp.on_edge(_kmap.index(key_no), True)
+    now = _t2.monotonic()
+    ui.last_move = now - 1.0   # slow detent: no velocity acceleration
+    sent_midi.clear()
+    ui.enc.position += delta
+    ui.tick(now)
+    return list(sent_midi)
+
+
+check("dial midi: two's complement counts up 1..63",
+      _dial_turn(1, 1) == [b"\xb0\x4a\x01"], str(sent_midi))
+check("dial midi: two's complement counts down from 127",
+      _dial_turn(1, -1) == [b"\xb0\x4a\x7f"], str(sent_midi))
+check("dial midi: binary offset centres on 64",
+      _dial_turn(2, 1) == [b"\xb0\x4a\x41"]
+      and _dial_turn(2, -1) == [b"\xb0\x4a\x3f"], str(sent_midi))
+check("dial midi: sign magnitude puts the sign in bit 6",
+      _dial_turn(3, 1) == [b"\xb0\x4a\x01"]
+      and _dial_turn(3, -1) == [b"\xb0\x4a\x41"], str(sent_midi))
+check("dial midi: mackie matches sign magnitude",
+      _dial_turn(4, 1) == [b"\xb0\x4a\x01"]
+      and _dial_turn(4, -1) == [b"\xb0\x4a\x41"], str(sent_midi))
+# absolute walks a value the device owns, starting from the mid point
+check("dial midi: absolute walks up from 64", _dial_turn(5, 1) == [b"\xb0\x4a\x41"],
+      str(sent_midi))
+check("dial midi: absolute keeps its place", _dial_turn(5, 1) == [b"\xb0\x4a\x42"],
+      str(sent_midi))
+# the absolute value lives in the ctx, so closing the module forgets it — the
+# parsed slot dict is thrown away and must never be written back to
+ui.nav.events.queue.append(FakeKeyEvent(uimod.K_BACK, True))
+ui.nav.events.queue.append(FakeKeyEvent(uimod.K_BACK, False))
+ui.tick(_t2.monotonic())
+ui.open_key_menu(1)
+check("dial midi: absolute resets when the module reopens",
+      _dial_turn(5, 1) == [b"\xb0\x4a\x41"], str(sent_midi))
+ui.nav.events.queue.append(FakeKeyEvent(uimod.K_BACK, True))
+ui.nav.events.queue.append(FakeKeyEvent(uimod.K_BACK, False))
+ui.tick(_t2.monotonic())
 check("dial: closing tells the app (menu_ev close)",
       any(m.get("t") == "menu_ev" and m.get("ev") == "close" for m in voutbox),
       str(voutbox))

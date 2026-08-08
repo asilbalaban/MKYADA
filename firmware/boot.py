@@ -14,6 +14,11 @@
 #     dedicated scroll report leaves the cursor where the user has it.
 #   HID consumer control (stock, report ID 3) — media keys
 #   CDC serial: console (debug/REPL) + data (app protocol)
+#   USB MIDI: OFF by default, on with `"midi": true` in config.json. Named
+#     after the product string, so a DAW lists it as "MKYADA Vision 6" rather
+#     than "CircuitPython usb_midi". Skipped whenever the CIRCUITPY drive is
+#     visible: the RP2040 has 7 endpoint pairs and the two together sit on the
+#     ceiling, so the drive — the recovery path — wins.
 #   Mass storage: CIRCUITPY drive HIDDEN by default (finished-product mode:
 #     the app manages all files over serial — see the fs_* commands in
 #     docs/serial-protocol.md). Only `"usb_drive": true` in config.json shows
@@ -161,7 +166,39 @@ except Exception:
     pass
 usb_hid.enable((usb_hid.Device.KEYBOARD, abs_mouse, usb_hid.Device.CONSUMER_CONTROL))
 usb_cdc.enable(console=True, data=True)
-if not usb_drive_wanted():
+# USB MIDI, so a key can drive a DAW as well as type. It is LAST and wrapped
+# because it is the only interface we can run out of endpoints for: the
+# RP2040 has 7 pairs and we already spend 5 (HID 1 + CDC console 2 + CDC data
+# 2), 6 with the CIRCUITPY drive. Enabling MIDI on top of a visible drive
+# would sit exactly on the ceiling, so it yields to the drive instead — the
+# drive is the recovery path and must never lose. If enable() still raises,
+# swallowing it costs MIDI and keeps the keyboard and the serial link, which
+# is what the app needs to talk the board back out of a bad config.
+DRIVE = usb_drive_wanted()  # claims and releases the recovery pin: ask once
+if CFG.get("midi") is True and not DRIVE:
+    try:
+        import usb_midi
+
+        # Windows refuses to enumerate a device whose audio-control interface
+        # name is over 31 characters; both product strings are well under.
+        # (macOS caches these names — renaming needs an Audio MIDI Setup
+        # cache clear before the new one shows up.)
+        usb_midi.set_names(streaming_interface_name=PRODUCT,
+                           audio_control_interface_name=PRODUCT,
+                           in_jack_name=PRODUCT, out_jack_name=PRODUCT)
+        usb_midi.enable()
+    except Exception:
+        pass
+else:
+    # Off by default: an unused MIDI port on every keypad is a confusing
+    # extra device in every DAW's input list, and it costs an endpoint.
+    try:
+        import usb_midi
+
+        usb_midi.disable()
+    except Exception:
+        pass
+if not DRIVE:
     # Finished-product mode: no CIRCUITPY drive on the host. That frees the
     # filesystem for the firmware itself, so the app can manage files over
     # serial (fs_* commands) — including config.json to turn this back off.

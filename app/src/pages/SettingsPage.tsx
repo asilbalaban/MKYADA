@@ -7,6 +7,7 @@ import {
   AppWindow,
   Gauge,
   HardDrive,
+  Music,
   Info,
   Keyboard,
   Layers,
@@ -315,6 +316,8 @@ function KeypadCard() {
   const hidden = hello?.usb_drive === false;
   // firmware < 0.4.0 has no usb_drive support (no fs_* serial commands)
   const supported = hello?.usb_drive !== undefined;
+  const midiOn = hello?.midi === true;
+  const midiSupported = hello?.midi !== undefined;
   const vision = deviceModel(hello) === "vision6";
   // firmware < 0.9.0 has no grid band (config show_layer / show_profile)
   const bandSupported = hello?.show_layer !== undefined;
@@ -354,6 +357,53 @@ function KeypadCard() {
       toast.error("Could not change the screen setting", String(e));
     } finally {
       setBandBusy(null);
+    }
+  }
+
+  // MIDI is decided in boot.py, so this is the usb_drive dance rather than a
+  // live set_cfg patch: merge into the stored config, then restart.
+  async function setMidi(on: boolean) {
+    if (!hello || !drive) return;
+    const ok = await confirm({
+      title: on ? "Turn on MIDI" : "Turn off MIDI",
+      message: on
+        ? "The keypad will also appear as a MIDI device called \"" +
+          (deviceModel(hello) === "vision6" ? "MKYADA Vision 6" : "MKYADA Keypad") +
+          "\", so MIDI keys can drive a DAW directly — no app in between.\n\n" +
+          "The keypad restarts now. Note: MIDI stays off while the USB drive is " +
+          "visible, because the two together exceed what the chip can present at once."
+        : "The keypad will stop presenting a MIDI port, and MIDI keys will do nothing." +
+          "\n\nThe keypad restarts now.",
+      confirmLabel: on ? "Turn on MIDI" : "Turn off MIDI",
+    });
+    if (!ok) return;
+    setBusy(true);
+    try {
+      let cfg: Record<string, unknown> = {};
+      try {
+        cfg = JSON.parse(await ipc.driveRead(drive.path, "config.json"));
+      } catch {
+        // fresh board without a config — the firmware defaults the rest
+      }
+      await ipc.driveWrite(
+        drive.path,
+        "config.json",
+        JSON.stringify({ ...cfg, midi: on }, null, 2),
+      );
+      await ipc.driveEject(drive.path).catch(() => {});
+      setRestarting(true);
+      await send({ t: "reset" }).catch(() => {});
+      await disconnect().catch(() => {});
+      toast.success(
+        "Keypad restarting",
+        on
+          ? "It will reconnect with a MIDI port. In your DAW, enable it as a MIDI input."
+          : "It will reconnect without a MIDI port.",
+      );
+    } catch (e) {
+      toast.error("Could not change the MIDI setting", String(e));
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -451,6 +501,37 @@ function KeypadCard() {
             >
               <HardDrive size={14} aria-hidden />
               {hidden ? "Hidden" : "Visible"}
+            </Button>
+          )}
+        </div>
+
+        <div className="flex items-center justify-between gap-4">
+          <div className="flex flex-col gap-0.5 text-sm">
+            <span className="text-fg font-medium">Present a MIDI port</span>
+            <span className="text-xs text-fg-faint">
+              Makes the keypad a USB MIDI device as well as a keyboard, so MIDI keys can play
+              notes, control changes and program changes straight into a DAW with no app
+              running. Off by default, and unavailable while the USB drive is visible — the
+              chip cannot present both at once.
+            </span>
+          </div>
+          {!hello ? (
+            <Badge tone="amber">connect a keypad</Badge>
+          ) : !midiSupported ? (
+            <Badge tone="amber">needs firmware ≥ 0.29.0</Badge>
+          ) : !hidden ? (
+            <Badge tone="amber">hide the USB drive first</Badge>
+          ) : (
+            <Button
+              variant={midiOn ? "primary" : "default"}
+              role="switch"
+              aria-checked={midiOn}
+              loading={busy}
+              disabled={!drive}
+              onClick={() => void setMidi(!midiOn)}
+            >
+              <Music size={14} aria-hidden />
+              {midiOn ? "On" : "Off"}
             </Button>
           )}
         </div>

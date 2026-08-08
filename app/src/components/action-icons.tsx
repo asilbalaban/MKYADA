@@ -66,6 +66,7 @@ export const KIND_ICON: Record<Assignment["kind"], string> = {
   obs: "obs",
   obs_center: "obs",
   enc_module: "dial",
+  midi: "midi",
   sequence: "multi-action",
 };
 

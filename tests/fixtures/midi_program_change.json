@@ -1,0 +1,20 @@
+{
+  "format": "mkyada-macro",
+  "version": 2,
+  "name": "Program 5 (ch 4)",
+  "kind": "midi",
+  "midi": {
+    "msg": "pc",
+    "ch": 3,
+    "d1": 5
+  },
+  "events": [
+    {
+      "delay": 0,
+      "type": "midi",
+      "m": "pc",
+      "ch": 3,
+      "d1": 5
+    }
+  ]
+}

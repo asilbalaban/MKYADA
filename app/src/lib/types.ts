@@ -15,6 +15,9 @@ export interface Hello {
   /** false = CIRCUITPY drive hidden, files managed over serial
    * (fs_* commands); absent on firmware < 0.4.0 */
   usb_drive?: boolean;
+  /** true = this board presents a USB MIDI port, so `midi` keys can play;
+   * decided at boot. Absent on firmware < 0.29.0 (proto < 16) */
+  midi?: boolean;
   /** hardware model ("core6" | "vision6"); absent on older firmware = core6 */
   model?: string;
   /** GPIO names in use, key 1 first (length == key_count); absent on older firmware */
@@ -77,6 +80,10 @@ export interface DeviceConfig {
   nav?: string[] | null;
   /** Vision 6 device UI language ("en" | "tr") — also editable on the device */
   lang?: string | null;
+  /** Present a USB MIDI port. Boot-time like usb_drive: set_cfg cannot patch
+   * it, the board has to restart, and it yields to a visible CIRCUITPY drive
+   * (the two together would sit on the RP2040's endpoint ceiling). */
+  midi?: boolean;
   /** Vision 6: band over the key grid naming the active layer — also on the device */
   show_layer?: boolean;
   /** Vision 6: the band shows the app's active profile label — also on the device */
@@ -160,12 +167,38 @@ export const MODULE_SLOT_LABELS: Record<ModuleSlot, string> = {
 export const SLOT_CONTEXTS = ["grid", "home", "menu"] as const;
 export type SlotContext = (typeof SLOT_CONTEXTS)[number];
 
+/** What a `midi` key sends. "note" is a note-on/note-off pair, "cc" a control
+ * change, "pc" a program change (the one-message way to recall an amp-sim or
+ * synth preset). */
+export type MidiMessage = "note" | "cc" | "pc";
+
+/** How a note key behaves. Momentary is the default and the one Ableton's
+ * Looper and drum-rack pads need: the note sounds while the key is held.
+ * Tap sends the pair back to back, which suits one-shot samples. */
+export type MidiNoteMode = "momentary" | "tap";
+
+/** The wire-level message names carried by a `midi` macro event. */
+export type MidiEventMsg = "note_on" | "note_off" | "cc" | "pc";
+
+/** How a Dial `midi_cc` slot encodes a turn.
+ *
+ * Absolute sends a value the device counts itself, which makes the parameter
+ * JUMP whenever the DAW's value and the encoder's disagree. The relative
+ * encodings send a delta instead, so the DAW's value is the only one — this
+ * is what every pro surface does, and why the default is relative. The three
+ * relative names are the industry's, and map to Reaper's Relative 1/2/3;
+ * Mackie's V-Pot encoding is sign-magnitude under another name. */
+export type MidiCcMode = "abs" | "rel_2c" | "rel_bin" | "rel_sm" | "rel_mackie";
+
 export type MacroEvent = (
   | { delay: number; type: "key"; action: "down" | "up"; key: string; vk?: number | null }
   | { delay: number; type: "move"; x: number; y: number }
   | { delay: number; type: "button"; action: "down" | "up"; button: string; x?: number; y?: number }
   | { delay: number; type: "scroll"; dx?: number; dy: number; x?: number; y?: number }
   | { delay: number; type: "consumer"; usage: string }
+  /** One MIDI message. d1/d2 are the two MIDI data bytes: note+velocity for
+   * note_on/note_off, controller+value for cc, program for pc (d2 unused). */
+  | { delay: number; type: "midi"; m: MidiEventMsg; ch: number; d1: number; d2?: number }
   | { delay: number; type: "wait" }
 ) & {
   /** optional user-given row title, shown in the editor; ignored by playback */
@@ -198,10 +231,14 @@ export interface MacroFile {
     | "obs"
     | "obs_center"
     | "enc_module"
+    | "midi"
     | "sequence";
   combo?: { mods: string[]; key: string };
   text?: string;
   media?: string;
+  /** midi kind: which message, on which channel (0-15), with which data
+   * bytes. `mode` applies to notes only. */
+  midi?: { msg: MidiMessage; ch: number; d1: number; d2?: number; mode?: MidiNoteMode };
   /** scroll kind: direction + how many wheel ticks + modifiers held (HID) */
   scroll?: { dir: ScrollDir; amount?: number; mods?: string[] };
   /** menu kind: which on-device menu action a key drives (Vision 6) */
@@ -397,6 +434,7 @@ export type EncModuleSlot = {
   | { t: "scroll"; axis: "v" | "h"; mods?: string[] }
   | { t: "move"; axis: "x" | "y"; step?: number; drag?: boolean; mods?: string[] }
   | { t: "consumer"; cw?: string; ccw?: string }
+  | { t: "midi_cc"; cc: number; ch?: number; mode?: MidiCcMode }
 );
 
 /** The Dial module (kind "enc_module") per-key configuration. Lives in the
@@ -495,6 +533,19 @@ export type Assignment = (
   // mouse-wheel scroll, optionally with modifiers held (e.g. Alt+wheel to
   // zoom in Illustrator, Ctrl+wheel to zoom a browser) — hardware HID
   | { kind: "scroll"; dir: ScrollDir; amount?: number; mods?: string[] }
+  // MIDI out — hardware, like a keystroke: the keypad is a MIDI device as
+  // well as a keyboard, so a key can drive a DAW with no app in the middle
+  | {
+      kind: "midi";
+      msg: MidiMessage;
+      /** 0-15 on the wire; the editor shows it 1-16 the way DAWs do */
+      ch: number;
+      /** note number, controller number or program number */
+      d1: number;
+      /** velocity or controller value; unused by pc */
+      d2?: number;
+      mode?: MidiNoteMode;
+    }
   // drive the Vision 6's own on-screen menu from a normal key (device-only)
   | { kind: "menu"; action: MenuAction }
   | { kind: "recorded"; name: string; macro: MacroFile }

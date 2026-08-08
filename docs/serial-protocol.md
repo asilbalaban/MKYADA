@@ -1,4 +1,26 @@
-# MKYADA serial protocol (v15)
+# MKYADA serial protocol (v16)
+
+v16 (firmware 0.29.0) is the **USB MIDI** release. No new message types; one
+config key, one `hello` field, one macro event type and one Dial slot type:
+
+- **`midi` config key** — when true the board presents a USB MIDI port named
+  after the product ("MKYADA Vision 6" / "MKYADA Keypad"). It is **boot-time,
+  like `usb_drive`**: `set_cfg` refuses it, so the app writes config.json and
+  sends `{"t":"reset"}` (a `reload` does not re-run boot.py). Default false —
+  an idle port clutters every DAW's device list and costs a USB endpoint.
+- **It yields to a visible CIRCUITPY drive.** The RP2040 has 7 endpoint pairs
+  and the firmware already spends 5 (HID 1 + CDC console 2 + CDC data 2), 6
+  with the drive. Rather than sit on the ceiling, boot.py skips MIDI whenever
+  the drive is visible, and the whole enable is wrapped: if it fails anyway
+  the board still comes up with its keyboard and its serial link, which is
+  what the app needs to talk it back out of a bad config.
+- **`hello.midi`** mirrors the switch, so the app can gate both the Settings
+  toggle and the `midi` action kind on a board that actually has the port.
+- **New macro event `{"type":"midi", "m":…, "ch":…, "d1":…, "d2":…}`** and the
+  Dial slot type `"midi_cc"` — both in
+  [macro-format.md](macro-format.md). All additive: old apps never send
+  either, old firmware skips unknown event types and treats an unknown slot
+  type as a dead slot.
 
 v15 (firmware 0.28.0) is the **Dial** release (kind `enc_module`) — a
 device-native encoder toolset. No new message types; two existing ones gain a
@@ -338,6 +360,26 @@ default a fresh firmware install gets. Recovery without the
 app: hold key 1 while plugging the keypad in — GP0 on Core 6, GP29 (macro
 key 1) on Vision 6, whose GP0 belongs to the OLED. The drive comes back for
 that session.
+
+## USB MIDI (v16)
+
+`config.json "midi": true` makes the board present a USB MIDI port alongside
+the keyboard, so a `midi` key can drive a DAW with nothing running on the
+computer. Off by default. Like `usb_drive` this is decided in boot.py, so
+`set_cfg` refuses the field — write config.json and `{"t":"reset"}`; a
+`reload` will not re-run boot.py. `hello` reports it as `midi` (absent on
+firmware < 0.29.0).
+
+The port is named after the product string. Two host quirks worth knowing:
+Windows will not enumerate a device whose audio-control interface name is over
+31 characters (both product strings are well under), and macOS caches MIDI
+port names in Audio MIDI Setup, so a renamed port needs that cache cleared
+before the new name shows up.
+
+MIDI is skipped while the CIRCUITPY drive is visible. The RP2040 has 7 USB
+endpoint pairs; the firmware already spends 5, or 6 with the drive, and MIDI
+wants one more — rather than sit exactly on the ceiling, the drive wins,
+because the drive is the recovery path.
 
 ## Two models (firmware 0.7.0)
 

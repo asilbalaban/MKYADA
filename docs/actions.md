@@ -24,6 +24,7 @@ Two families:
 | **Media key** | Consumer-control usages: Play/Pause, Mute, Volume, Brightness, etc. |
 | **Volume level** | Pressing the key mutes/unmutes (standalone). On a Vision 6, the wheel opens an absolute volume slider — the exact percentage needs the app running (see [Wheel menu](#wheel-menu-vision-6)). |
 | **Mouse scroll** | Wheel up/down or horizontal pan, optionally with modifiers held (e.g. `Ctrl+wheel` to zoom, `Alt+wheel` in Illustrator). |
+| **MIDI message** | A note, control change or program change straight into a DAW — the keypad is a USB MIDI device as well as a keyboard. Notes hold while the key is held (what Ableton's Looper and drum pads need); a Mackie Control picker gives Logic and Pro Tools transport with no mapping. Needs **MIDI** switched on in Settings (off by default, restart required, and unavailable while the USB drive is visible). |
 | **Recorded macro** | A recording from the [Recorder](macro-format.md): mouse paths, clicks and keystrokes replayed 1:1 as real HID. |
 | **Device menu** *(Vision 6)* | Drive the OLED's own menu from a key — scroll ←/→, CONFIRM, BACK, open Home/Grid/Settings. |
 

@@ -104,7 +104,16 @@ gc.collect()  # the display stack litters the heap; start the app compacted
 
 DEBOUNCE_S = 0.02
 PING_TIMEOUT_S = 5.0
-PROTO_VERSION = 15 # v15: Dial module (kind enc_module) — a device-local
+PROTO_VERSION = 16 # v16: USB MIDI. A new config key "midi" (boot-time, like
+                   # usb_drive — set_cfg cannot patch it, it needs a reset)
+                   # adds a MIDI interface named after the product, and hello
+                   # mirrors it so the app only offers the feature to a board
+                   # that has it. New action kind "midi" plays a new event
+                   # type {"type":"midi","m":note_on|note_off|cc|pc,...}, and
+                   # the Dial gains a "midi_cc" slot type. All additive: old
+                   # apps never send either, old firmware skips unknown event
+                   # types and treats an unknown slot type as a dead slot.
+                   # v15: Dial module (kind enc_module) — a device-local
                    # encoder toolset. The device announces it with a plain
                    # ctx message the app must NOT answer with a menu (it only
                    # suppresses its own key handling), and closing the module
@@ -222,6 +231,11 @@ DEFAULT_CONFIG = {
                          # mode: the app manages files over serial). Only an
                          # explicit true shows it — same rule as boot.py. Hold
                          # key 1 at power-on to force the drive back on.
+    "midi": False,       # USB MIDI interface off unless asked for: it costs a
+                         # USB endpoint and an idle port clutters every DAW's
+                         # device list. Boot-time only (boot.py reads this
+                         # file directly) — flipping it needs a reset, not a
+                         # reload, and it yields to a visible CIRCUITPY drive.
     "watchdog": True,    # hardware watchdog: a hung firmware hard-resets
                          # itself instead of bricking (false only for bench
                          # debugging — a paused debugger trips it)
@@ -259,6 +273,17 @@ def read_text(path):
 
 def uid_hex():
     return "".join("%02x" % b for b in microcontroller.cpu.uid)
+
+
+def midi_ready():
+    """True when a USB MIDI port really exists on this boot. usb_midi.ports
+    is empty when boot.py disabled the interface, which is the honest answer
+    to "can a midi key do anything here" — the config key alone can lie."""
+    try:
+        import usb_midi
+        return bool(usb_midi.ports)
+    except Exception:
+        return False
 
 
 class Buttons:
@@ -471,6 +496,7 @@ class App:
         if cfg.get("busy_other") not in ("ignore", "switch"):
             cfg["busy_other"] = "ignore"
         cfg["usb_drive"] = cfg.get("usb_drive") is True  # same rule as boot.py
+        cfg["midi"] = cfg.get("midi") is True            # same rule as boot.py
         cfg["show_layer"] = cfg.get("show_layer") is True
         cfg["show_profile"] = cfg.get("show_profile") is True
         # ui.py indexes cfg["wheel_layers"] directly (the Settings toggle and
@@ -711,6 +737,13 @@ class App:
                 "key_count": c["key_count"], "layer_key": c["layer_key"],
                 "layer_count": c["layer_count"], "layer_mode": c["layer_mode"],
                 "key_map": c["key_map"], "usb_drive": c["usb_drive"],
+                # The MIDI port that ACTUALLY came up, not what config asked
+                # for: boot.py refuses MIDI while the CIRCUITPY drive is
+                # visible, and holding key 1 at power-on forces the drive back
+                # whatever config says. Reporting the config key would show
+                # the app an "On" switch on a board whose midi keys do
+                # nothing.
+                "midi": midi_ready(),
                 "pins": self.key_pin_names(), "nav": self.nav_pin_names(),
                 "show_layer": c["show_layer"], "show_profile": c["show_profile"],
                 # The wheel's paging mode is a device setting the app can flip
@@ -1371,8 +1404,17 @@ class App:
         OS's typematic repeat generates the character stream — exactly a
         normal keyboard's rate and initial delay. `trigger` None = a serial
         hold play: released by the app's "stop" (via should_stop) or when
-        the app goes away."""
-        self.engine.key_down(events[0])
+        the app goes away.
+
+        A momentary MIDI note rides the same contract with a different
+        transport: note_on now, note_off on release. Ableton's Looper and
+        every drum-rack pad want exactly that — a note that only ever sends
+        "on" reads as a stuck key to them."""
+        midi = events[0].get("type") == "midi"
+        if midi:
+            self._midi_event(events[0])
+        else:
+            self.engine.key_down(events[0])
         try:
             while True:
                 if should_stop():
@@ -1386,7 +1428,14 @@ class App:
                 self.led.tick()
                 time.sleep(0.002)
         finally:
-            self.engine.key_up(events[1])
+            if midi:
+                self._midi_event(events[1])
+            else:
+                self.engine.key_up(events[1])
+
+    def _midi_event(self, ev):
+        self.engine.midi_send(ev.get("m", ""), ev.get("ch", 0),
+                              ev.get("d1", 0), ev.get("d2", 0))
 
     def play_file(self, path, trigger=None, speed=None, repeat=None,
                   hold=False, variant=None):
@@ -1503,6 +1552,23 @@ class App:
                      and events[1].get("type") == "key"
                      and events[1].get("action") == "up"
                      and events[0].get("key") == events[1].get("key"))
+        # A momentary MIDI note: note_on + its note_off and nothing else, so
+        # the note can sound for exactly as long as the key is held. The mode
+        # is read from the payload rather than inferred, because a "tap" note
+        # compiles to the very same two events — only the intent differs.
+        midi_cfg = data.get("midi")
+        # The pair is checked message by message, not just by type: the hold
+        # path skips release_all, so a hand-written file whose second event
+        # is something other than the matching note_off would leave the note
+        # sounding until some later macro cleaned up.
+        momentary = (not variants and len(events) == 2
+                     and isinstance(midi_cfg, dict)
+                     and midi_cfg.get("mode") == "momentary"
+                     and events[0].get("type") == "midi"
+                     and events[0].get("m") == "note_on"
+                     and events[1].get("type") == "midi"
+                     and events[1].get("m") == "note_off"
+                     and events[0].get("d1") == events[1].get("d1"))
         # replay while the physical key is held down (like OS key repeat);
         # single keys default ON — "hold_repeat": false opts out
         hold_repeat = settings.get("hold_repeat")
@@ -1545,8 +1611,9 @@ class App:
             return stop
 
         try:
-            if (plain_tap and not loop and int(repeat) == 1
-                    and (hold or (hold_repeat and trigger is not None))):
+            if (not loop and int(repeat) == 1
+                    and ((plain_tap and (hold or (hold_repeat and trigger is not None)))
+                         or (momentary and (hold or trigger is not None)))):
                 # real-keyboard hold: HID key down until the physical key
                 # (or, for serial holds, the app's "stop") lets go
                 self.hold_key(events, trigger, should_stop)

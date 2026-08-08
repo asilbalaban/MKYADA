@@ -66,3 +66,40 @@ to one. On the **Vision 6** you turn the wheel and read the layer name on screen
 ![Core 6 · Keys](images/screens/core6-keys.png)
 
 > Actions: Layers · Go-to-layer · Launch · Shortcut · Play sound.
+
+## 7. Music production
+
+The keypad is a **USB MIDI device as well as a keyboard**, so one box does both
+jobs — the cheap MIDI controllers can't send shortcuts, and the stream decks
+can't send MIDI. Put transport on keys and mixer knobs on the wheel: notes for
+clip and scene launch in Ableton, a **program change** to jump between amp-sim
+presets, control changes on the **Dial** for cutoff, send level or pan.
+
+Two details that make it feel like real gear. Notes are **momentary** by
+default — the note lasts exactly as long as your finger, which is what
+Ableton's Looper and drum-rack pads want. And the Dial's CC slots send
+**relative** values by default, so a knob never jumps when the DAW's value and
+the encoder's disagree.
+
+Ableton, Reaper and FL Studio MIDI-learn anything: wiggle the control, click the
+parameter. Logic and Pro Tools have no such thing, so the MIDI editor has a
+**Mackie Control** picker — choose "Mackie Control" as a control surface in the
+DAW and transport works with no mapping at all.
+
+Switch **MIDI** on in Settings first; it's off by default, needs a restart, and
+is unavailable while the USB drive is visible.
+
+> Actions: MIDI message · Dial (MIDI CC slots) · Shortcut · Layers.
+
+## 8. Reading music on stage
+
+A page turner that costs nothing extra. **forScore** and **MobileSheets** both
+ship with the arrow keys bound to next/previous page, so the *Sheet music page
+turner* Dial preset works the moment you plug in — USB-C straight into an iPad,
+no pairing, no batteries, and no app on the tablet. The wheel turns pages, the
+wheel press is next page, and a second slot scrolls within an oversized score.
+
+Nothing about this needs MIDI or the desktop app: it is plain USB keyboard
+input, so it works on any tablet or laptop that accepts a keyboard.
+
+> Actions: Dial (page-turner preset) · Shortcut.

@@ -164,7 +164,7 @@ export function effectiveLayers(cfg: {
 // are pre-compiled to sibling "part" files it plays over serial (still
 // hardware HID), host steps it performs itself.
 
-const HID_KINDS = new Set(["keystroke", "combo", "text", "media", "scroll", "recorded"]);
+const HID_KINDS = new Set(["keystroke", "combo", "text", "media", "scroll", "midi", "recorded"]);
 
 export function stepIsHid(step: SequenceStep): boolean {
   return HID_KINDS.has(step.a.kind);
@@ -350,6 +350,69 @@ function scrollName(dir: ScrollDir, mods: string[]): string {
   return `${pre}Scroll ${dir}`;
 }
 
+/** How long a note is held when it is played straight through rather than by
+ * the firmware's hold path. Long enough for a sampler to see a real note
+ * rather than a zero-length blip, short enough to feel instant.
+ *
+ * This applies to momentary notes too. The hold path ignores event delays —
+ * it sends note-on, waits for the key, then sends note-off — but it is not
+ * the only route: the Vision 6 action card, key-logic variants, sequence
+ * steps and app-driven plays all run the events normally, and a 0 ms note
+ * there is inaudible. */
+export const MIDI_TAP_MS = 20;
+export const MIDI_DEFAULT_VELOCITY = 100;
+
+/** Scientific pitch notation, the way DAWs label notes: MIDI 60 = C3 in
+ * Ableton/Logic's numbering (note 0 is C-2). */
+const MIDI_NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+
+export function midiNoteName(note: number): string {
+  const n = Math.max(0, Math.min(127, Math.round(note)));
+  return `${MIDI_NOTE_NAMES[n % 12]}${Math.floor(n / 12) - 2}`;
+}
+
+/** Mackie Control transport, as plain note numbers.
+ *
+ * This exists because Logic Pro and Pro Tools have no general MIDI-learn for
+ * transport: the user would otherwise be sent into Logic's Controller
+ * Assignments editor. Pick "Mackie Control" in the DAW's control-surface list
+ * instead and these notes work with no mapping at all. It is a partial
+ * surface — no LCD/LED feedback, no 8 channel strips — but transport is the
+ * part everybody wants. */
+export const MCU_NOTES: { note: number; label: string }[] = [
+  { note: 94, label: "Play" },
+  { note: 93, label: "Stop" },
+  { note: 95, label: "Record" },
+  { note: 91, label: "Rewind" },
+  { note: 92, label: "Fast forward" },
+  { note: 86, label: "Loop / cycle" },
+  { note: 89, label: "Click / metronome" },
+  { note: 84, label: "Drop marker" },
+];
+
+function midiName(a: Extract<Assignment, { kind: "midi" }>): string {
+  const ch = ` (ch ${(a.ch ?? 0) + 1})`;
+  if (a.msg === "cc") return `CC ${a.d1} = ${a.d2 ?? 0}${ch}`;
+  if (a.msg === "pc") return `Program ${a.d1}${ch}`;
+  return `Note ${midiNoteName(a.d1)}${ch}`;
+}
+
+function midiEvents(a: Extract<Assignment, { kind: "midi" }>): MacroEvent[] {
+  const ch = Math.max(0, Math.min(15, Math.round(a.ch ?? 0)));
+  const d1 = Math.max(0, Math.min(127, Math.round(a.d1)));
+  const d2 = Math.max(0, Math.min(127, Math.round(a.d2 ?? MIDI_DEFAULT_VELOCITY)));
+  if (a.msg === "cc") return [{ delay: 0, type: "midi", m: "cc", ch, d1, d2 }];
+  if (a.msg === "pc") return [{ delay: 0, type: "midi", m: "pc", ch, d1 }];
+  // Both note modes compile to the same pair; the payload's `mode` is what
+  // tells the firmware to hold the note until the key comes up instead of
+  // playing straight through. The gap matters for both, because the hold
+  // path is not the only way these events get played (see MIDI_TAP_MS).
+  return [
+    { delay: 0, type: "midi", m: "note_on", ch, d1, d2 },
+    { delay: MIDI_TAP_MS, type: "midi", m: "note_off", ch, d1 },
+  ];
+}
+
 function menuName(action: MenuAction): string {
   return MENU_LABEL[action];
 }
@@ -368,6 +431,8 @@ export function encSlotComplete(s: EncModuleSlot | null | undefined): s is EncMo
       return true;
     case "consumer":
       return !!(s.cw || s.ccw);
+    case "midi_cc":
+      return typeof s.cc === "number";
     default:
       return false;
   }
@@ -476,6 +541,26 @@ export function compileAssignment(a: Assignment, name?: string): MacroFile | nul
           kind: "scroll",
           scroll: { dir: a.dir, amount, ...(mods.length ? { mods } : {}) },
           events: scrollEvents(a.dir, amount, mods),
+        };
+      }
+      case "midi": {
+        const ch = Math.max(0, Math.min(15, Math.round(a.ch ?? 0)));
+        const d1 = Math.max(0, Math.min(127, Math.round(a.d1)));
+        const isNote = a.msg === "note";
+        return {
+          ...base,
+          name: name ?? midiName(a),
+          kind: "midi",
+          midi: {
+            msg: a.msg,
+            ch,
+            d1,
+            ...(a.msg === "pc"
+              ? {}
+              : { d2: Math.max(0, Math.min(127, Math.round(a.d2 ?? MIDI_DEFAULT_VELOCITY))) }),
+            ...(isNote ? { mode: a.mode ?? "momentary" } : {}),
+          },
+          events: midiEvents(a),
         };
       }
       case "menu":
@@ -825,6 +910,19 @@ function parseAssignmentBase(m: MacroFile): Assignment {
         ...(m.scroll?.mods?.length ? { mods: m.scroll.mods } : {}),
         ...behavior,
       };
+    case "midi": {
+      const p = m.midi;
+      const msg = p?.msg ?? "note";
+      return {
+        kind: "midi",
+        msg,
+        ch: p?.ch ?? 0,
+        d1: p?.d1 ?? (msg === "cc" ? 1 : 60),
+        ...(msg === "pc" ? {} : { d2: p?.d2 ?? MIDI_DEFAULT_VELOCITY }),
+        ...(msg === "note" ? { mode: p?.mode ?? "momentary" } : {}),
+        ...behavior,
+      };
+    }
     case "menu":
       return { kind: "menu", action: m.menu ?? "confirm", ...behavior };
     case "launch":
@@ -948,6 +1046,8 @@ export function describeAssignment(a: Assignment): string {
       const n = a.amount && a.amount !== SCROLL_DEFAULT_AMOUNT ? ` ×${a.amount}` : "";
       return `${pre}Scroll ${SCROLL_ARROW[a.dir]}${n}`;
     }
+    case "midi":
+      return `♪ ${midiName(a)}`;
     case "menu":
       return MENU_LABEL[a.action];
     case "recorded":

@@ -17,6 +17,9 @@ import {
   holdRepeatDefault,
   isSlotBuiltin,
   kindRequiresHost,
+  MEDIA_USAGES,
+  MIDI_TAP_MS,
+  midiNoteName,
   migrateMacro,
   MODIFIERS,
   parseAssignment,
@@ -25,7 +28,7 @@ import {
   SLOT_BUILTIN_ACTION,
 } from "./macro-model";
 import { ENC_PRESETS, encPresetSlots } from "./enc-presets";
-import type { Assignment, MacroFile } from "./types";
+import type { Assignment, EncModuleSlot, MacroFile } from "./types";
 
 /** Defaults are dropped at compile time; normalize both sides for comparison. */
 function normalize(a: Assignment): Assignment {
@@ -77,6 +80,10 @@ const CASES: [string, Assignment][] = [
   ["scroll left", { kind: "scroll", dir: "left", amount: 3 }],
   ["scroll right", { kind: "scroll", dir: "right", amount: 2 }],
   ["scroll with modifiers (zoom)", { kind: "scroll", dir: "up", amount: 1, mods: ["ALT"] }],
+  ["midi note", { kind: "midi", msg: "note", ch: 0, d1: 60, d2: 100, mode: "momentary" }],
+  ["midi note tap on ch 10", { kind: "midi", msg: "note", ch: 9, d1: 36, d2: 127, mode: "tap" }],
+  ["midi cc", { kind: "midi", msg: "cc", ch: 0, d1: 74, d2: 64 }],
+  ["midi program change", { kind: "midi", msg: "pc", ch: 3, d1: 5 }],
   ["menu confirm", { kind: "menu", action: "confirm" }],
   ["menu left", { kind: "menu", action: "left" }],
   ["recorded", { kind: "recorded", name: "demo", macro: recordedMacro }],
@@ -132,7 +139,7 @@ const CASES: [string, Assignment][] = [
         { l: "ZOOM", t: "scroll", axis: "v", mods: ["WIN"], m: 2 },
         { l: "WHEEL", t: "move", axis: "y", step: 4, drag: true, m: 1, b: { t: "click" } },
         { l: "VOL", t: "consumer", cw: "volume_up", ccw: "volume_down", m: 1, b: { t: "consumer", u: "play_pause" } },
-        null,
+        { l: "CUT", t: "midi_cc", cc: 74, ch: 0, mode: "rel_2c", m: 1 },
         null,
       ],
     },
@@ -251,6 +258,63 @@ describe("assignment round-trip", () => {
       { delay: 10, type: "scroll", dy: 1 },
       { delay: 10, type: "key", action: "up", key: "alt_l" },
     ]);
+  });
+
+  it("a note compiles to an on/off pair the firmware can hold", () => {
+    const f = compileAssignment({
+      kind: "midi", msg: "note", ch: 0, d1: 60, d2: 100, mode: "momentary",
+    })!;
+    expect(f.events).toEqual([
+      { delay: 0, type: "midi", m: "note_on", ch: 0, d1: 60, d2: 100 },
+      { delay: MIDI_TAP_MS, type: "midi", m: "note_off", ch: 0, d1: 60 },
+    ]);
+    // The gap is not just for tap mode. A momentary note also gets played
+    // straight through in places the hold path never sees — the Vision 6
+    // action card, key-logic variants, sequence steps — and a 0 ms note is
+    // inaudible there.
+    expect(f.events[1].delay).toBeGreaterThan(0);
+    // the payload's mode is what tells the firmware to hold rather than play
+    // straight through — the two modes emit the same pair otherwise
+    expect(f.midi?.mode).toBe("momentary");
+    const tap = compileAssignment({
+      kind: "midi", msg: "note", ch: 0, d1: 60, d2: 100, mode: "tap",
+    })!;
+    expect(tap.midi?.mode).toBe("tap");
+    expect(tap.events[1].delay).toBeGreaterThan(0);
+  });
+
+  it("cc and pc compile to a single message", () => {
+    const cc = compileAssignment({ kind: "midi", msg: "cc", ch: 2, d1: 74, d2: 64 })!;
+    expect(cc.events).toEqual([{ delay: 0, type: "midi", m: "cc", ch: 2, d1: 74, d2: 64 }]);
+    const pc = compileAssignment({ kind: "midi", msg: "pc", ch: 15, d1: 5 })!;
+    expect(pc.events).toEqual([{ delay: 0, type: "midi", m: "pc", ch: 15, d1: 5 }]);
+    // pc has no second data byte at all, on the wire or in the payload
+    expect(pc.midi?.d2).toBeUndefined();
+  });
+
+  it("midi data is clamped to what the wire can carry", () => {
+    const f = compileAssignment({ kind: "midi", msg: "note", ch: 99, d1: 999, d2: -5 })!;
+    expect(f.events[0]).toMatchObject({ ch: 15, d1: 127, d2: 0 });
+  });
+
+  it("midi is hardware, so it runs standalone and can sit in a sequence", () => {
+    expect(kindRequiresHost("midi")).toBe(false);
+    const seq: Assignment = {
+      kind: "sequence",
+      steps: [
+        { a: { kind: "midi", msg: "pc", ch: 0, d1: 3 }, delayMs: 0 },
+        { a: { kind: "keystroke", key: "f5" }, delayMs: 50 },
+      ],
+    };
+    // a pure-HID sequence compiles to one event stream the device plays by
+    // itself; if midi were missing from HID_KINDS this would need the app
+    expect(compileAssignment(seq)!.events.length).toBeGreaterThan(1);
+  });
+
+  it("note names follow the numbering DAWs print", () => {
+    expect(midiNoteName(60)).toBe("C3");
+    expect(midiNoteName(0)).toBe("C-2");
+    expect(midiNoteName(127)).toBe("G8");
   });
 
   it("menu assignment is device-only with no HID events", () => {
@@ -623,6 +687,65 @@ describe("dial (enc_module)", () => {
       }
       expect(working).toBeGreaterThan(0);
     }
+  });
+
+  // Mirror of the firmware's key tables (firmware/mkyada/hidmap.py): the
+  // labels resolve_key() can turn into a HID usage when the event carries no
+  // Windows `vk` — which is always the case for a preset combo. A label
+  // outside this set resolves to None on the device and the slot silently
+  // does nothing, which is exactly how an f13 preset would ship broken.
+  const RESOLVABLE_KEYS = new Set([
+    ..."abcdefghijklmnopqrstuvwxyz",
+    ..."0123456789",
+    ..."-=[]\\;'`,./",
+    "enter", "return", "esc", "escape", "backspace", "tab", "space",
+    "caps_lock", "up", "down", "left", "right", "delete", "home", "end",
+    "page_up", "page_down", "insert",
+    ...Array.from({ length: 12 }, (_, i) => `f${i + 1}`),
+  ]);
+
+  it("every preset key is one the firmware can resolve", () => {
+    for (const p of ENC_PRESETS) {
+      for (const s of encPresetSlots(p)) {
+        if (!s) continue;
+        const keys: string[] = [];
+        if (s.t === "keys") {
+          if (s.cw?.key) keys.push(s.cw.key);
+          if (s.ccw?.key) keys.push(s.ccw.key);
+        }
+        if (s.b?.t === "combo" && s.b.key) keys.push(s.b.key);
+        for (const k of keys) {
+          expect(RESOLVABLE_KEYS.has(k), `${p.id} slot ${s.l}: unresolvable key "${k}"`).toBe(true);
+        }
+      }
+    }
+  });
+
+  it("every preset consumer usage is one the firmware knows", () => {
+    for (const p of ENC_PRESETS) {
+      for (const s of encPresetSlots(p)) {
+        if (!s) continue;
+        const usages: string[] = [];
+        if (s.t === "consumer") {
+          if (s.cw) usages.push(s.cw);
+          if (s.ccw) usages.push(s.ccw);
+        }
+        if (s.b?.t === "consumer" && s.b.u) usages.push(s.b.u);
+        for (const u of usages) {
+          expect(MEDIA_USAGES, `${p.id} slot ${s.l}`).toContain(u);
+        }
+      }
+    }
+  });
+
+  // encSlotComplete's default branch is `return false`, so a slot type it
+  // does not know is dropped to null by normalizeEncSlots and never reaches
+  // the device — editable in the app, silently absent on the keypad.
+  it("a midi_cc slot survives normalization", () => {
+    const slot: EncModuleSlot = { l: "CUT", t: "midi_cc", cc: 74, ch: 0, mode: "rel_2c" };
+    expect(encSlotComplete(slot)).toBe(true);
+    const file = compileAssignment({ kind: "enc_module", slots: [slot] })!;
+    expect(file.enc_module?.slots[0]).toMatchObject({ t: "midi_cc", cc: 74, mode: "rel_2c" });
   });
 
   it("editing a preset's slots never mutates the preset", () => {

@@ -8,7 +8,7 @@
 import type { Assignment } from "./types";
 import type { WheelPreview } from "./oled-draw";
 import { KIND_ICON } from "../components/action-icons";
-import { encSlotComplete, kindRequiresHost } from "./macro-model";
+import { encSlotComplete, kindRequiresHost, midiNoteName } from "./macro-model";
 
 /** Which key the preview is standing in for. The speed editor prints "A > K3"
  * from it; callers that don't know (the Settings reference table shows one
@@ -191,6 +191,21 @@ const KINDS: KindMeta[] = [
       mtype: "picker",
       title: "MEDIA",
       summary: "Turn to browse every media key, tap to use the highlighted one, hold to reassign this key to it.",
+    },
+  },
+  {
+    id: "midi",
+    label: "MIDI message",
+    icon: KIND_ICON.midi,
+    // A MIDI message is typed input the same way a keystroke is: the keypad
+    // is its own MIDI device, so this works standalone with no app running —
+    // which is what lets one keypad be a macro pad and a MIDI controller.
+    category: "media",
+    host: false,
+    wheel: {
+      mtype: "card",
+      title: "MIDI",
+      summary: "Turn to send it again per detent (step a program, retrigger a note); press to send once.",
     },
   },
   // ── Automation ───────────────────────────────────────────────────────────
@@ -411,6 +426,19 @@ export function wheelPreview(a: Assignment, where?: PreviewWhere): WheelPreview 
     }
     case "scroll":
       return { screen: "card", title: "SCROLL", big: a.dir.toUpperCase(), line: "turn: scroll", hint: "step" };
+    case "midi":
+      return {
+        screen: "card",
+        title: "MIDI",
+        big:
+          a.msg === "cc"
+            ? `CC${a.d1}`
+            : a.msg === "pc"
+              ? `PC${a.d1}`
+              : midiNoteName(a.d1),
+        line: "turn: send",
+        hint: `ch ${(a.ch ?? 0) + 1}`,
+      };
     case "obs": {
       if (a.action === "setScene")
         return {

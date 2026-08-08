@@ -7,7 +7,7 @@ import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, ChevronRight, FolderOpen, Ke
 import { open } from "@tauri-apps/plugin-dialog";
 import { SOUND_EXTENSIONS, playSound } from "../lib/sound";
 import { readTextFile } from "../lib/fs";
-import type { Assignment, AssignmentVariants, EncModuleSlot, MacroFile, MicMode, ObsAction, SequenceStep, SoundHoldAction } from "../lib/types";
+import type { Assignment, AssignmentVariants, EncModuleSlot, MacroFile, MicMode, MidiCcMode, MidiMessage, ObsAction, SequenceStep, SoundHoldAction } from "../lib/types";
 import {
   ENC_LABEL_MAX,
   IS_MAC,
@@ -23,13 +23,15 @@ import {
   keyFromEvent,
   kindRequiresHost,
   migrateMacro,
+  MCU_NOTES,
+  midiNoteName,
   modifierDisplay,
   modsFromEvent,
   obsActionToRequest,
   sequenceIsPureHid,
   stepIsHid,
 } from "../lib/macro-model";
-import { ENC_PRESETS, encPresetSlots } from "../lib/enc-presets";
+import { ENC_PRESET_GROUPS, ENC_PRESETS, encPresetSlots } from "../lib/enc-presets";
 import { displayKey, untypeableChars } from "../lib/layout";
 import { allKinds, categoryLabel, wheelPreview, wheelSpec } from "../lib/kind-registry";
 import { OledPreview } from "./OledPreview";
@@ -237,6 +239,8 @@ export function AssignmentEditor({
               else if (kind === "volume") onChange({ kind: "volume" });
               else if (kind === "mic_level") onChange({ kind: "mic_level" });
               else if (kind === "scroll") onChange({ kind: "scroll", dir: "up" });
+              else if (kind === "midi")
+                onChange({ kind: "midi", msg: "note", ch: 0, d1: 60, d2: 100, mode: "momentary" });
               else if (kind === "menu") onChange({ kind: "menu", action: "confirm" });
               else if (kind === "launch") onChange({ kind: "launch", target: "" });
               else if (kind === "command") onChange({ kind: "command", command: "" });
@@ -426,6 +430,8 @@ export function AssignmentEditor({
           )}
         </>
       )}
+
+      {value.kind === "midi" && <MidiFields value={value} onChange={onChange} />}
 
       {value.kind === "menu" && (
         <ControlField label="Device menu action">
@@ -1422,6 +1428,15 @@ const ENC_SLOT_TYPES = [
   { id: "scroll" as const, label: "Mouse scroll" },
   { id: "move" as const, label: "Mouse drag (color wheels & sliders)" },
   { id: "consumer" as const, label: "Volume / media" },
+  { id: "midi_cc" as const, label: "MIDI control change (DAW knob)" },
+];
+
+const MIDI_CC_MODES: { id: MidiCcMode; label: string }[] = [
+  { id: "rel_2c", label: "Relative — two's complement (Reaper Relative 1)" },
+  { id: "rel_bin", label: "Relative — binary offset (Reaper Relative 2)" },
+  { id: "rel_sm", label: "Relative — sign magnitude (Reaper Relative 3)" },
+  { id: "rel_mackie", label: "Relative — Mackie V-Pot" },
+  { id: "abs", label: "Absolute 0–127 (can jump)" },
 ];
 
 function encDefaultSlot(t: EncModuleSlot["t"], i: number): EncModuleSlot {
@@ -1434,6 +1449,10 @@ function encDefaultSlot(t: EncModuleSlot["t"], i: number): EncModuleSlot {
       return { l: "DRAG", t: "move", axis: "y", step: 4, drag: true, m: 1, b: { t: "click" } };
     case "consumer":
       return { l: "VOL", t: "consumer", cw: "volume_up", ccw: "volume_down", m: 1, b: { t: "consumer", u: "play_pause" } };
+    case "midi_cc":
+      // CC 74 is the filter-cutoff convention, and relative is the default so
+      // the parameter never jumps on the first turn
+      return { l: "CC74", t: "midi_cc", cc: 74, ch: 0, mode: "rel_2c", m: 1 };
   }
 }
 
@@ -1636,6 +1655,56 @@ function EncSlotRow({
         </div>
       )}
 
+      {slot?.t === "midi_cc" && (
+        <div className="flex flex-wrap items-center gap-2 pl-9">
+          <span className="text-fg-faint text-xs">CC:</span>
+          <Input
+            className="w-16"
+            type="number"
+            min={0}
+            max={127}
+            aria-label="Controller number"
+            value={String(slot.cc ?? 0)}
+            onChange={(e) =>
+              onChange({ ...slot, cc: Math.max(0, Math.min(127, Number(e.target.value) || 0)) })
+            }
+          />
+          <span className="text-fg-faint text-xs">Channel:</span>
+          <Select
+            className="w-16"
+            aria-label="MIDI channel"
+            value={String(slot.ch ?? 0)}
+            onChange={(e) => onChange({ ...slot, ch: Number(e.target.value) })}
+          >
+            {Array.from({ length: 16 }, (_, i) => (
+              <option key={i} value={String(i)}>
+                {i + 1}
+              </option>
+            ))}
+          </Select>
+          <Select
+            className="w-64"
+            aria-label="Encoder encoding"
+            value={slot.mode ?? "rel_2c"}
+            onChange={(e) => onChange({ ...slot, mode: e.target.value as MidiCcMode })}
+          >
+            {MIDI_CC_MODES.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.label}
+              </option>
+            ))}
+          </Select>
+          {toggle(!!slot.inv, "Invert", () => onChange({ ...slot, inv: !slot.inv }))}
+          {slot.mode === "abs" && (
+            <p className="text-fg-faint w-full text-xs">
+              Absolute counts the value on the keypad, so it jumps the first time you turn it if
+              the DAW is somewhere else. Pick a relative mode unless your target only accepts
+              absolute — and set the matching mode on the DAW side too.
+            </p>
+          )}
+        </div>
+      )}
+
       {slot && (
         <div className="flex flex-wrap items-center gap-2 pl-9">
           <span className="text-fg-faint text-xs">Wheel press:</span>
@@ -1683,6 +1752,185 @@ function EncSlotRow({
   );
 }
 
+const MIDI_MSGS = [
+  { id: "note" as const, label: "Note — pads, clip & scene launch, Looper" },
+  { id: "cc" as const, label: "Control Change — faders, knobs, toggles" },
+  { id: "pc" as const, label: "Program Change — recall a preset" },
+];
+
+/** 0-127 spinner with the app's clamp, used for every MIDI data byte. */
+function MidiByte({
+  label,
+  value,
+  onChange,
+  hint,
+}: {
+  label: string;
+  value: number;
+  onChange: (n: number) => void;
+  hint?: string;
+}) {
+  return (
+    <Field label={label}>
+      <div className="flex items-center gap-2">
+        <Input
+          type="number"
+          min={0}
+          max={127}
+          className="w-20"
+          value={String(value)}
+          onChange={(e) => onChange(Math.max(0, Math.min(127, Number(e.target.value) || 0)))}
+        />
+        <span className="text-xs text-fg-faint">{hint ?? "0–127"}</span>
+      </div>
+    </Field>
+  );
+}
+
+function MidiFields({
+  value,
+  onChange,
+}: {
+  value: Extract<Assignment, { kind: "midi" }>;
+  onChange: (a: Assignment) => void;
+}) {
+  const isNote = value.msg === "note";
+  return (
+    <>
+      <ControlField label="Message">
+        <Select
+          aria-label="MIDI message"
+          value={value.msg}
+          onChange={(e) => {
+            const msg = e.target.value as MidiMessage;
+            // Each message means something different by d1, so reset it to
+            // that message's sane default rather than carrying a note number
+            // over into a controller number.
+            onChange({
+              ...value,
+              msg,
+              d1: msg === "note" ? 60 : msg === "cc" ? 1 : 0,
+              ...(msg === "pc" ? { d2: undefined } : { d2: value.d2 ?? 100 }),
+              ...(msg === "note" ? { mode: value.mode ?? "momentary" } : { mode: undefined }),
+            });
+          }}
+        >
+          {MIDI_MSGS.map((m) => (
+            <option key={m.id} value={m.id}>
+              {m.label}
+            </option>
+          ))}
+        </Select>
+      </ControlField>
+
+      <ControlField label="Channel">
+        <Select
+          aria-label="MIDI channel"
+          value={String(value.ch ?? 0)}
+          onChange={(e) => onChange({ ...value, ch: Number(e.target.value) })}
+        >
+          {Array.from({ length: 16 }, (_, i) => (
+            <option key={i} value={String(i)}>
+              {i + 1}
+            </option>
+          ))}
+        </Select>
+      </ControlField>
+
+      {isNote && (
+        <>
+          <ControlField label="Mackie Control transport">
+            <Select
+              aria-label="Mackie Control transport"
+              value={String(MCU_NOTES.find((m) => m.note === value.d1)?.note ?? "")}
+              onChange={(e) => {
+                const note = Number(e.target.value);
+                if (!e.target.value) return;
+                onChange({ ...value, ch: 0, d1: note, d2: 127, mode: "momentary" });
+              }}
+            >
+              <option value="">— not a transport button —</option>
+              {MCU_NOTES.map((m) => (
+                <option key={m.note} value={String(m.note)}>
+                  {m.label}
+                </option>
+              ))}
+            </Select>
+            <p className="text-xs text-fg-faint mt-1">
+              Shortcut to the note numbers Mackie Control uses. Pick "Mackie Control" as a control
+              surface in Logic, Cubase, Studio One or Pro Tools and transport works with no
+              mapping — the one route into the DAWs that have no MIDI-learn.
+            </p>
+          </ControlField>
+          <MidiByte
+            label="Note"
+            value={value.d1}
+            hint={`${midiNoteName(value.d1)} — 60 is middle C`}
+            onChange={(d1) => onChange({ ...value, d1 })}
+          />
+          <MidiByte
+            label="Velocity"
+            value={value.d2 ?? 100}
+            hint="how hard the pad is hit"
+            onChange={(d2) => onChange({ ...value, d2 })}
+          />
+          <Field label="While the key is held">
+            <div className="flex gap-2">
+              <Button
+                variant={value.mode !== "tap" ? "primary" : "default"}
+                onClick={() => onChange({ ...value, mode: "momentary" })}
+              >
+                Hold the note
+              </Button>
+              <Button
+                variant={value.mode === "tap" ? "primary" : "default"}
+                onClick={() => onChange({ ...value, mode: "tap" })}
+              >
+                Send a short tap
+              </Button>
+            </div>
+            <p className="text-xs text-fg-faint mt-1">
+              Hold is what Ableton's Looper and drum-rack pads expect — the note lasts exactly as
+              long as your finger. Tap suits one-shot samples that retrigger on every press.
+            </p>
+          </Field>
+        </>
+      )}
+
+      {value.msg === "cc" && (
+        <>
+          <MidiByte
+            label="Controller"
+            value={value.d1}
+            onChange={(d1) => onChange({ ...value, d1 })}
+          />
+          <MidiByte
+            label="Value"
+            value={value.d2 ?? 127}
+            hint="127 is the usual 'on' for a MIDI-learned button"
+            onChange={(d2) => onChange({ ...value, d2 })}
+          />
+        </>
+      )}
+
+      {value.msg === "pc" && (
+        <MidiByte
+          label="Program"
+          value={value.d1}
+          hint="the preset slot to recall"
+          onChange={(d1) => onChange({ ...value, d1 })}
+        />
+      )}
+
+      <p className="text-xs text-fg-faint">
+        Needs <strong>MIDI</strong> switched on for this keypad in Settings — it is off by default
+        and takes effect after a restart. Then MIDI-learn it in your DAW: hit Cmd/Ctrl+M in Ableton,
+        right-click the parameter in FL, or use the Actions list in Reaper.
+      </p>
+    </>
+  );
+}
+
 function EncModuleFields({
   value,
   onChange,
@@ -1697,6 +1945,11 @@ function EncModuleFields({
     next[i] = s;
     onChange({ ...value, slots: next });
   };
+  // The picker resets itself to the placeholder after applying, so the note
+  // of the set you just applied is the only thing left telling you what the
+  // six tiles now do.
+  const [appliedPreset, setAppliedPreset] = useState<string | null>(null);
+  const applied = ENC_PRESETS.find((p) => p.id === appliedPreset);
 
   return (
     <>
@@ -1706,19 +1959,26 @@ function EncModuleFields({
           value=""
           onChange={(e) => {
             const p = ENC_PRESETS.find((x) => x.id === e.target.value);
-            if (p) onChange({ ...value, slots: encPresetSlots(p) });
+            if (!p) return;
+            onChange({ ...value, slots: encPresetSlots(p) });
+            setAppliedPreset(p.id);
           }}
         >
           <option value="">— pick a program —</option>
-          {ENC_PRESETS.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.label}
-            </option>
+          {ENC_PRESET_GROUPS.map((g) => (
+            <optgroup key={g.id} label={g.label}>
+              {ENC_PRESETS.filter((p) => p.group === g.id).map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.label}
+                </option>
+              ))}
+            </optgroup>
           ))}
         </Select>
         <p className="text-fg-faint text-xs mt-1">
-          Fills the six slots with that program's stock shortcuts — defaults, every slot stays
-          editable below.
+          {applied
+            ? `${applied.note} Every slot stays editable below.`
+            : "Fills the six slots with that program's stock shortcuts — defaults, every slot stays editable below."}
         </p>
       </Field>
 

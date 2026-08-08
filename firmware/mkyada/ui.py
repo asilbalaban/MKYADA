@@ -135,7 +135,8 @@ KIND_ICON = {"keystroke": "keyboard", "combo": "keyboard", "text": "text",
              "scroll": "scroll-v", "menu": "layers", "sequence": "sequence",
              "launch": "rocket", "command": "terminal", "sound": "music",
              "mic": "mic", "mic_level": "mic", "webhook": "webhook",
-             "obs": "camera", "obs_center": "camera", "enc_module": "dial"}
+             "obs": "camera", "obs_center": "camera", "enc_module": "dial",
+             "midi": "note"}
 
 # mtype:"obs" menu fields the app may push (proto v13): a re-send while the
 # menu is open merges only the fields present in the message into the open
@@ -280,6 +281,9 @@ class Ui:
         elif kind == "scroll":
             sc = data.get("scroll")
             sub = sc.get("dir") if isinstance(sc, dict) else None
+        elif kind == "midi":
+            m = data.get("midi")
+            sub = m.get("msg") if isinstance(m, dict) else None
         elif kind == "menu":
             sub = data.get("menu")
         # The icon a macro picks for itself, by name. Validated in oled/
@@ -973,6 +977,11 @@ class Ui:
         elif kind == "scroll":
             self._card_state("scroll", path, tr("scroll_t"), name,
                              tr("hint_scroll"))
+        elif kind == "midi":
+            # turn = send it again per detent (step a program, retrigger a
+            # note); CONFIRM = send once
+            self._card_state("midi", path, tr("midi_t"), name,
+                             tr("hint_midi"))
         elif kind == "media":
             # browse every media key: turn to highlight, tap to fire once,
             # hold to reassign this key to the highlighted one
@@ -1327,6 +1336,38 @@ class Ui:
             if usage:
                 for _ in range(min(n, 4)):
                     eng.consumer_tap(usage)
+        elif t == "midi_cc":
+            # No tap cap here, unlike the branches above: a CC is one 3-byte
+            # message with no sleep, so a fast spin costs nothing.
+            try:
+                cc = clamp(int(s.get("cc") or 0), 0, 127)
+                chan = clamp(int(s.get("ch") or 0), 0, 15)
+            except (TypeError, ValueError):
+                cc, chan = 0, 0
+            mode = s.get("mode") or "rel_2c"
+            if mode == "abs":
+                # An absolute knob has to remember where it is. That state
+                # lives in the ctx, not in s: s is the parsed macro file and
+                # is dropped when the module closes.
+                vals = c.get("cc")
+                if vals is None:
+                    vals = c["cc"] = {}
+                cur = vals.get(c["sel"], 64)
+                cur = clamp(cur + (n if pos else -n), 0, 127)
+                vals[c["sel"]] = cur
+                eng.midi_send("cc", chan, cc, cur)
+            else:
+                # Relative: send the DELTA, so the DAW's own value is the only
+                # one that matters and the knob can never jump. 63 is the most
+                # a 7-bit relative encoding can say in one message.
+                step = min(n, 63)
+                if mode == "rel_bin":       # binary offset: 64 = no change
+                    v = 64 + step if pos else 64 - step
+                elif mode in ("rel_sm", "rel_mackie"):  # sign in bit 6
+                    v = step if pos else 0x40 + step
+                else:                       # two's complement (the default)
+                    v = step if pos else 128 - step
+                eng.midi_send("cc", chan, cc, v)
 
     def _encmod_fire(self, s):
         """The encoder button inside the module: the slot's own press action
@@ -1553,7 +1594,7 @@ class Ui:
             if press in (K_PSH, K_CONFIRM):
                 self._optlist_press(press)
                 return
-        elif mode in ("key", "scroll"):
+        elif mode in ("key", "scroll", "midi"):
             if d:
                 for _ in range(min(abs(d), 4)):
                     self.app.play_file(path=c["path"], trigger=None)
