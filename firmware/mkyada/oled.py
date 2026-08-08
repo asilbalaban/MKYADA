@@ -81,6 +81,7 @@ class Oled:
         self._cells = None  # per-tile cache for the grid
         self._menu = None   # (chrome, rows) cache for the lists
         self._chrome = None # grid chrome signature (band/page/state)
+        self._emod = None   # per-tile cache for the Dial module
         for _ in range(INIT_TRIES):
             try:
                 import board
@@ -241,6 +242,8 @@ class Oled:
             self._chrome = None
         if key != "menu":
             self._menu = None
+        if key != "encmod":
+            self._emod = None
         self.fb.clear()
         return True
 
@@ -554,6 +557,47 @@ class Oled:
             else:
                 self._txt(f.fit(want[0], 37), mid, y + 8 + pad, 0.5, on)
         self.paint("grid")
+
+    def show_encmod(self, name, labels, sel):
+        """Dial module: title strip + a 3x2 tile map of the six slots,
+        mirroring the physical key layout the way the grid does. The filled
+        tile is the slot the wheel drives; a key press moves it. An empty
+        slot is a bare dash — that key is dead while the module is open.
+
+        Same repaint contract as the grid: only tiles whose content changed
+        are redrawn, so hopping slots while a color wheel is live costs two
+        tiles, never a full frame."""
+        if not self.display:
+            return
+        fb = self.fb
+        f = self.font
+        fresh = self._last != "encmod" or self._emod is None
+        if fresh:
+            fb.clear()
+            self._emod = [None] * 6
+            self._bar9(f.fit(upper(name), 86), "DIAL")
+        top = 11
+        h = 25
+        for k in range(6):
+            lab = labels[k] if k < len(labels) else None
+            want = (lab, k == sel)
+            if self._emod[k] == want:
+                continue
+            self._emod[k] = want
+            x = TILE_X[k % 3]
+            y = top + (k // 3) * (h + 1)
+            fb.rect(x, y, TILE_W, h, 0)
+            mid = x + TILE_W // 2 + 1
+            ty = y + (h - 7) // 2
+            if lab is None:
+                self._txt("-", mid, ty, 0.5, False)
+            elif want[1]:
+                fb.rfill(x, y, TILE_W, h, 1, 0)
+                self._txt(f.fit(lab, 37), mid, ty, 0.5, True)
+            else:
+                fb.rframe(x, y, TILE_W, h, 1)
+                self._txt(f.fit(lab, 37), mid, ty, 0.5, False)
+        self.paint("encmod")
 
     def update_band(self, band, page=None, st=None):
         """Repaint ONLY the band on the live grid. The record dot blinks twice

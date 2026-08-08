@@ -5,6 +5,9 @@
 #   HID absolute-position mouse (custom) — two reports on one interface:
 #     report 2 (pointer): buttons(1B) + X(16-bit abs 0..32767) + Y(16-bit abs)
 #     report 4 (scroll): wheel(8-bit rel, vertical) + pan(8-bit rel, AC Pan)
+#     report 5 (rel pointer): buttons(1B) + dX(8-bit rel) + dY(8-bit rel) —
+#       nudges the cursor from wherever the user has it (Dial drag slots);
+#       an absolute report can't do that without knowing the position.
 #     Split on purpose: X/Y are absolute, so a wheel tick riding the same
 #     report would re-assert the last known position and teleport the cursor
 #     (a scroll-only macro used to jump the mouse to screen center). A
@@ -87,6 +90,29 @@ ABS_MOUSE_DESCRIPTOR = bytes((
     0x95, 0x01,        #     Report Count (1)
     0x81, 0x06,        #     Input (Data, Variable, Relative)
     0xC0,              #   End Collection
+    0x85, 0x05,        #   Report ID (5) — relative pointer (Dial drag)
+    0x09, 0x01,        #   Usage (Pointer)
+    0xA1, 0x00,        #   Collection (Physical)
+    0x05, 0x09,        #     Usage Page (Buttons)
+    0x19, 0x01,        #     Usage Minimum (1)
+    0x29, 0x03,        #     Usage Maximum (3)
+    0x15, 0x00,        #     Logical Minimum (0)
+    0x25, 0x01,        #     Logical Maximum (1)
+    0x95, 0x03,        #     Report Count (3)
+    0x75, 0x01,        #     Report Size (1)
+    0x81, 0x02,        #     Input (Data, Variable, Absolute)
+    0x95, 0x01,        #     Report Count (1)
+    0x75, 0x05,        #     Report Size (5)
+    0x81, 0x03,        #     Input (Constant) — padding
+    0x05, 0x01,        #     Usage Page (Generic Desktop)
+    0x09, 0x30,        #     Usage (X)
+    0x09, 0x31,        #     Usage (Y)
+    0x15, 0x81,        #     Logical Minimum (-127)
+    0x25, 0x7F,        #     Logical Maximum (127)
+    0x75, 0x08,        #     Report Size (8)
+    0x95, 0x02,        #     Report Count (2)
+    0x81, 0x06,        #     Input (Data, Variable, Relative)
+    0xC0,              #   End Collection
     0xC0,              # End Collection
 ))
 
@@ -94,9 +120,9 @@ abs_mouse = usb_hid.Device(
     report_descriptor=ABS_MOUSE_DESCRIPTOR,
     usage_page=0x01,
     usage=0x02,
-    report_ids=(2, 4),
-    in_report_lengths=(5, 2),  # pointer / scroll (see engine.py)
-    out_report_lengths=(0, 0),
+    report_ids=(2, 4, 5),
+    in_report_lengths=(5, 2, 3),  # pointer / scroll / rel pointer (engine.py)
+    out_report_lengths=(0, 0, 0),
 )
 
 def usb_drive_wanted():

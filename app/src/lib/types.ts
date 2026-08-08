@@ -197,6 +197,7 @@ export interface MacroFile {
     | "webhook"
     | "obs"
     | "obs_center"
+    | "enc_module"
     | "sequence";
   combo?: { mods: string[]; key: string };
   text?: string;
@@ -242,6 +243,9 @@ export interface MacroFile {
    * which widgets show, which audio input the mic widgets follow, what the
    * encoder does and what the six keys fire while the dashboard is open */
   obs_center?: ObsCenterConfig;
+  /** enc_module kind: the Dial module's six slots — parsed in full by the
+   * firmware when the module opens (device-native, no host round-trip) */
+  enc_module?: EncModuleConfig;
   /** sequence kind: the editable steps. Pure-HID sequences also compile
    * their steps into `events` (standalone); mixed ones leave `events` empty
    * and the desktop app orchestrates the steps. */
@@ -358,6 +362,49 @@ export interface ObsCenterConfig {
   quickKeys?: (ObsQuickKey | null)[];
 }
 
+/** The Dial module's encoder-button action: what pressing the encoder does
+ * while that slot is selected (Space on a jog slot, a left click on a drag
+ * slot, a media tap on a volume slot). Absent/null = the press does nothing. */
+export type EncModuleBtn =
+  | { t: "combo"; mods: string[]; key: string }
+  | { t: "click" }
+  | { t: "consumer"; u: string };
+
+/** One Dial slot: what turning the encoder does while it is selected. Field
+ * names are the on-device schema verbatim (the firmware parses the macro file
+ * directly, so there is no mapping layer):
+ * - keys: CW / CCW each send a full modifier combo per detent (jog, zoom,
+ *   trim, nudge, brush size)
+ * - scroll: vertical or horizontal wheel ticks, optional modifiers held
+ *   around them (Cmd+scroll = zoom)
+ * - move: relative cursor movement on one axis per detent; `drag` holds the
+ *   left button through the turn gesture — for controls with no shortcut
+ *   (DaVinci color wheels: hover the control, turn the encoder)
+ * - consumer: media/volume usages per detent */
+export type EncModuleSlot = {
+  /** OLED tile label, ≤6 chars (clamped again on the device) */
+  l: string;
+  /** sensitivity: units per detent before velocity acceleration (1–10) */
+  m?: number;
+  /** invert the turn direction */
+  inv?: boolean;
+  /** encoder-button action while this slot is selected */
+  b?: EncModuleBtn | null;
+} & (
+  | { t: "keys"; cw?: { mods: string[]; key: string }; ccw?: { mods: string[]; key: string } }
+  | { t: "scroll"; axis: "v" | "h"; mods?: string[] }
+  | { t: "move"; axis: "x" | "y"; step?: number; drag?: boolean }
+  | { t: "consumer"; cw?: string; ccw?: string }
+);
+
+/** The Dial module (kind "enc_module") per-key configuration. Lives in the
+ * macro file so it travels with profiles and backups. Fully device-native:
+ * every slot action is plain HID, so the module works with the app closed. */
+export interface EncModuleConfig {
+  /** exactly 6 entries, null = empty slot (that key is dead in the module) */
+  slots: (EncModuleSlot | null)[];
+}
+
 /** Live OBS session numbers pushed from the Rust client (`obs:live` event)
  * while an OBS Center is open. Mirrors `obs::ObsLive`: every field optional,
  * each event carries only what changed. */
@@ -460,6 +507,9 @@ export type Assignment = (
   | ({ kind: "obs" } & ObsRequest)
   // open the live OBS dashboard on the Vision 6 screen (host + screen only)
   | { kind: "obs_center"; center?: ObsCenterConfig }
+  // Dial: a device-native encoder toolset — the key opens a 6-slot module on
+  // the Vision 6 screen, keys select a slot, the wheel drives it (pure HID)
+  | { kind: "enc_module"; slots?: (EncModuleSlot | null)[] }
   // Stream Deck-style multi action: run several actions with one press
   | { kind: "sequence"; steps: SequenceStep[] }
 ) & {

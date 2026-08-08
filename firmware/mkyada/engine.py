@@ -48,7 +48,8 @@ class Engine:
         self.consumer = _find_device(0x0C, 0x01)
         self.mods = 0        # modifier byte
         self.keys = []       # pressed usages (max 6)
-        self.buttons = 0     # mouse button byte
+        self.buttons = 0     # mouse button byte (abs pointer, id 2)
+        self.rel_buttons = 0  # mouse button byte (rel pointer, id 5)
         self.mx = 16384      # last absolute position (0..32767)
         self.my = 16384
         self.sw = 1919       # screen size - 1 for scaling
@@ -88,12 +89,14 @@ class Engine:
         self._kbd_report()
 
     # --- mouse ---
-    # Two reports on the mouse interface (boot.py ABS_MOUSE_DESCRIPTOR):
+    # Three reports on the mouse interface (boot.py ABS_MOUSE_DESCRIPTOR):
     # pointer (id 2) carries buttons + absolute X/Y, scroll (id 4) carries
-    # the relative wheel/pan bytes ONLY. Absolute X/Y in a scroll report
-    # would re-assert the last known position and teleport the cursor to
-    # wherever the previous macro left it (screen center after boot).
-    # usb_hid rejects a wrong length, so these packs and boot.py's
+    # the relative wheel/pan bytes ONLY, rel pointer (id 5) carries its own
+    # button state + relative dX/dY. Absolute X/Y in a scroll report would
+    # re-assert the last known position and teleport the cursor to wherever
+    # the previous macro left it (screen center after boot); the rel report
+    # exists so Dial drag slots can nudge the cursor from wherever the USER
+    # left it. usb_hid rejects a wrong length, so these packs and boot.py's
     # in_report_lengths must stay in lockstep.
     def _mouse_report(self):
         self.mouse.send_report(struct.pack(
@@ -116,6 +119,25 @@ class Engine:
         else:
             self.buttons &= ~bit & 0xFF
         self._mouse_report()
+
+    def _rel_report(self, dx=0, dy=0):
+        self.mouse.send_report(struct.pack(
+            "<Bbb", self.rel_buttons & 0x07,
+            max(-127, min(127, int(dx))), max(-127, min(127, int(dy)))), 5)
+
+    def rel_move(self, dx, dy):
+        """Nudge the cursor relative to wherever it is now (report id 5).
+        The id-2 abs state (mx/my) is deliberately untouched: abs macros
+        keep replaying to their recorded positions regardless of nudges."""
+        self._rel_report(dx, dy)
+
+    def rel_button(self, name, down):
+        bit = {"left": 0x01, "right": 0x02, "middle": 0x04}.get(name, 0x01)
+        if down:
+            self.rel_buttons |= bit
+        else:
+            self.rel_buttons &= ~bit & 0xFF
+        self._rel_report()
 
     SCROLL_MAX_TICKS = 20  # per event/burst; matches the app's amount clamp
 
@@ -173,6 +195,11 @@ class Engine:
         if self.buttons:
             self.buttons = 0
             self._mouse_report()
+        # Same rule for the rel pointer: only report when a drag is actually
+        # held, and a zero-delta release leaves the cursor where it is.
+        if self.rel_buttons:
+            self.rel_buttons = 0
+            self._rel_report()
 
     # --- direct combo (serial "keys" command / tiny bindings) ---
     def tap_combo(self, mod_names, key_label, hold_ms=30):

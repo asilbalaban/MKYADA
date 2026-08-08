@@ -3,7 +3,7 @@
 // Source:    icons/src/icons.txt
 // Generator: node scripts/build-icons.mjs
 //
-// 270 icons, 21 categories, 2160 bytes of pixels.
+// 271 icons, 21 categories, 2168 bytes of pixels.
 // Layout: 8 bytes per icon, one per row, bit 7 = leftmost pixel —
 // byte for byte what firmware/mkyada/icons.py ships to the board.
 //
@@ -21,7 +21,7 @@ export const ICON_CATEGORIES: readonly (readonly [string, readonly string[]])[] 
   ["düzenleme", ["copy", "paste", "cut", "undo", "redo", "save", "trash", "duplicate", "select-all", "replace", "new", "open", "rename", "edit"]],
   ["metin", ["bold", "italic", "underline", "strikethrough", "align-left", "align-center", "align-right", "list", "indent", "quote", "link", "code", "text"]],
   ["dosya", ["file", "folder", "folder-open", "archive", "download", "upload", "cloud", "cloud-up", "cloud-down", "print", "disk"]],
-  ["sistem", ["power", "restart", "sleep", "settings", "wrench", "tools", "cpu", "memory", "usb", "battery", "plug", "bug", "terminal", "database", "server"]],
+  ["sistem", ["power", "restart", "sleep", "settings", "wrench", "tools", "cpu", "memory", "usb", "battery", "plug", "bug", "terminal", "database", "server", "dial"]],
   ["ağ", ["globe", "wifi", "signal", "share", "send", "mail", "chat", "bell", "at", "user", "users"]],
   ["durum", ["check", "cross", "warning", "info", "question", "plus", "minus", "star", "heart", "flag", "lock", "unlock", "eye", "eye-off", "shield", "tag"]],
   ["zaman", ["clock", "timer", "alarm", "calendar", "hourglass", "history"]],
@@ -51,27 +51,27 @@ export const ICON_NAMES: readonly string[] = [
   "quote", "link", "code", "text", "file", "folder", "folder-open", "archive", "download",
   "upload", "cloud", "cloud-up", "cloud-down", "print", "disk", "power", "restart", "sleep",
   "settings", "wrench", "tools", "cpu", "memory", "usb", "battery", "plug", "bug", "terminal",
-  "database", "server", "globe", "wifi", "signal", "share", "send", "mail", "chat", "bell",
-  "at", "user", "users", "check", "cross", "warning", "info", "question", "plus", "minus",
-  "star", "heart", "flag", "lock", "unlock", "eye", "eye-off", "shield", "tag", "clock",
-  "timer", "alarm", "calendar", "hourglass", "history", "window", "windows", "tabs", "split",
-  "layout", "grid", "layers", "pin", "minimize", "maximize", "close", "fullscreen", "brush",
-  "pen", "pencil", "eraser", "palette", "crop", "zoom-in", "zoom-out", "move", "rotate",
-  "ruler", "shapes", "gamepad", "dice", "target", "trophy", "rocket", "lightning", "fire",
-  "sparkle", "search", "filter", "sort", "bookmark", "key", "gift", "coffee", "bulb", "magnet",
-  "map-pin", "calculator", "chart", "percent", "hash", "keyboard", "mouse", "scroll-v",
-  "scroll-h", "sequence", "webhook", "macro", "brightness-low", "brightness-high", "contrast",
-  "screen-lock", "profile-switch", "cube", "bezier", "workspace", "sketch", "extrude",
-  "revolve", "fillet", "chamfer", "split-body", "view-top", "view-front", "view-side",
-  "view-iso", "hide-body", "show-body", "measure-dist", "measure-angle", "constraint", "origin",
-  "pen-tool", "select-arrow", "select-direct", "node-add", "node-remove", "path-union",
-  "path-subtract", "path-intersect", "path-exclude", "align-l", "align-c", "align-r", "align-t",
-  "align-b", "distribute-h", "distribute-v", "layer-lock", "mask", "artboard", "clipboard",
-  "clipboard-history", "snap-left", "snap-right", "snap-max", "task-manager", "app-switch",
-  "always-on-top", "screen-record", "printer-3d", "preheat", "auto-home", "bed-level",
-  "filament", "nozzle", "fan", "print-pause", "ghost", "pacman", "invader", "invader2", "alien",
-  "skull", "robot", "mushroom", "sword", "coin", "bomb", "ufo", "cat", "smiley", "joystick",
-  "arcade", "tetromino", "crown", "potion", "chest",
+  "database", "server", "dial", "globe", "wifi", "signal", "share", "send", "mail", "chat",
+  "bell", "at", "user", "users", "check", "cross", "warning", "info", "question", "plus",
+  "minus", "star", "heart", "flag", "lock", "unlock", "eye", "eye-off", "shield", "tag",
+  "clock", "timer", "alarm", "calendar", "hourglass", "history", "window", "windows", "tabs",
+  "split", "layout", "grid", "layers", "pin", "minimize", "maximize", "close", "fullscreen",
+  "brush", "pen", "pencil", "eraser", "palette", "crop", "zoom-in", "zoom-out", "move",
+  "rotate", "ruler", "shapes", "gamepad", "dice", "target", "trophy", "rocket", "lightning",
+  "fire", "sparkle", "search", "filter", "sort", "bookmark", "key", "gift", "coffee", "bulb",
+  "magnet", "map-pin", "calculator", "chart", "percent", "hash", "keyboard", "mouse",
+  "scroll-v", "scroll-h", "sequence", "webhook", "macro", "brightness-low", "brightness-high",
+  "contrast", "screen-lock", "profile-switch", "cube", "bezier", "workspace", "sketch",
+  "extrude", "revolve", "fillet", "chamfer", "split-body", "view-top", "view-front",
+  "view-side", "view-iso", "hide-body", "show-body", "measure-dist", "measure-angle",
+  "constraint", "origin", "pen-tool", "select-arrow", "select-direct", "node-add",
+  "node-remove", "path-union", "path-subtract", "path-intersect", "path-exclude", "align-l",
+  "align-c", "align-r", "align-t", "align-b", "distribute-h", "distribute-v", "layer-lock",
+  "mask", "artboard", "clipboard", "clipboard-history", "snap-left", "snap-right", "snap-max",
+  "task-manager", "app-switch", "always-on-top", "screen-record", "printer-3d", "preheat",
+  "auto-home", "bed-level", "filament", "nozzle", "fan", "print-pause", "ghost", "pacman",
+  "invader", "invader2", "alien", "skull", "robot", "mushroom", "sword", "coin", "bomb", "ufo",
+  "cat", "smiley", "joystick", "arcade", "tetromino", "crown", "potion", "chest",
 ];
 
 // One hex string rather than an array of arrays: it keeps this generated
@@ -100,43 +100,44 @@ const PIX_HEX =
   "3e63c2c0c3663c087c0c183764fa020724bd7e66667ebd24070f1d70e0c08000c76f3a18" +
   "2c46c3005affbdc3c3bdff5affaaaaaaaaff4242183c18185a5a7a0e00fd85bdbd85fd00" +
   "2424ff81817e1818bd7e7effff7ebd81ff81a191a181bdff7ec37ec37ec37e00ffa3ff00" +
-  "ffa3ff003c5a99ff995a3c00003c42992418000003030f0f3f3fffff07053d42819e90f0" +
-  "80e0f8fef8e08000ffc3a5998181ff007e8181817e306000183c424242ff00183c429da5" +
-  "a59c403e3c42423c7e81810066999966fd858500010386ccec7c3810c3e77e3c3c7ee7c3" +
-  "1824245a5a9981ff1818003818183c003c4283060c0c000c181818ffff181800000000ff" +
-  "ff0000001818fe7c386cc60066ffffff7e3c1800c0dededec0c0c0003c4242ffdbc3ff00" +
-  "3c4240ffdbc3ff00003c429999423c00033d439ab2443cc07ec3c3c3663c18007fc1a191" +
-  "898583ff3c4289898e81423c247ec3cbcbc37e00c37e99999d817ec342ff81a981a9ff00" +
-  "ff422418182442ff3e63d3ddc3663c08ffff81818181ff00efef81bfa1e1213fe7998181" +
-  "8181ff00ff9999999999ff00ff81ff999999ff00cccc00cccc00cccc183c7eff007e3c18" +
-  "18183c7e7e3c18180000000000ffff00ffffc3c3c3c3ffff7ec3a59999a5c37ee7819918" +
-  "189981e7070f1d3878783800070f1d3870e0c08003070e1c3870e0c0070d1b366c687800" +
-  "3c5ac399a5c37c1c3030ff3033330f037c92ba927c0c06037c82ba827c0c0603183c66db" +
-  "db663c183c66c3c2c0663c40ffa981a981a9ff003c42818181817e007ea5e781a5e7817e" +
-  "ff81b1818d81ff003c4299bd99423c00ffbdbd7e3c183c7e183c5a5a7e5ac3810e1c387c" +
-  "0c183060081c3a766e4e6c3810387cfe7c3810007c8282827c0c0603ff7e3c1818181800" +
-  "2672f826222622007e424242425a66003c429999423c0c0f247eff819999ff0000fc8586" +
-  "868578ff3c4281995a3c183cc3c3c3c3c37e00003c429999423c1808ff81ffa981a9ff00" +
-  "00030f3fff00ff00c1c20408102043832424ff24ff242400ff81ab81b581ff003c5a9981" +
-  "8181423c183c660000663c18002466c3c3662400dfc000dfc000dfc0fc8485878584fc00" +
-  "bdc3bd81bdc3bd0000003c7e7e3c000018813c66663c81183c7af9f9f9f97a3cff99a5bd" +
-  "9981ff3c3f21e19f8181ff003f43c2868484fc00c0c0301c06030300ffa1a1a1a1a1ff00" +
-  "ff83868d99b1ff00183c7e18ff8181ff10362321212336103f4181818181ff001f3161c1" +
-  "8181ff00e7a5a5a5a5a5e700ffffff818181ff00ff81bdbdbd81ff00ff8787878787ff00" +
-  "1824428181422418e7810081810081e77effffffffff7e008181a5ffa581810080809884" +
-  "8281ff003c427e7e00ff0000808080808698b0ff387c6c7c38101000c0e0f0f8fce0b00c" +
-  "c0a09088849ca0203c243c00187e18003c243c00007e0000fc84878181e1213ffc84849e" +
-  "90f00000fc84bdbdbd3d013ffc84a5a5a525213f80be80b880be8000107c1038107c1000" +
-  "017d011d017d0100ffdadad8d8c0c000c0c0d8d8dadaff009999999999999900ff0000ff" +
-  "0000ff003c427e00183c7efff5f2f5f2f5f2f50042bd3c3c3c3cbd423c5ac3c3c3c3c37e" +
-  "3c5ac3dbd3dec37efff1f1f1f1f1f1ffff8f8f8f8f8f8fffff81bdbdbdbd81ffff818595" +
-  "a5a5ff00f88888fb09090f0018183cff818181ffff8199bd9981ff18ff81bd81c3423c18" +
-  "1818242424667e3c82c6aa10aac6820000030f3fff003c663c4299bd99423c0f7e427e3c" +
-  "3c1818083c64c4999123263cff81b5b5b581ff003c7edbffffffffb63c7ef8f0f0f87e3c" +
-  "24183c66ffbd8142183c7edbff245aa53c7edbff7e2442817effdbdbff7e5a5a187ebddb" +
-  "ff7e42663c7edbff7e3c243c03060c1830f830503c7edbdbdbdb7e3c060c3c7effff7e3c" +
-  "3c42ffaa7e24428181c3ffa5ff997e3c3c7edbffbdc37e3c183c18187effff7eff81bdbd" +
-  "81dbff81c0c0c0c0f0f0000099dbffffff7e7e00423c24247effff7e7ec3ffdbffc3ff00";
+  "ffa3ff003c5a99818181423c3c5a99ff995a3c00003c42992418000003030f0f3f3fffff" +
+  "07053d42819e90f080e0f8fef8e08000ffc3a5998181ff007e8181817e306000183c4242" +
+  "42ff00183c429da5a59c403e3c42423c7e81810066999966fd858500010386ccec7c3810" +
+  "c3e77e3c3c7ee7c31824245a5a9981ff1818003818183c003c4283060c0c000c181818ff" +
+  "ff181800000000ffff0000001818fe7c386cc60066ffffff7e3c1800c0dededec0c0c000" +
+  "3c4242ffdbc3ff003c4240ffdbc3ff00003c429999423c00033d439ab2443cc07ec3c3c3" +
+  "663c18007fc1a191898583ff3c4289898e81423c247ec3cbcbc37e00c37e99999d817ec3" +
+  "42ff81a981a9ff00ff422418182442ff3e63d3ddc3663c08ffff81818181ff00efef81bf" +
+  "a1e1213fe79981818181ff00ff9999999999ff00ff81ff999999ff00cccc00cccc00cccc" +
+  "183c7eff007e3c1818183c7e7e3c18180000000000ffff00ffffc3c3c3c3ffff7ec3a599" +
+  "99a5c37ee7819918189981e7070f1d3878783800070f1d3870e0c08003070e1c3870e0c0" +
+  "070d1b366c6878003c5ac399a5c37c1c3030ff3033330f037c92ba927c0c06037c82ba82" +
+  "7c0c0603183c66dbdb663c183c66c3c2c0663c40ffa981a981a9ff003c42818181817e00" +
+  "7ea5e781a5e7817eff81b1818d81ff003c4299bd99423c00ffbdbd7e3c183c7e183c5a5a" +
+  "7e5ac3810e1c387c0c183060081c3a766e4e6c3810387cfe7c3810007c8282827c0c0603" +
+  "ff7e3c18181818002672f826222622007e424242425a66003c429999423c0c0f247eff81" +
+  "9999ff0000fc8586868578ff3c4281995a3c183cc3c3c3c3c37e00003c429999423c1808" +
+  "ff81ffa981a9ff0000030f3fff00ff00c1c20408102043832424ff24ff242400ff81ab81" +
+  "b581ff003c5a99818181423c183c660000663c18002466c3c3662400dfc000dfc000dfc0" +
+  "fc8485878584fc00bdc3bd81bdc3bd0000003c7e7e3c000018813c66663c81183c7af9f9" +
+  "f9f97a3cff99a5bd9981ff3c3f21e19f8181ff003f43c2868484fc00c0c0301c06030300" +
+  "ffa1a1a1a1a1ff00ff83868d99b1ff00183c7e18ff8181ff10362321212336103f418181" +
+  "8181ff001f3161c18181ff00e7a5a5a5a5a5e700ffffff818181ff00ff81bdbdbd81ff00" +
+  "ff8787878787ff001824428181422418e7810081810081e77effffffffff7e008181a5ff" +
+  "a5818100808098848281ff003c427e7e00ff0000808080808698b0ff387c6c7c38101000" +
+  "c0e0f0f8fce0b00cc0a09088849ca0203c243c00187e18003c243c00007e0000fc848781" +
+  "81e1213ffc84849e90f00000fc84bdbdbd3d013ffc84a5a5a525213f80be80b880be8000" +
+  "107c1038107c1000017d011d017d0100ffdadad8d8c0c000c0c0d8d8dadaff0099999999" +
+  "99999900ff0000ff0000ff003c427e00183c7efff5f2f5f2f5f2f50042bd3c3c3c3cbd42" +
+  "3c5ac3c3c3c3c37e3c5ac3dbd3dec37efff1f1f1f1f1f1ffff8f8f8f8f8f8fffff81bdbd" +
+  "bdbd81ffff818595a5a5ff00f88888fb09090f0018183cff818181ffff8199bd9981ff18" +
+  "ff81bd81c3423c181818242424667e3c82c6aa10aac6820000030f3fff003c663c4299bd" +
+  "99423c0f7e427e3c3c1818083c64c4999123263cff81b5b5b581ff003c7edbffffffffb6" +
+  "3c7ef8f0f0f87e3c24183c66ffbd8142183c7edbff245aa53c7edbff7e2442817effdbdb" +
+  "ff7e5a5a187ebddbff7e42663c7edbff7e3c243c03060c1830f830503c7edbdbdbdb7e3c" +
+  "060c3c7effff7e3c3c42ffaa7e24428181c3ffa5ff997e3c3c7edbffbdc37e3c183c1818" +
+  "7effff7eff81bdbd81dbff81c0c0c0c0f0f0000099dbffffff7e7e00423c24247effff7e" +
+  "7ec3ffdbffc3ff00";
 
 const PIX = new Uint8Array(PIX_HEX.length / 2);
 for (let i = 0; i < PIX.length; i++) {

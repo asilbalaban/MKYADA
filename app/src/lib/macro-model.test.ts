@@ -1,8 +1,9 @@
 // Round-trip contract: every assignment kind must survive
 // parseAssignment(compileAssignment(a)) with its meaning intact — that pair
 // is what moves assignments between the UI and the device drive.
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { serializeForDevice } from "./recorder-model";
+import { applyLayoutMap } from "./layout";
 import {
   assignmentComplete,
   compileAssignment,
@@ -11,15 +12,19 @@ import {
   compileVariantParts,
   describeAssignment,
   describeSlotAssignment,
+  ENC_LABEL_MAX,
+  encSlotComplete,
   holdRepeatDefault,
   isSlotBuiltin,
   kindRequiresHost,
   migrateMacro,
+  MODIFIERS,
   parseAssignment,
   sequencePartFileName,
   slotEditValue,
   SLOT_BUILTIN_ACTION,
 } from "./macro-model";
+import { ENC_PRESETS, encPresetSlots } from "./enc-presets";
 import type { Assignment, MacroFile } from "./types";
 
 /** Defaults are dropped at compile time; normalize both sides for comparison. */
@@ -116,6 +121,20 @@ const CASES: [string, Assignment][] = [
           { label: "REC", action: { action: "recordToggle" } },
         ],
       },
+    },
+  ],
+  [
+    "dial (enc_module)",
+    {
+      kind: "enc_module",
+      slots: [
+        { l: "JOG", t: "keys", cw: { mods: [], key: "right" }, ccw: { mods: [], key: "left" }, m: 1, b: { t: "combo", mods: [], key: "space" } },
+        { l: "ZOOM", t: "scroll", axis: "v", mods: ["WIN"], m: 2 },
+        { l: "WHEEL", t: "move", axis: "y", step: 4, drag: true, m: 1, b: { t: "click" } },
+        { l: "VOL", t: "consumer", cw: "volume_up", ccw: "volume_down", m: 1, b: { t: "consumer", u: "play_pause" } },
+        null,
+        null,
+      ],
     },
   ],
   ["keystroke with restart", { kind: "keystroke", key: "a", behavior: { on_repress: "restart" } }],
@@ -544,5 +563,128 @@ describe("first-run starter macro", () => {
     expect(back.label).toBe(STARTER_NAME);
     // and re-saving it keeps the name — no silent rename to "Type: https://…"
     expect(compileAssignment(back)?.name).toBe(STARTER_NAME);
+  });
+});
+
+describe("dial (enc_module)", () => {
+  it("is device-native — never requires the host", () => {
+    expect(kindRequiresHost("enc_module")).toBe(false);
+  });
+
+  it("labels are clamped to the OLED tile width, slots padded to 6", () => {
+    const file = compileAssignment({
+      kind: "enc_module",
+      slots: [{ l: "TIMELINE", t: "scroll", axis: "h" }],
+    })!;
+    expect(file.enc_module?.slots).toHaveLength(6);
+    expect(file.enc_module?.slots[0]?.l).toBe("TIMELI");
+    expect(file.enc_module?.slots[5]).toBeNull();
+  });
+
+  it("incomplete slots compile to null (dead keys on the device)", () => {
+    const file = compileAssignment({
+      kind: "enc_module",
+      slots: [
+        { l: "X", t: "keys" }, // no cw/ccw — nothing to do
+        { l: "OK", t: "scroll", axis: "v" },
+      ],
+    })!;
+    expect(file.enc_module?.slots[0]).toBeNull();
+    expect(file.enc_module?.slots[1]).not.toBeNull();
+  });
+
+  it("needs at least one working slot to be saveable", () => {
+    expect(assignmentComplete({ kind: "enc_module" })).toBe(false);
+    expect(assignmentComplete({ kind: "enc_module", slots: [] })).toBe(false);
+    expect(assignmentComplete({ kind: "enc_module", slots: [{ l: "X", t: "keys" }] })).toBe(false);
+    expect(
+      assignmentComplete({ kind: "enc_module", slots: [{ l: "S", t: "scroll", axis: "v" }] }),
+    ).toBe(true);
+  });
+
+  it("presets are sane: ≤6 slots, tile-sized labels, valid mods & multipliers", () => {
+    for (const p of ENC_PRESETS) {
+      expect(p.slots.length).toBeLessThanOrEqual(6);
+      let working = 0;
+      for (const s of encPresetSlots(p)) {
+        if (!s) continue;
+        working++;
+        expect(encSlotComplete(s)).toBe(true);
+        expect(s.l.length).toBeGreaterThan(0);
+        expect(s.l.length).toBeLessThanOrEqual(ENC_LABEL_MAX);
+        expect(s.l).toBe(s.l.toUpperCase());
+        expect(s.m ?? 1).toBeGreaterThanOrEqual(1);
+        expect(s.m ?? 1).toBeLessThanOrEqual(10);
+        const mods: string[] = [];
+        if (s.t === "keys") mods.push(...(s.cw?.mods ?? []), ...(s.ccw?.mods ?? []));
+        if (s.t === "scroll") mods.push(...(s.mods ?? []));
+        if (s.b?.t === "combo") mods.push(...s.b.mods);
+        for (const m of mods) expect(MODIFIERS).toContain(m);
+      }
+      expect(working).toBeGreaterThan(0);
+    }
+  });
+
+  it("editing a preset's slots never mutates the preset", () => {
+    const p = ENC_PRESETS[0];
+    const a = encPresetSlots(p);
+    const b = encPresetSlots(p);
+    a.forEach((s) => s && (s.l = "EDITED"));
+    expect(b).toEqual(encPresetSlots(p));
+  });
+});
+
+describe("dial presets resolve through the keyboard layout", () => {
+  // A Turkish-Q-style fixture: the characters the presets mean live on
+  // different physical keys than on US (the field bug: "zoom out" pressed
+  // the US "-" position, which types another character on Turkish-Q).
+  const TRQ = {
+    "0": { base: "0", shift: "=", altgr: "}" },
+    "-": { base: "*", shift: "?", altgr: "\\" },
+    "=": { base: "-", shift: "_", altgr: "" },
+    "[": { base: "ğ", shift: "Ğ", altgr: "¨" },
+    "]": { base: "ü", shift: "Ü", altgr: "~" },
+    "8": { base: "8", shift: "(", altgr: "[" },
+    "9": { base: "9", shift: ")", altgr: "]" },
+    z: { base: "z", shift: "Z", altgr: "" },
+  };
+
+  afterEach(() => applyLayoutMap({}));
+
+  it("character shortcuts land on the key that types them", () => {
+    applyLayoutMap(TRQ);
+    const prem = ENC_PRESETS.find((p) => p.id === "premiere")!;
+    const zoom = encPresetSlots(prem).find((s) => s?.l === "ZOOM");
+    if (zoom?.t !== "keys") throw new Error("zoom slot missing");
+    // "=" is shift+0 on this layout; "-" sits on the US "=" position
+    expect(zoom.cw).toEqual({ mods: ["SHIFT"], key: "0" });
+    expect(zoom.ccw).toEqual({ mods: [], key: "=" });
+  });
+
+  it("altgr characters carry the alt_gr modifier", () => {
+    applyLayoutMap(TRQ);
+    const ps = ENC_PRESETS.find((p) => p.id === "photoshop")!;
+    const brush = encPresetSlots(ps).find((s) => s?.l === "BRUSH");
+    if (brush?.t !== "keys") throw new Error("brush slot missing");
+    // "[" / "]" are AltGr+8 / AltGr+9 on this layout
+    expect(brush.cw).toEqual({ mods: ["ALT_GR"], key: "9" });
+    expect(brush.ccw).toEqual({ mods: ["ALT_GR"], key: "8" });
+  });
+
+  it("named keys (arrows, space) pass through untouched", () => {
+    applyLayoutMap(TRQ);
+    const prem = ENC_PRESETS.find((p) => p.id === "premiere")!;
+    const jog = encPresetSlots(prem).find((s) => s?.l === "JOG");
+    if (jog?.t !== "keys") throw new Error("jog slot missing");
+    expect(jog.cw).toEqual({ mods: [], key: "right" });
+    expect(jog.b).toEqual({ t: "combo", mods: [], key: "space" });
+  });
+
+  it("US fallback keeps the original keys", () => {
+    const prem = ENC_PRESETS.find((p) => p.id === "premiere")!;
+    const zoom = encPresetSlots(prem).find((s) => s?.l === "ZOOM");
+    if (zoom?.t !== "keys") throw new Error("zoom slot missing");
+    expect(zoom.cw).toEqual({ mods: [], key: "=" });
+    expect(zoom.ccw).toEqual({ mods: [], key: "-" });
   });
 });

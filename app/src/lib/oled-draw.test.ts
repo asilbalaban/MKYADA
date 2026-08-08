@@ -118,6 +118,11 @@ const SCREENS: { name: string; lang: "en" | "tr"; paint: (o: OledScreens) => voi
     lang: "en",
     paint: (o) => o.show_obscenter({ time: "01:02:33", scene: "Intro" }),
   },
+  {
+    name: "encmod",
+    lang: "en",
+    paint: (o) => o.show_encmod("DaVinci", ["WHEEL", "FINE", "JOG", "ZOOM", "SCRL", null], 0),
+  },
   { name: "host", lang: "en", paint: (o) => o.show_host() },
   {
     // Turkish is not decoration here: the labels are wider, so this is the case

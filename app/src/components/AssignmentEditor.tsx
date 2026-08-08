@@ -7,8 +7,9 @@ import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, ChevronRight, FolderOpen, Ke
 import { open } from "@tauri-apps/plugin-dialog";
 import { SOUND_EXTENSIONS, playSound } from "../lib/sound";
 import { readTextFile } from "../lib/fs";
-import type { Assignment, AssignmentVariants, MacroFile, MicMode, ObsAction, SequenceStep, SoundHoldAction } from "../lib/types";
+import type { Assignment, AssignmentVariants, EncModuleSlot, MacroFile, MicMode, ObsAction, SequenceStep, SoundHoldAction } from "../lib/types";
 import {
+  ENC_LABEL_MAX,
   IS_MAC,
   MEDIA_USAGES,
   MIC_MODE_LABELS,
@@ -28,6 +29,7 @@ import {
   sequenceIsPureHid,
   stepIsHid,
 } from "../lib/macro-model";
+import { ENC_PRESETS, encPresetSlots } from "../lib/enc-presets";
 import { displayKey, untypeableChars } from "../lib/layout";
 import { allKinds, categoryLabel, wheelPreview, wheelSpec } from "../lib/kind-registry";
 import { OledPreview } from "./OledPreview";
@@ -166,6 +168,9 @@ export function AssignmentEditor({
         (k.id !== "sequence" || !nested) &&
         // menu nav is device-only; callers opt in (never inside a sequence)
         (k.id !== "menu" || allowMenu) &&
+        // the Dial needs the device screen too, and is a key action, not a
+        // slot/sequence one
+        (k.id !== "enc_module" || (allowMenu && !nested && !slotMode)) &&
         // a true off switch only matters where "none" means the built-in
         // action (module slots) — on keys, "Not assigned" already is nothing
         // (but keep it listed if the current value somehow carries it)
@@ -240,6 +245,7 @@ export function AssignmentEditor({
               else if (kind === "webhook") onChange({ kind: "webhook", url: "" });
               else if (kind === "obs") onChange({ kind: "obs", action: "setScene", sceneName: "" });
               else if (kind === "obs_center") onChange({ kind: "obs_center", center: { encoder: "mic" } });
+              else if (kind === "enc_module") onChange({ kind: "enc_module", slots: [] });
               else if (kind === "sequence")
                 onChange({ kind: "sequence", steps: [{ a: { kind: "keystroke", key: "" }, delayMs: 0 }] });
               else importMacro();
@@ -732,6 +738,8 @@ export function AssignmentEditor({
       {value.kind === "obs" && <ObsFields value={value} onChange={onChange} />}
 
       {value.kind === "obs_center" && <ObsCenterFields value={value} onChange={onChange} />}
+
+      {value.kind === "enc_module" && <EncModuleFields value={value} onChange={onChange} />}
 
       {value.kind === "recorded" && (
         <div className="flex items-center gap-2 text-sm">
@@ -1403,6 +1411,309 @@ function ObsCenterFields({
           <option key={i} value={i} />
         ))}
       </datalist>
+    </>
+  );
+}
+
+// ── Dial (kind "enc_module") ───────────────────────────────────────────────
+
+const ENC_SLOT_TYPES = [
+  { id: "keys" as const, label: "Shortcut pair (turn right / left)" },
+  { id: "scroll" as const, label: "Mouse scroll" },
+  { id: "move" as const, label: "Mouse drag (color wheels & sliders)" },
+  { id: "consumer" as const, label: "Volume / media" },
+];
+
+function encDefaultSlot(t: EncModuleSlot["t"], i: number): EncModuleSlot {
+  switch (t) {
+    case "keys":
+      return { l: `K${i + 1}`, t: "keys", cw: { mods: [], key: "" }, ccw: { mods: [], key: "" }, m: 1 };
+    case "scroll":
+      return { l: "SCRL", t: "scroll", axis: "v", m: 1 };
+    case "move":
+      return { l: "DRAG", t: "move", axis: "y", step: 4, drag: true, m: 1, b: { t: "click" } };
+    case "consumer":
+      return { l: "VOL", t: "consumer", cw: "volume_up", ccw: "volume_down", m: 1, b: { t: "consumer", u: "play_pause" } };
+  }
+}
+
+function encComboText(c?: { mods: string[]; key: string }): string {
+  if (!c?.key) return "";
+  return [...c.mods.map(modifierDisplay), displayKey(c.key).toUpperCase()].join(" + ");
+}
+
+function EncSlotRow({
+  i,
+  slot,
+  onChange,
+}: {
+  i: number;
+  slot: EncModuleSlot | null;
+  onChange: (s: EncModuleSlot | null) => void;
+}) {
+  const changeType = (t: string) => {
+    if (!t) return onChange(null);
+    const d = encDefaultSlot(t as EncModuleSlot["t"], i);
+    // keep what carries over (label, sensitivity); the payload resets per type
+    onChange({ ...d, l: slot?.l || d.l, m: slot?.m ?? d.m });
+  };
+  const toggle = (on: boolean, label: string, fn: () => void) => (
+    <Button variant={on ? "primary" : "default"} role="switch" aria-checked={on} onClick={fn}>
+      {label}
+    </Button>
+  );
+  return (
+    <div className="border-line flex flex-col gap-2 rounded-md border p-2">
+      <div className="flex items-center gap-2">
+        <span className="text-fg-faint w-7 shrink-0 text-xs">K{i + 1}</span>
+        <Select
+          className="min-w-0 flex-1"
+          aria-label={`Slot ${i + 1} tool`}
+          value={slot?.t ?? ""}
+          onChange={(e) => changeType(e.target.value)}
+        >
+          <option value="">— empty slot —</option>
+          {ENC_SLOT_TYPES.map((t) => (
+            <option key={t.id} value={t.id}>
+              {t.label}
+            </option>
+          ))}
+        </Select>
+        <Input
+          className="w-24"
+          aria-label={`Slot ${i + 1} screen label`}
+          maxLength={ENC_LABEL_MAX}
+          value={slot?.l ?? ""}
+          placeholder="label"
+          disabled={!slot}
+          onChange={(e) => slot && onChange({ ...slot, l: e.target.value.toUpperCase() })}
+        />
+        <Select
+          className="w-20"
+          aria-label={`Slot ${i + 1} sensitivity`}
+          value={String(slot?.m ?? 1)}
+          disabled={!slot}
+          onChange={(e) => slot && onChange({ ...slot, m: Number(e.target.value) })}
+        >
+          {Array.from({ length: 10 }, (_, n) => (
+            <option key={n + 1} value={String(n + 1)}>
+              ×{n + 1}
+            </option>
+          ))}
+        </Select>
+      </div>
+
+      {slot?.t === "keys" && (
+        <div className="flex flex-wrap items-center gap-2 pl-9">
+          <span className="text-fg-faint text-xs">Turn right:</span>
+          <KeyCapture
+            withMods
+            value={encComboText(slot.cw)}
+            onCapture={(key, mods) => onChange({ ...slot, cw: { key, mods } })}
+          />
+          <span className="text-fg-faint text-xs">Turn left:</span>
+          <KeyCapture
+            withMods
+            value={encComboText(slot.ccw)}
+            onCapture={(key, mods) => onChange({ ...slot, ccw: { key, mods } })}
+          />
+        </div>
+      )}
+
+      {slot?.t === "scroll" && (
+        <div className="flex flex-wrap items-center gap-2 pl-9">
+          <Select
+            className="w-32"
+            aria-label="Scroll axis"
+            value={slot.axis}
+            onChange={(e) => onChange({ ...slot, axis: e.target.value as "v" | "h" })}
+          >
+            <option value="v">Vertical</option>
+            <option value="h">Horizontal</option>
+          </Select>
+          <span className="text-fg-faint text-xs">Hold:</span>
+          {MODIFIERS.map((m) => {
+            const on = (slot.mods ?? []).includes(m);
+            return (
+              <Button
+                key={m}
+                variant={on ? "primary" : "default"}
+                role="switch"
+                aria-checked={on}
+                onClick={() =>
+                  onChange({
+                    ...slot,
+                    mods: on ? (slot.mods ?? []).filter((x) => x !== m) : [...(slot.mods ?? []), m],
+                  })
+                }
+              >
+                {modifierDisplay(m)}
+              </Button>
+            );
+          })}
+          {toggle(!!slot.inv, "Invert", () => onChange({ ...slot, inv: !slot.inv }))}
+        </div>
+      )}
+
+      {slot?.t === "move" && (
+        <div className="flex flex-wrap items-center gap-2 pl-9">
+          <Select
+            className="w-36"
+            aria-label="Drag axis"
+            value={slot.axis}
+            onChange={(e) => onChange({ ...slot, axis: e.target.value as "x" | "y" })}
+          >
+            <option value="y">Up / down (Y)</option>
+            <option value="x">Left / right (X)</option>
+          </Select>
+          <span className="text-fg-faint text-xs">px/detent:</span>
+          <Input
+            className="w-16"
+            type="number"
+            min={1}
+            max={30}
+            aria-label="Pixels per detent"
+            value={String(slot.step ?? 1)}
+            onChange={(e) =>
+              onChange({ ...slot, step: Math.max(1, Math.min(30, Number(e.target.value) || 1)) })
+            }
+          />
+          {toggle(slot.drag !== false, "Hold left button (drag)", () =>
+            onChange({ ...slot, drag: slot.drag === false }),
+          )}
+          {toggle(!!slot.inv, "Invert", () => onChange({ ...slot, inv: !slot.inv }))}
+        </div>
+      )}
+
+      {slot?.t === "consumer" && (
+        <div className="flex flex-wrap items-center gap-2 pl-9">
+          <span className="text-fg-faint text-xs">Turn right:</span>
+          <Select
+            className="w-32"
+            aria-label="Turn right media key"
+            value={slot.cw ?? ""}
+            onChange={(e) => onChange({ ...slot, cw: e.target.value || undefined })}
+          >
+            {MEDIA_USAGES.map((u) => (
+              <option key={u} value={u}>
+                {u.replace(/_/g, " ")}
+              </option>
+            ))}
+          </Select>
+          <span className="text-fg-faint text-xs">Turn left:</span>
+          <Select
+            className="w-32"
+            aria-label="Turn left media key"
+            value={slot.ccw ?? ""}
+            onChange={(e) => onChange({ ...slot, ccw: e.target.value || undefined })}
+          >
+            {MEDIA_USAGES.map((u) => (
+              <option key={u} value={u}>
+                {u.replace(/_/g, " ")}
+              </option>
+            ))}
+          </Select>
+        </div>
+      )}
+
+      {slot && (
+        <div className="flex flex-wrap items-center gap-2 pl-9">
+          <span className="text-fg-faint text-xs">Wheel press:</span>
+          <Select
+            className="w-32"
+            aria-label={`Slot ${i + 1} wheel press`}
+            value={slot.b?.t ?? ""}
+            onChange={(e) => {
+              const t = e.target.value;
+              if (!t) return onChange({ ...slot, b: null });
+              if (t === "click") return onChange({ ...slot, b: { t: "click" } });
+              if (t === "consumer") return onChange({ ...slot, b: { t: "consumer", u: "play_pause" } });
+              onChange({ ...slot, b: { t: "combo", mods: [], key: "" } });
+            }}
+          >
+            <option value="">— nothing —</option>
+            <option value="combo">Shortcut</option>
+            <option value="click">Left click</option>
+            <option value="consumer">Media key</option>
+          </Select>
+          {slot.b?.t === "combo" && (
+            <KeyCapture
+              withMods
+              value={encComboText(slot.b)}
+              onCapture={(key, mods) => onChange({ ...slot, b: { t: "combo", key, mods } })}
+            />
+          )}
+          {slot.b?.t === "consumer" && (
+            <Select
+              className="w-32"
+              aria-label="Wheel press media key"
+              value={slot.b.u}
+              onChange={(e) => onChange({ ...slot, b: { t: "consumer", u: e.target.value } })}
+            >
+              {MEDIA_USAGES.map((u) => (
+                <option key={u} value={u}>
+                  {u.replace(/_/g, " ")}
+                </option>
+              ))}
+            </Select>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function EncModuleFields({
+  value,
+  onChange,
+}: {
+  value: Extract<Assignment, { kind: "enc_module" }>;
+  onChange: (a: Assignment) => void;
+}) {
+  const slots: (EncModuleSlot | null)[] = [...(value.slots ?? [])];
+  while (slots.length < 6) slots.push(null);
+  const setSlot = (i: number, s: EncModuleSlot | null) => {
+    const next = [...slots];
+    next[i] = s;
+    onChange({ ...value, slots: next });
+  };
+
+  return (
+    <>
+      <Field label="Start from a preset">
+        <Select
+          aria-label="Dial preset"
+          value=""
+          onChange={(e) => {
+            const p = ENC_PRESETS.find((x) => x.id === e.target.value);
+            if (p) onChange({ ...value, slots: encPresetSlots(p) });
+          }}
+        >
+          <option value="">— pick a program —</option>
+          {ENC_PRESETS.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.label}
+            </option>
+          ))}
+        </Select>
+        <p className="text-fg-faint text-xs mt-1">
+          Fills the six slots with that program's stock shortcuts — defaults, every slot stays
+          editable below.
+        </p>
+      </Field>
+
+      <Field label="Slots — the six keys pick one, the wheel drives it">
+        <div className="flex flex-col gap-2">
+          {slots.map((s, i) => (
+            <EncSlotRow key={i} i={i} slot={s} onChange={(n) => setSlot(i, n)} />
+          ))}
+        </div>
+        <p className="text-fg-faint text-xs mt-1">
+          Pressing this key opens the Dial on the keypad screen. While it's open the six
+          physical keys select a slot instead of running their normal actions; BACK closes it.
+          Everything is plain HID — it works even with the app closed.
+        </p>
+      </Field>
     </>
   );
 }

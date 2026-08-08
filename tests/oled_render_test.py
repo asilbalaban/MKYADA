@@ -552,6 +552,8 @@ for name, fn in (
          "klabels": ["MUTE", "CAM", "CLIP", "", "", "REC"]})),
     ("obscenter_min", lambda d: d.show_obscenter(
         {"time": "01:02:33", "scene": "Intro"})),
+    ("encmod", lambda d: d.show_encmod(
+        "DaVinci", ["WHEEL", "FINE", "JOG", "ZOOM", "SCRL", None], 0)),
     ("host", lambda d: d.show_host()),
 ):
     d = make_oled()

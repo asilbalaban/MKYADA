@@ -129,7 +129,18 @@ const VISION6_KEYS: Record<number, Record<string, Assignment>> = {
     3: { kind: "scroll", dir: "up", amount: 2, label: "Zoom in" },
     4: { kind: "scroll", dir: "down", amount: 2, label: "Zoom out" },
     5: { kind: "combo", mods: ["cmd"], key: "s", label: "Save" },
-    6: { kind: "combo", mods: ["cmd", "shift"], key: "e", label: "Export" },
+    6: {
+      kind: "enc_module",
+      label: "Edit Dial",
+      slots: [
+        { l: "JOG", t: "keys", cw: { mods: [], key: "right" }, ccw: { mods: [], key: "left" }, m: 1, b: { t: "combo", mods: [], key: "space" } },
+        { l: "ZOOM", t: "keys", cw: { mods: ["WIN"], key: "=" }, ccw: { mods: ["WIN"], key: "-" }, m: 1 },
+        { l: "WHEEL", t: "move", axis: "y", step: 4, drag: true, m: 1, b: { t: "click" } },
+        { l: "SCRL", t: "scroll", axis: "h", m: 1 },
+        { l: "VOL", t: "consumer", cw: "volume_up", ccw: "volume_down", m: 1, b: { t: "consumer", u: "play_pause" } },
+        null,
+      ],
+    },
   },
   // layer C — "Dev"
   2: {

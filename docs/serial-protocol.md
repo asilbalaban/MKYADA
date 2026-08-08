@@ -1,4 +1,27 @@
-# MKYADA serial protocol (v14)
+# MKYADA serial protocol (v15)
+
+v15 (firmware 0.28.0) is the **Dial** release (kind `enc_module`) — a
+device-native encoder toolset. No new message types; two existing ones gain a
+meaning, and the HID mouse grows a report:
+
+- **`ctx` can announce a device-local view.** Opening a Dial sends the usual
+  `{"t":"ctx","key":…,"layer":…,"kind":"enc_module","file":…}` — but as an
+  **announcement, not a menu request**. The app must NOT answer with a `menu`
+  (new firmware ignores the reply while the module is open; the announce
+  exists so the app can suppress its own handling of the `btn` edges streamed
+  while the six keys are the module's slot selectors — same double-execution
+  rule as the OBS Center). Everything the module does is plain HID performed
+  by the device itself; it works identically with no app attached.
+- **A device-local view now emits `menu_ev ev:"close"`** when it closes
+  (BACK, or a transfer taking the screen), so the app can drop its edge
+  suppression.
+- **HID: relative pointer report (id 5)** on the mouse interface — buttons +
+  dX/dY (int8), used by the Dial's mouse-drag slots to nudge the cursor from
+  wherever the user has it (the id-2 pointer is absolute and would teleport).
+  Report id 2 (absolute pointer) and id 4 (wheel/pan) are unchanged.
+
+The Dial's on-device payload (`enc_module.slots`) is documented in
+[macro-format.md](macro-format.md).
 
 v14 (firmware 0.27.0) is the **meta sidecar** release. One new on-device
 file, `/macros/meta.json`, managed by `mkyada/meta.py` — no new commands,
@@ -278,7 +301,7 @@ STANDALONE ──(host_enter)──► HOST ──(host_leave | CDC disconnect |
 | `{"t":"macro_changed","file":"/macros/key3-b.json","reason":"speed"}` | fw 0.7.0, Vision 6. The user edited that macro's `settings.speed` on the device (persisted into the file). The app should re-read the file / refresh its cache |
 | `{"t":"enc","d":1,"n":3}` | fw 0.7.0, Vision 6, host mode. Encoder detents (`d` = direction, `n` = count batched per poll) — lets the app run computer-side wheel actions |
 | `{"t":"btn","slot":"back","down":true}` | fw 0.7.0, Vision 6, host mode. Module buttons (`psh` \| `back` \| `confirm`) — the slot variant of `btn`, distinct from key events |
-| `{"t":"ctx","key":3,"layer":"a","kind":"obs","sub":"setScene","file":"/macros/key3-a.json"}` | v9, Vision 6. The wheel was pressed on a host-kind key (`kind` = `obs`/`obs_center` (v13)/`webhook`/`command`/`launch`/`sound`/`mic`/`volume`; `sub` = the action detail, e.g. the OBS action or media usage; `file` = the exact macro path, profile-aware). The app answers with a `menu`. Only sent after `hostinfo`. For `obs_center` a bare key press opens the menu too (like `volume`/`mic_level`) |
+| `{"t":"ctx","key":3,"layer":"a","kind":"obs","sub":"setScene","file":"/macros/key3-a.json"}` | v9, Vision 6. The wheel was pressed on a host-kind key (`kind` = `obs`/`obs_center` (v13)/`webhook`/`command`/`launch`/`sound`/`mic`/`volume`; `sub` = the action detail, e.g. the OBS action or media usage; `file` = the exact macro path, profile-aware). The app answers with a `menu`. Only sent after `hostinfo`. For `obs_center` a bare key press opens the menu too (like `volume`/`mic_level`). v15: `kind:"enc_module"` is an **announcement only** — the Dial is device-local, the app must not answer with a `menu` (it only mutes its own `btn` handling until `menu_ev ev:"close"`) |
 | `{"t":"menu_ev","ev":"pick","id":"Intro"}` | v9, Vision 6. The user acted on the open menu: `pick` (a **tap** on a list item — use it live), `assign` (a **hold** on a list item — reassign the key to it), `fire` (a card's CONFIRM), `value` (`v` = a slider's new value, or ±1 on a card), `close` (BACK / idle / disconnect). The app performs it and usually replies `menu`/`menu_result` |
 | `{"t":"pin","pin":"GP13","down":true}` | fw 0.7.0. While `pin_detect` is armed: a watched GPIO changed — the wiring wizard assigns it to the key being probed |
 | `{"t":"btn","key":2,"phys":4,"layer":"a","edge":"down"}` | Every press/release. `key` = logical (after `key_map`), `phys` = GPIO number. Host mode: always; standalone: since v2, while an app is connected |

@@ -83,6 +83,11 @@ TEST_IDLE_MIN_S = 15
 # for the app's cold-cache path: the first open of a key's menu reads its
 # macro file over serial (with retries if the link is busy) before answering.
 CTX_WAIT_S = 3.0
+# Dial module: a turn gesture on a drag slot is one continuous mouse drag;
+# the held left button is released this long after the last detent. Long
+# enough to survive detent gaps at slow deliberate turns, short enough that
+# the control is dropped as soon as the hand leaves the wheel.
+DRAG_RELEASE_S = 0.35
 
 (S_HOME, S_SELECT, S_SPEED, S_SAVED, S_SET_MENU, S_TIMEOUT,
  S_PLAYING, S_HOST, S_TOAST, S_LANG, S_TEST, S_ABOUT, S_CTX,
@@ -124,7 +129,7 @@ KIND_ICON = {"keystroke": "keyboard", "combo": "keyboard", "text": "text",
              "scroll": "scroll-v", "menu": "layers", "sequence": "sequence",
              "launch": "rocket", "command": "terminal", "sound": "music",
              "mic": "mic", "mic_level": "mic", "webhook": "webhook",
-             "obs": "camera", "obs_center": "camera"}
+             "obs": "camera", "obs_center": "camera", "enc_module": "dial"}
 
 # mtype:"obs" menu fields the app may push (proto v13): a re-send while the
 # menu is open merges only the fields present in the message into the open
@@ -923,7 +928,7 @@ class Ui:
     # kinds whose whole point is the wheel menu (a continuous slider or the
     # OBS dashboard), so pressing the physical key should open the menu, not
     # "run" a poor default
-    PRESS_MENU_KINDS = ("volume", "mic_level", "obs_center")
+    PRESS_MENU_KINDS = ("volume", "mic_level", "obs_center", "enc_module")
 
     def wants_press_menu(self, key_no):
         """True if pressing key `key_no` should open its wheel menu (slider
@@ -983,6 +988,8 @@ class Ui:
             # hold to reassign — all standalone, the device rewrites the file
             self._enter_optlist("menu", path, self._menu_opts(), sub,
                                  tr("menu_t"))
+        elif kind == "enc_module":
+            self._enter_encmod(path, name)
         elif kind in ("launch", "command", "sound", "mic", "mic_level",
                       "webhook", "obs", "obs_center"):
             self._ctx_host(kind, sub, path, k0, l)
@@ -1163,10 +1170,195 @@ class Ui:
         return (mode == "host" and c.get("mtype") == "obs"
                 and c.get("obsview") == "center")
 
+    # --- Dial module (kind enc_module) ---
+    # A user-defined encoder toolset: the key's file carries up to six slots
+    # (enc_module.slots), each mapping a wheel turn to plain HID — a shortcut
+    # pair, a scroll axis, a relative mouse drag or a consumer usage. While
+    # the module owns the screen the six keys select slots (App.on_edge
+    # routes edges here) and the wheel drives the selected one. Everything
+    # runs on the device: no app, no host round-trip.
+
+    def enc_module_active(self):
+        """True while a Dial module owns the keypad: the six keys are slot
+        selectors, so App.on_edge must route the edge to encmod_key instead
+        of playing that key's macro."""
+        return (self.state == S_CTX and self.ctx is not None
+                and self.ctx.get("mode") == "encmod")
+
+    def _enter_encmod(self, path, name):
+        """Open the Dial module: the one kind whose payload the device needs
+        beyond the header, so the file gets a full parse here (small — the
+        payload is six tiny dicts) and the slots live only while the module
+        is open."""
+        try:
+            with open(path, "rb") as f:
+                data = json.load(f)
+        except (OSError, ValueError, MemoryError):
+            data = None
+        em = (data or {}).get("enc_module")
+        raw = em.get("slots") if isinstance(em, dict) else None
+        slots = [None] * 6
+        if isinstance(raw, list):
+            for i in range(min(6, len(raw))):
+                s = raw[i]
+                if isinstance(s, dict) and s.get("t"):
+                    s["l"] = str(s.get("l") or "")[:6]
+                    slots[i] = s
+        del data, em, raw
+        gc.collect()
+        if not any(slots):
+            self._toast(upper(name or "DIAL")[:12], tr("no_slots"),
+                        tr("assign_app"))
+            return
+        sel = 0
+        while not slots[sel]:
+            sel += 1
+        self.ctx = {"mode": "encmod", "name": name or "Dial",
+                    "slots": slots, "sel": sel, "drag_until": 0.0}
+        self.state = S_CTX
+        self.activity_at = time.monotonic()
+        self.last_move = 0.0
+        self._draw_encmod()
+        if self.app.proto.connected:
+            # Announce only (proto v15): the app must NOT answer with a menu
+            # (on_menu ignores it while the module is open) — it uses this to
+            # suppress its own handling of the key edges streamed while the
+            # keypad belongs to the module.
+            self.app.proto.send({"t": "ctx", "key": self.sel_key + 1,
+                                 "layer": LAYER_NAMES[self.app.layer],
+                                 "kind": "enc_module", "file": path})
+
+    def _draw_encmod(self):
+        c = self.ctx
+        labels = [(s["l"] or "K%d" % (i + 1)) if s else None
+                  for i, s in enumerate(c["slots"])]
+        self.oled.show_encmod(c["name"], labels, c["sel"])
+
+    def encmod_key(self, key_no):
+        """A physical key pressed while the module is open: select that slot.
+        Empty slots are dead keys; re-pressing the selected one is a no-op."""
+        c = self.ctx
+        if not self.enc_module_active():
+            return
+        i = clamp(key_no - 1, 0, 5)
+        if i == c["sel"] or not c["slots"][i]:
+            return
+        self._encmod_drag_release(c)  # a held drag must not leak across slots
+        c["sel"] = i
+        self.activity_at = time.monotonic()
+        self._draw_encmod()
+
+    def _encmod_drag_release(self, c):
+        eng = self.app.engine
+        if eng.rel_buttons:
+            eng.rel_button("left", False)
+        c["drag_until"] = 0.0
+
+    def _encmod_turn(self, now, d, c):
+        s = c["slots"][c["sel"]]
+        if not s:
+            return
+        # velocity acceleration, same feel as the speed editor: fast detents
+        # (or coalesced multi-detent ticks) count double/triple
+        dt = now - self.last_move
+        self.last_move = now
+        ad = abs(d)
+        per = 3 if (ad > 1 or dt < 0.04) else (2 if dt < 0.09 else 1)
+        try:
+            mult = clamp(int(s.get("m") or 1), 1, 10)
+        except (TypeError, ValueError):
+            mult = 1
+        n = ad * per * mult
+        pos = d > 0
+        if s.get("inv"):
+            pos = not pos
+        eng = self.app.engine
+        t = s.get("t")
+        if t == "keys":
+            node = s.get("cw") if pos else s.get("ccw")
+            if isinstance(node, dict) and node.get("key"):
+                # short hold: 6 taps at the default 30 ms would stall the
+                # wheel for ~0.2 s — jog must feel like a jog wheel
+                for _ in range(min(n, 6)):
+                    eng.tap_combo(node.get("mods") or (), node["key"],
+                                  hold_ms=12)
+        elif t == "scroll":
+            amt = n if pos else -n
+            if s.get("axis") == "h":
+                eng.wheel_burst(0, amt, s.get("mods"))
+            else:
+                eng.wheel_burst(amt, 0, s.get("mods"))
+        elif t == "move":
+            try:
+                step = clamp(int(s.get("step") or 1), 1, 30)
+            except (TypeError, ValueError):
+                step = 1
+            amt = n * step
+            if not pos:
+                amt = -amt
+            if s.get("drag"):
+                if not eng.rel_buttons:
+                    eng.rel_button("left", True)
+                c["drag_until"] = now + DRAG_RELEASE_S
+            if s.get("axis") == "x":
+                eng.rel_move(amt, 0)
+            else:
+                eng.rel_move(0, amt)
+        elif t == "consumer":
+            usage = s.get("cw") if pos else s.get("ccw")
+            if usage:
+                for _ in range(min(n, 4)):
+                    eng.consumer_tap(usage)
+
+    def _encmod_fire(self, s):
+        """The encoder button inside the module: the slot's own press action
+        (play/pause on a jog slot, a left click on a drag slot, ...)."""
+        b = s.get("b") if isinstance(s, dict) else None
+        if not isinstance(b, dict):
+            return
+        eng = self.app.engine
+        t = b.get("t")
+        if t == "combo":
+            if b.get("key"):
+                eng.tap_combo(b.get("mods") or (), b["key"])
+        elif t == "click":
+            eng.rel_button("left", True)
+            time.sleep(0.03)
+            eng.rel_button("left", False)
+        elif t == "consumer":
+            if b.get("u"):
+                eng.consumer_tap(b["u"])
+
+    def _st_encmod(self, now, d, press):
+        c = self.ctx
+        if d:
+            self._encmod_turn(now, d, c)
+            self.activity_at = now
+        elif c["drag_until"] and now > c["drag_until"]:
+            # the turn gesture ended: drop the held drag button
+            self._encmod_drag_release(c)
+        if press == K_BACK:
+            self._encmod_drag_release(c)
+            if self.app.proto.connected:
+                self.app.proto.send({"t": "menu_ev", "ev": "close"})
+            c["slots"] = None
+            self._enter_grid()
+            gc.collect()
+        elif press in (K_PSH, K_CONFIRM):
+            self._encmod_fire(c["slots"][c["sel"]])
+            self.activity_at = now
+        # no idle timeout: like the OBS Center this is a dashboard, not a
+        # chooser — a color session parks on it for minutes at a time
+
     def on_menu(self, msg):
         """The app rendered/updated the open wheel menu (host-fed list, slider
         or status card). Ignored unless a menu is open for this key."""
         if self.state != S_CTX or not self.ctx:
+            return
+        if self.ctx.get("mode") == "encmod":
+            # The Dial module is device-local; its ctx announce is info-only.
+            # An old app answers it with a default card anyway — swallowing
+            # the reply here keeps the module on screen.
             return
         key = msg.get("key")
         if key is not None and self.ctx.get("key") not in (None, key):
@@ -1326,6 +1518,9 @@ class Ui:
             return
         if mode == "host":
             self._st_ctx_host(now, d, press)
+            return
+        if mode == "encmod":
+            self._st_encmod(now, d, press)
             return
         # --- local menus (keystroke / scroll knob / media browser / volume) ---
         if press == K_BACK:
@@ -1774,6 +1969,14 @@ class Ui:
                 # running behind it): tell it the menu is gone so the session
                 # tears down instead of leaking behind the transfer screen
                 self.app.proto.send({"t": "menu_ev", "ev": "close"})
+            elif self.state == S_CTX and self.ctx \
+                    and self.ctx.get("mode") == "encmod":
+                # the Dial module dies under a transfer too: drop a held
+                # drag (the host must not keep dragging a color wheel while
+                # files move) and tell the app its edge suppression is over
+                self._encmod_drag_release(self.ctx)
+                self.app.proto.send({"t": "menu_ev", "ev": "close"})
+                self.ctx = None
             self._drain_inputs()
             self.state = S_XFER
             self.oled.show_transfer()

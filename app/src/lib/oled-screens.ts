@@ -468,6 +468,35 @@ export class OledScreens {
     if (page) this._dots(60, page.n, page.sel);
   }
 
+  /** Dial module (kind "enc_module"): title strip + a 3x2 tile map of the six
+   * slots mirroring the physical key layout. The filled tile is the slot the
+   * wheel drives; an empty slot (null label) draws as a bare dash — that key
+   * is dead while the module is open. Mirrors oled.py show_encmod. */
+  show_encmod(name: string, labels: (string | null)[], sel: number) {
+    const fb = this.fb;
+    const f = this.font;
+    this.clear();
+    this._bar9(f.fit(upper(name), 86), "DIAL");
+    const top = 11;
+    const h = 25;
+    for (let k = 0; k < 6; k++) {
+      const lab = labels[k] ?? null;
+      const x = TILE_X[k % 3];
+      const y = top + Math.trunc(k / 3) * (h + 1);
+      const mid = x + Math.trunc(TILE_W / 2) + 1;
+      const ty = y + Math.trunc((h - 7) / 2);
+      if (lab == null) {
+        this._txt("-", mid, ty, 0.5, false);
+      } else if (k === sel) {
+        fb.rfill(x, y, TILE_W, h, 1, 0);
+        this._txt(f.fit(lab, 37), mid, ty, 0.5, true);
+      } else {
+        fb.rframe(x, y, TILE_W, h, 1);
+        this._txt(f.fit(lab, 37), mid, ty, 0.5, false);
+      }
+    }
+  }
+
   /** Layer picker: arrows either side, a 2x letter, the layer's name under it
    * when it has one, position dots at the bottom.
    *

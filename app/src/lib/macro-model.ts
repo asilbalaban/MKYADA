@@ -5,6 +5,7 @@
 import type {
   Assignment,
   DeviceConfig,
+  EncModuleSlot,
   MacroEvent,
   MacroFile,
   MenuAction,
@@ -353,6 +354,37 @@ function menuName(action: MenuAction): string {
   return MENU_LABEL[action];
 }
 
+/** Dial: OLED tile labels are clamped to this many characters. */
+export const ENC_LABEL_MAX = 6;
+
+/** True when a Dial slot has everything its type needs to do anything. */
+export function encSlotComplete(s: EncModuleSlot | null | undefined): s is EncModuleSlot {
+  if (!s) return false;
+  switch (s.t) {
+    case "keys":
+      return !!(s.cw?.key || s.ccw?.key);
+    case "scroll":
+    case "move":
+      return true;
+    case "consumer":
+      return !!(s.cw || s.ccw);
+    default:
+      return false;
+  }
+}
+
+/** Normalize Dial slots to the on-device shape: exactly 6 entries, labels
+ * clamped, incomplete slots dropped to null (the firmware treats them as
+ * dead keys). */
+export function normalizeEncSlots(slots?: (EncModuleSlot | null)[]): (EncModuleSlot | null)[] {
+  const out: (EncModuleSlot | null)[] = [];
+  for (let i = 0; i < 6; i++) {
+    const s = slots?.[i] ?? null;
+    out.push(encSlotComplete(s) ? { ...s, l: (s.l ?? "").slice(0, ENC_LABEL_MAX) } : null);
+  }
+  return out;
+}
+
 /** True when the assignment has everything it needs to be saved. */
 export function assignmentComplete(a: Assignment): boolean {
   switch (a.kind) {
@@ -373,6 +405,8 @@ export function assignmentComplete(a: Assignment): boolean {
       return a.url.length > 0;
     case "obs":
       return obsActionComplete(a);
+    case "enc_module":
+      return (a.slots ?? []).some((s) => encSlotComplete(s));
     case "sequence":
       return (
         a.steps.length > 0 &&
@@ -564,6 +598,18 @@ export function compileAssignment(a: Assignment, name?: string): MacroFile | nul
           name: name ?? "OBS Center",
           kind: "obs_center",
           ...(a.center ? { obs_center: a.center } : {}),
+          events: [],
+        };
+      }
+      case "enc_module": {
+        // A no-op carrier like obs_center — but the mirror image of the host
+        // kinds: the DEVICE parses the payload when the module opens and runs
+        // every slot as plain HID, app or no app.
+        return {
+          ...base,
+          name: name ?? "Dial",
+          kind: "enc_module",
+          enc_module: { slots: normalizeEncSlots(a.slots) },
           events: [],
         };
       }
@@ -834,6 +880,12 @@ function parseAssignmentBase(m: MacroFile): Assignment {
         ...(m.obs_center ? { center: m.obs_center } : {}),
         ...behavior,
       };
+    case "enc_module":
+      return {
+        kind: "enc_module",
+        slots: normalizeEncSlots(m.enc_module?.slots),
+        ...behavior,
+      };
     case "sequence":
       return { kind: "sequence", steps: m.seq ?? [], ...behavior };
     default:
@@ -921,6 +973,10 @@ export function describeAssignment(a: Assignment): string {
       return `◉ ${obsActionName(a)}`;
     case "obs_center":
       return "◉ OBS Center";
+    case "enc_module": {
+      const n = (a.slots ?? []).filter((s) => encSlotComplete(s)).length;
+      return `◎ Dial · ${n} slot${n === 1 ? "" : "s"}`;
+    }
     case "sequence":
       return `⧉ ${a.steps.length} step${a.steps.length === 1 ? "" : "s"}`;
   }

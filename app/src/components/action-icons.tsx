@@ -65,6 +65,7 @@ export const KIND_ICON: Record<Assignment["kind"], string> = {
   webhook: "webhook",
   obs: "obs",
   obs_center: "obs",
+  enc_module: "dial",
   sequence: "multi-action",
 };
 

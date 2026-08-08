@@ -27,7 +27,7 @@ identically.
 | `version` | yes | `2`, or `3` when the file carries key-logic `variants` |
 | `name` | no | Display name |
 | `created` | no | ISO 8601 timestamp |
-| `kind` | no | UI metadata: `"combo"` \| `"keystroke"` \| `"text"` \| `"media"` \| `"volume"` \| `"mic_level"` \| `"scroll"` \| `"recorded"` \| `"launch"` \| `"command"` \| `"sound"` \| `"mic"` \| `"webhook"` \| `"obs"` \| `"sequence"`. The app uses it to show and re-edit the assignment. Since firmware 0.18.0 the Vision 6 also reads `kind` to pick the [wheel menu](actions.md#wheel-menu-vision-6): `"volume"` (system-volume slider; press plays the `mute` consumer event so it still works standalone) and `"mic_level"` (mic input-gain slider, host-only, empty events) open on a bare key press; `"media"` becomes a browser (turn to pick a usage, hold to reassign — the device rewrites this file). |
+| `kind` | no | UI metadata: `"combo"` \| `"keystroke"` \| `"text"` \| `"media"` \| `"volume"` \| `"mic_level"` \| `"scroll"` \| `"recorded"` \| `"launch"` \| `"command"` \| `"sound"` \| `"mic"` \| `"webhook"` \| `"obs"` \| `"obs_center"` \| `"enc_module"` \| `"sequence"`. The app uses it to show and re-edit the assignment. Since firmware 0.18.0 the Vision 6 also reads `kind` to pick the [wheel menu](actions.md#wheel-menu-vision-6): `"volume"` (system-volume slider; press plays the `mute` consumer event so it still works standalone) and `"mic_level"` (mic input-gain slider, host-only, empty events) open on a bare key press; `"media"` becomes a browser (turn to pick a usage, hold to reassign — the device rewrites this file). |
 | `combo` / `text` / `seq` … | no | UI metadata matching `kind` |
 | `sounds` / `targets` / `commands` / `webhooks` | no | Multi-value host keys (app ≥ 0.38.0): the key's full sound/target/command list (`sound`/`target`/`command` stays the default the press uses and is a member), or the webhook's **alternative** requests (the default stays in `webhook`). `sounds` entries are `{label?, sound}` and `commands` entries `{label?, command}` — the wheel shows the label when given, else the file name / command line; `targets` are plain strings (the file name is the label). The Vision 6 wheel lists them — tap uses one now, hold makes it the default (the app rewrites this file). Old firmware/app versions ignore the extra fields and just use the default. |
 | `screen` | for mouse macros | Capture resolution; absolute coordinates are rescaled from it (`x * 32767 / (width-1)`). |
@@ -107,6 +107,43 @@ Every event has `delay` — milliseconds to wait **before** executing it.
   in firmware ≥ 0.8.0). Each unit is one detent-sized report.
 - `consumer` usages: `play_pause`, `next_track`, `prev_track`, `stop`, `mute`, `volume_up`, `volume_down`, `brightness_up`, `brightness_down`.
 - `wait`: pure delay, no action.
+
+**`kind: "enc_module"`** — the Dial (fw ≥ 0.28.0, proto v15, screen models).
+A device-native encoder toolset: pressing the key opens a full-screen module,
+the six keys select one of up to six *slots*, and turning the encoder runs the
+selected slot as plain HID — no app needed. The payload is `enc_module`:
+
+```json
+"enc_module": { "slots": [
+  { "l": "JOG",  "t": "keys", "cw": {"mods": [], "key": "right"},
+    "ccw": {"mods": [], "key": "left"}, "m": 1,
+    "b": {"t": "combo", "mods": [], "key": "space"} },
+  { "l": "ZOOM", "t": "scroll", "axis": "v", "mods": ["cmd"], "inv": false, "m": 1 },
+  { "l": "WHEEL", "t": "move", "axis": "y", "step": 4, "drag": true, "m": 1,
+    "b": {"t": "click"} },
+  { "l": "VOL", "t": "consumer", "cw": "volume_up", "ccw": "volume_down", "m": 1,
+    "b": {"t": "consumer", "u": "play_pause"} },
+  null, null ] }
+```
+
+- `slots`: exactly 6 entries; `null` = empty slot (that key is dead while the
+  module is open).
+- `l`: OLED tile label, ≤ 6 chars (clamped again on the device).
+- `t` picks the turn action: `"keys"` (`cw`/`ccw` are full modifier combos,
+  one tap per detent), `"scroll"` (`axis` `"v"`|`"h"`, optional `mods` held
+  around the ticks — Cmd+scroll zoom), `"move"` (relative cursor nudge on
+  `axis` `"x"`|`"y"`, `step` px per detent 1–30; `drag: true` holds the left
+  button through the turn gesture — for controls with no shortcut, e.g.
+  DaVinci color wheels), `"consumer"` (`cw`/`ccw` are consumer usages).
+- `m`: sensitivity 1–10 (units per detent, multiplied by the wheel's own
+  velocity acceleration). `inv` flips the direction.
+- `b`: the encoder button while this slot is selected — absent = nothing,
+  `{"t":"combo",…}`, `{"t":"click"}` (left click via the relative pointer) or
+  `{"t":"consumer","u":…}`.
+- `events` stays `[]` — the file is a carrier; the firmware parses the payload
+  in full when the module opens and drops it again on close. BACK closes; the
+  module has no idle timeout. Mouse-drag slots ride the relative pointer
+  report (id 5) added to the HID descriptor in the same release.
 
 **`kind: "menu"`** (screen models) has no HID events. `"menu"` is one of
 `left` / `right` / `confirm` / `back`, and the firmware feeds it to the

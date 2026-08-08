@@ -24,6 +24,7 @@ import {
   obsCenterValue,
   openObsCenter,
 } from "./obs-center";
+import { setEncModuleOpen } from "./enc-module";
 import { serializeForDevice } from "./recorder-model";
 import { playSound } from "./sound";
 import type { Assignment, MacroFile, ObsSnapshot, Profile, WebhookRequest } from "./types";
@@ -113,6 +114,7 @@ export function WheelMenuProvider({ children }: { children: ReactNode }) {
       stopPoll();
       stopObs();
       closeObsCenter();
+      setEncModuleOpen(false);
       openRef.current = null;
     };
     const sendMenu = (fields: Record<string, unknown>) => {
@@ -425,6 +427,23 @@ export function WheelMenuProvider({ children }: { children: ReactNode }) {
     };
 
     const onCtx = async (m: Record<string, unknown>) => {
+      if (String(m.kind ?? "") === "enc_module") {
+        // The Dial module (proto v15) is device-local: the ctx is an announce,
+        // NOT a menu request — answering with a `menu` would clobber the
+        // module screen on old firmware and is ignored by new. The flag makes
+        // profiles.tsx swallow the slot-select key edges streamed while the
+        // keypad belongs to the module; menu_ev "close" clears it.
+        setEncModuleOpen(true);
+        openRef.current = {
+          key: Number(m.key),
+          layer: String(m.layer ?? "a"),
+          file: String(m.file ?? "").replace(/^\//, ""),
+          kind: "enc_module",
+          sub: undefined,
+          mf: null,
+        };
+        return;
+      }
       const d = driveRef.current;
       const file = String(m.file ?? "").replace(/^\//, "");
       let mf: MacroFile | null = null;
@@ -481,6 +500,7 @@ export function WheelMenuProvider({ children }: { children: ReactNode }) {
       un();
       stopPoll();
       stopObs();
+      setEncModuleOpen(false);
       openRef.current = null;
     };
   }, [onMsg, send]);

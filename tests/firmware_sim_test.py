@@ -215,6 +215,38 @@ check("wheel_burst holds ctrl", burst_kbd and burst_kbd[0][0] == 0x01, str(burst
 check("wheel_burst releases ctrl", burst_kbd[-1][0] == 0x00, str(burst_kbd))
 check("wheel_burst ticks", [m[0] for m in burst_wheel] == [1, 1], str(burst_wheel))
 
+# rel pointer (id 5, 3 bytes): Dial drag slots nudge from the user's position
+sent_reports.clear()
+eng.rel_move(30, -4)
+rel = [struct.unpack("<Bbb", r[2]) for r in sent_reports
+       if r[1] == 0x02 and len(r[2]) == 3]
+check("rel move dx/dy", rel == [(0, 30, -4)], str(rel))
+check("rel move sends no abs pointer",
+      not any(r[1] == 0x02 and len(r[2]) == 5 for r in sent_reports),
+      str(sent_reports))
+
+sent_reports.clear()
+eng.rel_move(500, -500)
+rel = [struct.unpack("<Bbb", r[2]) for r in sent_reports
+       if r[1] == 0x02 and len(r[2]) == 3]
+check("rel move clamps to +/-127", rel == [(0, 127, -127)], str(rel))
+
+sent_reports.clear()
+eng.rel_button("left", True)
+eng.rel_move(5, 0)
+eng.release_all()
+rel = [struct.unpack("<Bbb", r[2]) for r in sent_reports
+       if r[1] == 0x02 and len(r[2]) == 3]
+check("rel drag press/move/release", rel == [(1, 0, 0), (1, 5, 0), (0, 0, 0)],
+      str(rel))
+check("release_all clears rel buttons", eng.rel_buttons == 0)
+
+sent_reports.clear()
+eng.release_all()
+check("release_all quiet without rel drag",
+      not any(r[1] == 0x02 and len(r[2]) == 3 for r in sent_reports),
+      str(sent_reports))
+
 # stop mid-play
 calls = {"n": 0}
 
@@ -644,7 +676,7 @@ app.proto.send = _orig_send
 app.proto.ser = None
 
 # --- serial "led" op (proto v2): app feedback override --------------------
-check("hello reports proto v14", app.hello()["proto"] == 14, str(app.hello()["proto"]))
+check("hello reports proto v15", app.hello()["proto"] == 15, str(app.hello()["proto"]))
 check("hello reports usb_drive", app.hello()["usb_drive"] == app.config["usb_drive"], str(app.hello()))
 
 # profile path resolution (issue #23): a profile is a full independent config —
@@ -1634,6 +1666,149 @@ check("ctx: mic_level asks the app for a slider",
       any(m.get("t") == "ctx" and m.get("kind") == "mic_level" for m in voutbox)
       and ui.ctx["mode"] == "wait", "ctx=%s" % (ui.ctx,))
 vapp.host_menus = False
+
+# --- Dial module (kind enc_module, proto v15) ------------------------------
+# A device-native encoder toolset: the key's file carries six slots, a bare
+# press opens the module, the six keys select slots, and the wheel drives the
+# selected one as plain HID. Fully standalone — the ctx is only an announce.
+_dial = {
+    "name": "DaVinci", "kind": "enc_module",
+    "enc_module": {"slots": [
+        {"l": "JOG", "t": "keys",
+         "cw": {"mods": [], "key": "right"}, "ccw": {"mods": [], "key": "left"},
+         "m": 1, "b": {"t": "combo", "mods": [], "key": "space"}},
+        {"l": "ZOOM", "t": "scroll", "axis": "v", "mods": ["cmd"], "m": 1},
+        {"l": "WHEEL", "t": "move", "axis": "y", "step": 4, "drag": True,
+         "m": 1, "b": {"t": "click"}},
+        {"l": "VOL", "t": "consumer", "cw": "volume_up", "ccw": "volume_down",
+         "m": 1, "b": {"t": "consumer", "u": "play_pause"}},
+        None, None]}}
+_write_key1(dict(_dial))
+ui._enter_grid()
+check("dial: a bare key press opens the module", ui.wants_press_menu(1) is True)
+voutbox.clear()
+ui.open_key_menu(1)
+check("dial: module opens with the first slot selected",
+      ui.state == uimod.S_CTX and ui.ctx["mode"] == "encmod"
+      and ui.ctx["sel"] == 0, "ctx=%s" % (ui.ctx,))
+check("dial: announced to the app as a plain ctx",
+      any(m.get("t") == "ctx" and m.get("kind") == "enc_module"
+          for m in voutbox), str(voutbox))
+check("dial: keypad belongs to the module",
+      ui.enc_module_active() and vapp.enc_module_active())
+
+# a stray menu reply (an OLD app answering the announce) must not clobber it
+ui.on_menu({"t": "menu", "mtype": "card", "key": 1, "title": "WHEEL", "big": "X"})
+check("dial: a stray app menu is ignored", ui.ctx.get("mode") == "encmod")
+
+# key edges route to slot selection — the local macro must NOT play
+_kmap = vapp.config["key_map"]
+vplays.clear()
+vapp.on_edge(_kmap.index(4), True)
+vapp.on_edge(_kmap.index(4), False)
+check("dial: a key press selects that slot, plays nothing",
+      ui.ctx["sel"] == 3 and vplays == [], "sel=%s plays=%s"
+      % (ui.ctx["sel"], vplays))
+vapp.on_edge(_kmap.index(5), True)  # empty slot: a dead key
+check("dial: an empty slot's key is dead", ui.ctx["sel"] == 3)
+
+# keys slot: one detent -> one tap of the combo (velocity accel forced off)
+vapp.on_edge(_kmap.index(1), True)
+_dnow = _t2.monotonic()
+ui.last_move = _dnow - 1.0
+sent_reports.clear()
+ui.enc.position += 1
+ui.tick(_dnow)
+_dial_kbd = [r[2] for r in sent_reports if r[1] == 0x06]
+check("dial: jog detent taps the cw combo once",
+      sum(1 for r in _dial_kbd if r[2] == 0x4F) == 1, str(_dial_kbd))
+# encoder button -> the slot's own action (space)
+sent_reports.clear()
+ui.nav.events.queue.append(FakeKeyEvent(uimod.K_CONFIRM, True))
+ui.nav.events.queue.append(FakeKeyEvent(uimod.K_CONFIRM, False))
+ui.tick(_t2.monotonic())
+_dial_kbd = [r[2] for r in sent_reports if r[1] == 0x06]
+check("dial: wheel press fires the slot's button action",
+      any(r[2] == 0x2C for r in _dial_kbd), str(_dial_kbd))
+
+# scroll slot: modifiers held around the wheel ticks (cmd+scroll zoom)
+vapp.on_edge(_kmap.index(2), True)
+_dnow = _t2.monotonic()
+ui.last_move = _dnow - 1.0
+sent_reports.clear()
+ui.enc.position += 1
+ui.tick(_dnow)
+_dial_wheel = [struct.unpack("<bb", r[2]) for r in sent_reports
+               if r[1] == 0x02 and len(r[2]) == 2]
+_dial_kbd = [r[2] for r in sent_reports if r[1] == 0x06]
+check("dial: zoom detent scrolls once with cmd held",
+      [m[0] for m in _dial_wheel] == [1]
+      and _dial_kbd and _dial_kbd[0][0] == 0x08
+      and _dial_kbd[-1][0] == 0x00,
+      "wheel=%s kbd=%s" % (_dial_wheel, _dial_kbd))
+
+# move slot: rel pointer drag — button down rides the turn, released after
+# the gesture window with the cursor untouched
+vapp.on_edge(_kmap.index(3), True)
+_dnow = _t2.monotonic()
+ui.last_move = _dnow - 1.0
+sent_reports.clear()
+ui.enc.position += 1
+ui.tick(_dnow)
+_dial_rel = [struct.unpack("<Bbb", r[2]) for r in sent_reports
+             if r[1] == 0x02 and len(r[2]) == 3]
+check("dial: drag detent holds the button and nudges the cursor",
+      _dial_rel == [(1, 0, 0), (1, 0, 4)], str(_dial_rel))
+sent_reports.clear()
+ui.tick(_dnow + 0.5)  # past DRAG_RELEASE_S with no detent
+_dial_rel = [struct.unpack("<Bbb", r[2]) for r in sent_reports
+             if r[1] == 0x02 and len(r[2]) == 3]
+check("dial: the drag releases after the gesture window",
+      _dial_rel == [(0, 0, 0)], str(_dial_rel))
+# switching slots mid-drag releases too (must not leak across slots)
+ui.enc.position += 1
+ui.tick(_t2.monotonic())
+sent_reports.clear()
+vapp.on_edge(_kmap.index(4), True)
+_dial_rel = [struct.unpack("<Bbb", r[2]) for r in sent_reports
+             if r[1] == 0x02 and len(r[2]) == 3]
+check("dial: switching slots drops a held drag",
+      _dial_rel == [(0, 0, 0)] and ui.ctx["sel"] == 3, str(_dial_rel))
+
+# consumer slot: turn down -> volume_down taps
+_dnow = _t2.monotonic()
+ui.last_move = _dnow - 1.0
+sent_reports.clear()
+ui.enc.position -= 1
+ui.tick(_dnow)
+_dial_cons = [struct.unpack("<H", r[2])[0] for r in sent_reports if r[0] == 0x0C]
+check("dial: volume slot turns the volume down",
+      0xEA in _dial_cons, str(_dial_cons))
+
+# no idle timeout: a color session parks on the module for minutes
+ui.activity_at = _t2.monotonic() - ui.idle_secs - 30
+ui.tick(_t2.monotonic())
+check("dial: the module never times out", ui.state == uimod.S_CTX
+      and ui.ctx.get("mode") == "encmod", "state=%d" % ui.state)
+
+# BACK closes: drag dropped, app told, keypad back to the grid
+voutbox.clear()
+ui.nav.events.queue.append(FakeKeyEvent(uimod.K_BACK, True))
+ui.nav.events.queue.append(FakeKeyEvent(uimod.K_BACK, False))
+ui.tick(_t2.monotonic())
+check("dial: BACK returns to the grid", ui.state == uimod.S_SELECT
+      and not ui.enc_module_active(), "state=%d" % ui.state)
+check("dial: closing tells the app (menu_ev close)",
+      any(m.get("t") == "menu_ev" and m.get("ev") == "close" for m in voutbox),
+      str(voutbox))
+
+# an all-empty module toasts instead of opening a dead screen
+_write_key1({"name": "Empty", "kind": "enc_module",
+             "enc_module": {"slots": [None] * 6}})
+ui._enter_grid()
+ui.open_key_menu(1)
+check("dial: an empty module shows a toast", ui.state == uimod.S_TOAST,
+      "state=%d" % ui.state)
 
 # restore key1 to its original stream file for any later expectations
 with open(vpath(1, 0), "w") as f:

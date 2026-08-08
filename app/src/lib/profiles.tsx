@@ -57,6 +57,7 @@ import type {
 import { DOUBLE_MS_DEFAULT, HOLD_MS_DEFAULT, LAYER_NAMES } from "./types";
 import { testModeActive } from "./focus";
 import { isObsCenterOpen } from "./obs-center";
+import { isEncModuleOpen } from "./enc-module";
 import {
   AUX_FILE_RE,
   compileAssignment,
@@ -561,6 +562,10 @@ export function ProfilesProvider({ children }: { children: ReactNode }) {
         // swallowed the local macro. Running the key's normal assignment here
         // too would be the double execution the whole design avoids.
         if (isObsCenterOpen()) return;
+        // Dial module open: the six keys are slot selectors on the device —
+        // the firmware swallowed the local macro, so the computer-side half
+        // must not run either (same double-execution rule as OBS Center).
+        if (isEncModuleOpen()) return;
         // key logic: a second press inside the double window fires "double"
         const klPending = klStates.current.get(keyId);
         if (klPending?.phase === "wait2") {

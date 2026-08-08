@@ -104,7 +104,13 @@ gc.collect()  # the display stack litters the heap; start the app compacted
 
 DEBOUNCE_S = 0.02
 PING_TIMEOUT_S = 5.0
-PROTO_VERSION = 14 # v14: /macros/meta.json sidecar (mkyada/meta.py) — per-stem
+PROTO_VERSION = 15 # v15: Dial module (kind enc_module) — a device-local
+                   # encoder toolset. The device announces it with a plain
+                   # ctx message the app must NOT answer with a menu (it only
+                   # suppresses its own key handling), and closing the module
+                   # emits menu_ev ev:"close". HID gains a relative pointer
+                   # report (id 5) for the module's mouse-drag slots.
+                   # v14: /macros/meta.json sidecar (mkyada/meta.py) — per-stem
                    # override fields (s=speed tenths, i=icon, n=name) plus a
                    # firmware-maintained CRC manifest (c=crc32, z=size) updated
                    # on every fs_write/fs_delete/wheel-assign. A device speed
@@ -1627,6 +1633,12 @@ class App:
         # local macro must NOT also play — that would be a double execution.
         if self.obs_center_active():
             return
+        # While a Dial module owns the screen the six keys select its slots —
+        # before the layer key too, so every key is a selector (obs pattern).
+        if self.enc_module_active():
+            if pressed:
+                self.ui_call("encmod_key", key_no)
+            return
         if c["layer_key"] == key_no:
             if pressed:
                 self.set_layer_idx((self.layer + 1) % c["layer_count"])
@@ -1656,6 +1668,15 @@ class App:
             return False
         try:
             return self.ui.obs_center_active()
+        except Exception:
+            return False
+
+    def enc_module_active(self):
+        """Whether a Dial module owns the keypad. Safe on core6."""
+        if not self.ui:
+            return False
+        try:
+            return self.ui.enc_module_active()
         except Exception:
             return False
 

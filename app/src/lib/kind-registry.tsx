@@ -8,7 +8,7 @@
 import type { Assignment } from "./types";
 import type { WheelPreview } from "./oled-draw";
 import { KIND_ICON } from "../components/action-icons";
-import { kindRequiresHost } from "./macro-model";
+import { encSlotComplete, kindRequiresHost } from "./macro-model";
 
 /** Which key the preview is standing in for. The speed editor prints "A > K3"
  * from it; callers that don't know (the Settings reference table shows one
@@ -279,6 +279,19 @@ const KINDS: KindMeta[] = [
   },
   // ── Device screen ────────────────────────────────────────────────────────
   {
+    id: "enc_module",
+    label: "Dial (encoder toolset)",
+    icon: KIND_ICON.enc_module,
+    category: "device",
+    host: false,
+    wheel: {
+      mtype: "card",
+      title: "DIAL",
+      summary:
+        "Pressing the key opens the Dial on the keypad screen: up to six encoder tools (jog, timeline zoom, scroll, color-wheel drag, …). The six keys pick a tool, the wheel drives it, and pressing the wheel runs the tool's own button action. Pure HID — works with the app closed.",
+    },
+  },
+  {
     id: "menu",
     label: "Device menu (screen models)",
     icon: KIND_ICON.menu,
@@ -448,6 +461,23 @@ export function wheelPreview(a: Assignment, where?: PreviewWhere): WheelPreview 
           fps: on(w.health) ? 60 : null,
           klabels: kl.some(Boolean) ? kl : ["MUTE", "CAM", "CLIP", "", "", "REC"],
         },
+      };
+    }
+    case "enc_module": {
+      const slots = a.slots ?? [];
+      const labels = Array.from({ length: 6 }, (_, i) => {
+        const s = slots[i];
+        return encSlotComplete(s) ? s.l || `K${i + 1}` : null;
+      });
+      if (labels.every((l) => l === null)) {
+        // nothing configured yet: a representative preview beats a blank map
+        return { screen: "encmod", name: a.label || "Dial", labels: ["JOG", "ZOOM", "SCRL", null, null, null], sel: 0 };
+      }
+      return {
+        screen: "encmod",
+        name: a.label || "Dial",
+        labels,
+        sel: Math.max(0, labels.findIndex((l) => l !== null)),
       };
     }
     case "mic":
