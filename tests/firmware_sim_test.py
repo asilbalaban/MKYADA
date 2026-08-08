@@ -1552,6 +1552,80 @@ check("ctx: media hold reassigns the key",
       _reassigned.get("kind") == "media" and _reassigned.get("media") == "play_pause",
       str(_reassigned))
 
+# midi -> the same browser over all 128 notes. The parts the picker does NOT
+# edit (channel, velocity, note mode) have to survive a reassign, which is why
+# it reads the payload from the file rather than the label cache.
+_write_key1({"name": "Note C3 (ch 10)", "kind": "midi", "version": 3,
+             "icon": "note", "settings": {"speed": 2.0},
+             "midi": {"msg": "note", "ch": 9, "d1": 60, "d2": 111,
+                      "mode": "momentary"},
+             "events": [
+                 {"delay": 0, "type": "midi", "m": "note_on", "ch": 9,
+                  "d1": 60, "d2": 111},
+                 {"delay": 20, "type": "midi", "m": "note_off", "ch": 9,
+                  "d1": 60}]})
+_confirm_key1()
+check("ctx: midi opens a note browser on the assigned note",
+      ui.state == uimod.S_CTX and ui.ctx["mode"] == "optlist"
+      and ui.ctx["kind"] == "midi_note" and ui.ctx["assigned"] == 60
+      and len(ui.ctx["opts"]) == 128, "ctx=%s" % (ui.ctx.get("kind"),))
+check("ctx: midi labels notes the way DAWs print them",
+      uimod.note_name(60) == "C3" and uimod.note_name(0) == "C-2"
+      and uimod.note_name(127) == "G8", uimod.note_name(60))
+# tap auditions the highlighted note as a real on/off pair — a bare note-on
+# would hang until something else cleaned it up
+ui.ctx["sel"] = 64
+sent_midi.clear()
+ui.nav.events.queue.append(FakeKeyEvent(uimod.K_CONFIRM, True))
+ui.nav.events.queue.append(FakeKeyEvent(uimod.K_CONFIRM, False))
+ui.tick(_t2.monotonic())
+check("ctx: midi tap auditions the highlighted note",
+      sent_midi == [b"\x99\x40\x6f", b"\x89\x40\x00"], str(sent_midi))
+# hold reassigns, keeping channel, velocity and mode
+ui.ctx["sel"] = 67
+ui.nav.events.queue.append(FakeKeyEvent(uimod.K_CONFIRM, True))  # held -> assign
+ui.tick(_t2.monotonic())
+with open(vpath(1, 0)) as f:
+    _remidi = json.load(f)
+check("ctx: midi hold reassigns the note",
+      _remidi.get("kind") == "midi" and _remidi["midi"]["d1"] == 67
+      and _remidi["events"][0]["d1"] == 67, str(_remidi))
+check("ctx: midi reassign keeps channel, velocity and mode",
+      _remidi["midi"]["ch"] == 9 and _remidi["midi"]["d2"] == 111
+      and _remidi["midi"]["mode"] == "momentary", str(_remidi.get("midi")))
+check("ctx: midi reassign names the key exactly as the app would",
+      _remidi.get("name") == "Note G3 (ch 10)", str(_remidi.get("name")))
+check("ctx: midi reassign keeps the icon and variants the app set",
+      _remidi.get("icon") == "note" and _remidi.get("version") == 3,
+      str({k: _remidi.get(k) for k in ("icon", "version")}))
+# a fast spin must cover ground: a tick can carry several detents, and one
+# step per tick put the far end of a 128-note list out of reach
+ui._enter_grid()
+_confirm_key1()
+ui.ctx["sel"] = 60
+ui.last_move = _t2.monotonic() - 1.0
+ui.enc.position += 4          # four detents coalesced into one tick
+ui.tick(_t2.monotonic())
+check("ctx: a fast spin moves further than one note",
+      ui.ctx["sel"] > 63, "sel=%d" % ui.ctx["sel"])
+# short lists stay one-per-detent so a nine-item browser cannot overshoot
+_write_key1({"name": "Vol+", "kind": "media", "media": "volume_up",
+             "events": [{"delay": 0, "type": "consumer", "usage": "volume_up"}]})
+ui._enter_grid()
+_confirm_key1()
+_msel = ui.ctx["sel"]
+ui.last_move = _t2.monotonic() - 1.0
+ui.enc.position += 1
+ui.tick(_t2.monotonic())
+check("ctx: a short browser still steps one per detent",
+      ui.ctx["sel"] == min(_msel + 1, len(ui.ctx["opts"]) - 1),
+      "sel=%d from %d" % (ui.ctx["sel"], _msel))
+
+# a bare key press still plays it — the browser is the PSH/CONFIRM gesture
+ui._enter_grid()
+check("press: a midi key still runs (no press-menu)",
+      ui.wants_press_menu(1) is False)
+
 # discoverability: the browser's bottom bar must advertise hold-to-reassign,
 # otherwise a first-timer never learns the gesture (issue: hold hint on screen)
 _menu_kw = {}

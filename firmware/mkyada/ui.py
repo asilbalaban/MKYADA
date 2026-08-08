@@ -109,6 +109,34 @@ BRIGHT_USAGES = ("brightness_up", "brightness_down")
 # grammar). Order is the on-screen list order.
 # Prev before Next everywhere a pair like this is listed — the order the
 # transport controls sit in on any physical remote.
+NOTE_NAMES = ("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
+
+
+def note_name(n):
+    """MIDI note number -> the name DAWs print (60 = C3)."""
+    return "%s%d" % (NOTE_NAMES[n % 12], n // 12 - 2)
+
+
+class _LabelView:
+    """len()/[] over an option list, labelling only the rows show_menu draws.
+
+    The browsers used to build every label on every detent. That is fine for
+    nine media keys and ruinous for 128 MIDI notes on a heap this fragmented:
+    a redraw would allocate 128 strings per turn. show_menu only ever reads
+    its visible window, so nothing else needs to exist."""
+
+    def __init__(self, ui, kind, opts):
+        self._ui = ui
+        self._kind = kind
+        self._opts = opts
+
+    def __len__(self):
+        return len(self._opts)
+
+    def __getitem__(self, i):
+        return self._ui._opt_label(self._kind, self._opts[i])
+
+
 MEDIA_OPTS = ("play_pause", "prev_track", "next_track", "stop", "mute",
               "volume_up", "volume_down", "brightness_up", "brightness_down")
 MEDIA_LABEL = {"play_pause": "Play/Pause", "next_track": "Next",
@@ -978,10 +1006,9 @@ class Ui:
             self._card_state("scroll", path, tr("scroll_t"), name,
                              tr("hint_scroll"))
         elif kind == "midi":
-            # turn = send it again per detent (step a program, retrigger a
-            # note); CONFIRM = send once
-            self._card_state("midi", path, tr("midi_t"), name,
-                             tr("hint_midi"))
+            # browse every note (or controller / program): turn to highlight,
+            # tap to hear it, hold to reassign this key to it
+            self._enter_midi_list(path)
         elif kind == "media":
             # browse every media key: turn to highlight, tap to fire once,
             # hold to reassign this key to the highlighted one
@@ -1029,6 +1056,12 @@ class Ui:
         return opts
 
     def _opt_label(self, kind, o):
+        if kind == "midi_note":
+            return note_name(o)
+        if kind == "midi_cc":
+            return "CC %d" % o
+        if kind == "midi_pc":
+            return "PC %d" % o
         if kind == "media":
             return MEDIA_LABEL.get(o, o)
         if kind == "menu":
@@ -1047,13 +1080,13 @@ class Ui:
                     "assigned": sel, "sel": sel, "path": path, "title": title}
         self.state = S_CTX
         self.activity_at = time.monotonic()
+        self.last_move = 0.0  # so the first detent is never accelerated
         self._draw_optlist()
 
     def _draw_optlist(self):
         c = self.ctx
-        labels = [self._opt_label(c["kind"], o) for o in c["opts"]]
-        self.oled.show_menu(c["title"], labels, c["sel"],
-                            marked=c["assigned"], action=tr("run"),
+        self.oled.show_menu(c["title"], _LabelView(self, c["kind"], c["opts"]),
+                            c["sel"], marked=c["assigned"], action=tr("run"),
                             hold=tr("hold_set"))
 
     def _resolve_hold(self, key, hold_s=MENU_HOLD_S):
@@ -1107,6 +1140,101 @@ class Ui:
         self.app.proto.send({"t": "macro_changed", "file": path,
                              "reason": "assign"})
         return "ok"
+
+    def _enter_midi_list(self, path):
+        """Open the MIDI browser for this key. The payload is read from the
+        file rather than the label cache because the picker has to keep the
+        parts it is not editing — channel, velocity and the note mode all
+        survive a reassign."""
+        try:
+            with open(path, "rb") as f:
+                data = json.load(f)
+        except (OSError, ValueError, MemoryError):
+            data = None
+        m = (data or {}).get("midi")
+        if not isinstance(m, dict):
+            m = {}
+        msg = m.get("msg") or "note"
+        try:
+            cur = clamp(int(m.get("d1") or 0), 0, 127)
+            ch = clamp(int(m.get("ch") or 0), 0, 15)
+            d2 = clamp(int(m.get("d2", 100)), 0, 127)
+        except (TypeError, ValueError):
+            cur, ch, d2 = 0, 0, 100
+        mode = m.get("mode") or "momentary"
+        del data, m
+        gc.collect()
+        if msg not in ("note", "cc", "pc"):
+            msg = "note"
+        self._enter_optlist("midi_" + msg, path, range(128), cur, tr("midi_t"))
+        # what the picker is not editing, kept for the audition and the write
+        # NOT "mode": that key is the ctx's own dispatch tag ("optlist").
+        self.ctx["ch"] = ch
+        self.ctx["d2"] = d2
+        self.ctx["note_mode"] = mode
+        self.ctx["msg"] = msg
+
+    def _midi_audition(self, c, d1):
+        """Tap in the browser: send the highlighted message so it can be heard
+        before it is committed. A note is a real on/off pair, not a bare
+        note-on that would hang."""
+        eng = self.app.engine
+        msg = c["msg"]
+        if msg == "cc":
+            eng.midi_send("cc", c["ch"], d1, c["d2"])
+        elif msg == "pc":
+            eng.midi_send("pc", c["ch"], d1)
+        else:
+            eng.midi_send("note_on", c["ch"], d1, c["d2"])
+            time.sleep(0.12)
+            eng.midi_send("note_off", c["ch"], d1)
+
+    def _midi_macro_name(self, msg, ch, d1, d2):
+        """The name the APP would compile for this message (macro-model.ts
+        midiName). It has to match character for character: the app treats a
+        name it did not generate as a user-typed label and freezes it, so a
+        shorter device name would stick to the key forever after."""
+        suffix = " (ch %d)" % (ch + 1)
+        if msg == "cc":
+            return "CC %d = %d%s" % (d1, d2, suffix)
+        if msg == "pc":
+            return "Program %d%s" % (d1, suffix)
+        return "Note %s%s" % (note_name(d1), suffix)
+
+    def _write_midi_macro(self, path, c, d1):
+        msg, ch, d2 = c["msg"], c["ch"], c["d2"]
+        pay = {"msg": msg, "ch": ch, "d1": d1}
+        if msg != "pc":
+            pay["d2"] = d2
+        if msg == "note":
+            pay["mode"] = c["note_mode"]
+            evs = [{"delay": 0, "type": "midi", "m": "note_on",
+                    "ch": ch, "d1": d1, "d2": d2},
+                   {"delay": 20, "type": "midi", "m": "note_off",
+                    "ch": ch, "d1": d1}]
+        elif msg == "cc":
+            evs = [{"delay": 0, "type": "midi", "m": "cc",
+                    "ch": ch, "d1": d1, "d2": d2}]
+        else:
+            evs = [{"delay": 0, "type": "midi", "m": "pc", "ch": ch, "d1": d1}]
+        # Merge rather than rewrite: a reassign moves the note, it does not
+        # throw away the key's icon, its speed setting or its tap/hold
+        # variants — and rebuilding the file from scratch would also downgrade
+        # a format-v3 (variants) macro to v2.
+        try:
+            with open(path, "rb") as f:
+                data = json.load(f)
+            if not isinstance(data, dict):
+                data = None
+        except (OSError, ValueError, MemoryError):
+            data = None
+        if data is None:
+            data = {"format": "mkyada-macro", "version": 2}
+        data["kind"] = "midi"
+        data["name"] = self._midi_macro_name(msg, ch, d1, d2)
+        data["midi"] = pay
+        data["events"] = evs
+        return self._write_macro(path, data)
 
     def _write_media_macro(self, path, usage):
         return self._write_macro(path, {
@@ -1588,13 +1716,23 @@ class Ui:
         eng = self.app.engine
         if mode == "optlist":
             if d:
-                c["sel"] = clamp(c["sel"] + (1 if d > 0 else -1), 0,
+                # Nine media keys are fine one-per-detent, 128 notes are not:
+                # a tick can carry several detents and dropping the surplus
+                # put the far end of the list out of reach at speed. Long
+                # lists get the speed editor's velocity curve; short ones stay
+                # one-per-detent so they cannot overshoot.
+                n = abs(d)
+                if len(c["opts"]) > 32:
+                    dt = now - self.last_move
+                    n *= 3 if (n > 1 or dt < 0.04) else (2 if dt < 0.09 else 1)
+                self.last_move = now
+                c["sel"] = clamp(c["sel"] + (n if d > 0 else -n), 0,
                                  len(c["opts"]) - 1)
                 self._draw_optlist()
             if press in (K_PSH, K_CONFIRM):
                 self._optlist_press(press)
                 return
-        elif mode in ("key", "scroll", "midi"):
+        elif mode in ("key", "scroll"):
             if d:
                 for _ in range(min(abs(d), 4)):
                     self.app.play_file(path=c["path"], trigger=None)
@@ -1624,6 +1762,8 @@ class Ui:
                 res = self._write_media_macro(c["path"], opt)
             elif c["kind"] == "menu":
                 res = self._write_menu_macro(c["path"], opt)
+            elif c["kind"][:5] == "midi_":
+                res = self._write_midi_macro(c["path"], c, opt)
             else:
                 res = "error"
             if res == "ok":
@@ -1636,6 +1776,8 @@ class Ui:
                 self._toast(c["title"], tr("save_fail"), "")
         elif c["kind"] == "media":
             self.app.engine.consumer_tap(opt)
+        elif c["kind"][:5] == "midi_":
+            self._midi_audition(c, opt)
         elif c["kind"] == "menu":
             self._run_menu_act(opt)  # transitions the UI itself
 

@@ -26,6 +26,7 @@ Two families:
 | **Mouse scroll** | Wheel up/down or horizontal pan, optionally with modifiers held (e.g. `Ctrl+wheel` to zoom, `Alt+wheel` in Illustrator). |
 | **MIDI message** | A note, control change or program change straight into a DAW — the keypad is a USB MIDI device as well as a keyboard. Notes hold while the key is held (what Ableton's Looper and drum pads need); a Mackie Control picker gives Logic and Pro Tools transport with no mapping. Needs **MIDI** switched on in Settings (off by default, restart required, and unavailable while the USB drive is visible). |
 | **Recorded macro** | A recording from the [Recorder](macro-format.md): mouse paths, clicks and keystrokes replayed 1:1 as real HID. |
+| **Dial** *(Vision 6)* | Opens a six-slot encoder toolset on the screen: the six keys pick a slot, the wheel drives it. Slots send shortcut pairs, scroll, a relative mouse drag (for controls with no shortcut, like DaVinci's colour wheels) or MIDI CC. Ready-made sets for Resolve, Premiere, Final Cut, Photoshop, Ableton, Logic, Reaper, FL Studio, a MIDI mixer and a sheet-music page turner. See [vision6.md](vision6.md). |
 | **Device menu** *(Vision 6)* | Drive the OLED's own menu from a key — scroll ←/→, CONFIRM, BACK, open Home/Grid/Settings. |
 
 ## Host actions — need the app connected
@@ -83,6 +84,7 @@ poor default for a volume key).
 | Microphone (mute) | Browse toggle / mute / unmute | Do it now | Reassign the key to that mode |
 | Webhook / Command / Launch / Sound · one entry | — | Run it (result shown; a line points at the app for adding more) | — |
 | Webhook / Command / Launch / Sound · several entries | Browse the key's entries (default marked) | Use the highlighted one now | Make it the key's **default** |
+| **MIDI** | Browse all 128 notes (or controller / program numbers), assigned one marked | **Hear** the highlighted note — a real on/off pair, nothing hangs | **Reassign** the key to it, keeping its channel, velocity and note mode |
 | Device menu (layer / nav) | Browse next/prev layer, jump to a layer, Home/Grid/Settings | Run the highlighted one | Reassign the key to it |
 
 A standalone volume key (app closed) still adjusts relatively over HID, but the

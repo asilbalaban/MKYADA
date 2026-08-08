@@ -128,6 +128,64 @@ device's pixels rather than a drawing of them.
   that an app owns them. Falls back to a plain "Connected to app" note on
   older apps.
 
+## Browsing and reassigning on the device
+
+Select a key in the grid and press the wheel (PSH or CONFIRM). What opens
+depends on the key's action, and the grammar is the same everywhere:
+
+> **turn** = walk the options · **tap** = do the highlighted one once ·
+> **hold** = reassign this key to it · **BACK** = leave
+
+Two kinds open a full browser. **Media keys** list the nine consumer usages.
+**MIDI keys** list all 128 notes by the names DAWs print (60 = C3) — or
+controller numbers for a CC key, program numbers for a program-change key.
+A tap **auditions** the highlighted note, sending a real note-on/note-off pair
+so nothing hangs, and a hold rewrites the key. The parts you are not editing —
+channel, velocity, and whether the note is momentary — are read from the file
+and put back unchanged.
+
+The keypad writes the macro itself, so a reassign sticks with no app running.
+It needs a writable filesystem, which means the USB drive has to be hidden
+(the default); with the drive visible the browser says so instead of failing
+silently.
+
+A press on the physical key still just plays it. The browser is the wheel
+gesture, not the key.
+
+> The note list is 128 entries long, so it is labelled lazily — only the rows
+> actually on screen are turned into strings. Building all 128 on every detent
+> would allocate a kilobyte of garbage per turn on a heap where fragmentation,
+> not free space, is the binding constraint.
+
+## The Dial — a six-slot encoder toolset
+
+A key whose action is **Dial** opens a module that takes over the screen: the
+six keys become slot selectors and the wheel drives whichever slot is
+selected, with the six labels drawn as tiles so you can see the whole set at
+once. Everything it does is plain HID or MIDI performed by the keypad, so it
+works with the app closed.
+
+Each slot is one of:
+
+| Slot | A detent sends |
+|---|---|
+| **Shortcut pair** | a full modifier combo one way, another the other (jog with arrows, zoom with ⌘+/⌘−) |
+| **Scroll** | wheel ticks, vertical or horizontal, with optional modifiers held around them (⌥+wheel to zoom) |
+| **Mouse drag** | a relative cursor nudge with the left button held — for controls that have no shortcut at all, like DaVinci's color wheels. Modifiers can ride the whole gesture, which is how Photoshop's brush-size scrub works |
+| **Volume / media** | a consumer usage |
+| **MIDI CC** | a control change — relative by default, so the knob never jumps when the DAW's value and the encoder's disagree |
+
+Pressing the wheel runs the selected slot's own button action (space on a jog
+slot, a click on a drag slot). Sensitivity is 1–10 per slot on top of the
+wheel's own velocity acceleration, and direction can be inverted. BACK closes;
+unlike the chooser menus the Dial has no idle timeout, because a colour
+session parks on it for minutes at a time.
+
+Ready-made sets fill the six slots for DaVinci Resolve, Premiere, Final Cut,
+Photoshop, a generic timeline, Ableton, Logic, Reaper, FL Studio, a MIDI mixer
+and a sheet-music page turner. They are starting points — every slot stays
+editable in the app.
+
 ## Working on the menu
 
 ### One drawing, two places it has to look right

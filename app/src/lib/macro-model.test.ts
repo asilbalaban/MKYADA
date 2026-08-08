@@ -311,6 +311,19 @@ describe("assignment round-trip", () => {
     expect(compileAssignment(seq)!.events.length).toBeGreaterThan(1);
   });
 
+  // The Vision 6 rewrites a midi macro itself when you hold to reassign, and
+  // builds this exact string (ui.py _midi_macro_name). If the two drift, the
+  // app reads the device's name as a user-typed label and freezes it onto the
+  // key — the note would then be stuck in the UI no matter what you change.
+  it("compiled midi names match what the device writes", () => {
+    expect(compileAssignment({ kind: "midi", msg: "note", ch: 9, d1: 67, d2: 111 })!.name)
+      .toBe("Note G3 (ch 10)");
+    expect(compileAssignment({ kind: "midi", msg: "cc", ch: 0, d1: 5, d2: 100 })!.name)
+      .toBe("CC 5 = 100 (ch 1)");
+    expect(compileAssignment({ kind: "midi", msg: "pc", ch: 0, d1: 7 })!.name)
+      .toBe("Program 7 (ch 1)");
+  });
+
   it("note names follow the numbering DAWs print", () => {
     expect(midiNoteName(60)).toBe("C3");
     expect(midiNoteName(0)).toBe("C-2");

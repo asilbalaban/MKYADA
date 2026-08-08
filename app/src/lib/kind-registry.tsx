@@ -203,9 +203,9 @@ const KINDS: KindMeta[] = [
     category: "media",
     host: false,
     wheel: {
-      mtype: "card",
+      mtype: "picker",
       title: "MIDI",
-      summary: "Turn to send it again per detent (step a program, retrigger a note); press to send once.",
+      summary: "Turn to browse every note, tap to hear the highlighted one, hold to reassign this key to it.",
     },
   },
   // ── Automation ───────────────────────────────────────────────────────────
@@ -426,19 +426,20 @@ export function wheelPreview(a: Assignment, where?: PreviewWhere): WheelPreview 
     }
     case "scroll":
       return { screen: "card", title: "SCROLL", big: a.dir.toUpperCase(), line: "turn: scroll", hint: "step" };
-    case "midi":
-      return {
-        screen: "card",
-        title: "MIDI",
-        big:
-          a.msg === "cc"
-            ? `CC${a.d1}`
-            : a.msg === "pc"
-              ? `PC${a.d1}`
-              : midiNoteName(a.d1),
-        line: "turn: send",
-        hint: `ch ${(a.ch ?? 0) + 1}`,
-      };
+    case "midi": {
+      // a browser of every note (or controller / program), cursor on the
+      // assigned one — the device walks all 128, the preview shows a window
+      const label = (n: number) =>
+        a.msg === "cc" ? `CC ${n}` : a.msg === "pc" ? `PC ${n}` : midiNoteName(n);
+      const around = [-2, -1, 0, 1, 2]
+        .map((o) => a.d1 + o)
+        .filter((n) => n >= 0 && n <= 127);
+      const items = around.map((n) => ({
+        label: label(n),
+        mark: n === a.d1 ? ("cursor" as const) : undefined,
+      }));
+      return { screen: "picker", title: "MIDI", items, action: "Play", hold: "hold: assign" };
+    }
     case "obs": {
       if (a.action === "setScene")
         return {
