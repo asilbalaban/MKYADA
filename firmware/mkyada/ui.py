@@ -88,6 +88,12 @@ CTX_WAIT_S = 3.0
 # enough to survive detent gaps at slow deliberate turns, short enough that
 # the control is dropped as soon as the hand leaves the wheel.
 DRAG_RELEASE_S = 0.35
+# Gestures that also hold modifiers get a longer window: on macOS a
+# Ctrl+click that ends without enough travel is SYNTHESIZED into a right
+# click (field bug: the Photoshop brush scrub popped the context menu on
+# slow single detents). A longer window merges hesitant detents into one
+# button-hold, so the release almost always follows real drag distance.
+MOD_DRAG_RELEASE_S = 0.8
 
 (S_HOME, S_SELECT, S_SPEED, S_SAVED, S_SET_MENU, S_TIMEOUT,
  S_PLAYING, S_HOST, S_TOAST, S_LANG, S_TEST, S_ABOUT, S_CTX,
@@ -1214,7 +1220,7 @@ class Ui:
         while not slots[sel]:
             sel += 1
         self.ctx = {"mode": "encmod", "name": name or "Dial",
-                    "slots": slots, "sel": sel, "drag_until": 0.0}
+                    "slots": slots, "sel": sel, "drag_until": 0.0, "held": 0}
         self.state = S_CTX
         self.activity_at = time.monotonic()
         self.last_move = 0.0
@@ -1249,9 +1255,14 @@ class Ui:
         self._draw_encmod()
 
     def _encmod_drag_release(self, c):
+        # button up first, then the gesture modifiers — the reverse of how
+        # the gesture began, so the host never sees a bare modifier-drag
         eng = self.app.engine
         if eng.rel_buttons:
             eng.rel_button("left", False)
+        if c.get("held"):
+            eng.drop_mods(c["held"])
+            c["held"] = 0
         c["drag_until"] = 0.0
 
     def _encmod_turn(self, now, d, c):
@@ -1296,10 +1307,17 @@ class Ui:
             amt = n * step
             if not pos:
                 amt = -amt
-            if s.get("drag"):
-                if not eng.rel_buttons:
-                    eng.rel_button("left", True)
-                c["drag_until"] = now + DRAG_RELEASE_S
+            mods = s.get("mods")
+            if mods and not c.get("held"):
+                # gesture modifiers (Ctrl+Opt+drag = Photoshop brush scrub)
+                # go down once, BEFORE the button, and ride the whole turn
+                # gesture — released with it below
+                c["held"] = eng.hold_mods(mods)
+            if s.get("drag") and not eng.rel_buttons:
+                eng.rel_button("left", True)
+            if mods or s.get("drag"):
+                c["drag_until"] = now + (MOD_DRAG_RELEASE_S if mods
+                                         else DRAG_RELEASE_S)
             if s.get("axis") == "x":
                 eng.rel_move(amt, 0)
             else:

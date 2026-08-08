@@ -134,7 +134,10 @@ selected slot as plain HID — no app needed. The payload is `enc_module`:
   around the ticks — Cmd+scroll zoom), `"move"` (relative cursor nudge on
   `axis` `"x"`|`"y"`, `step` px per detent 1–30; `drag: true` holds the left
   button through the turn gesture — for controls with no shortcut, e.g.
-  DaVinci color wheels), `"consumer"` (`cw`/`ccw` are consumer usages).
+  DaVinci color wheels; optional `mods` are held through the gesture too,
+  pressed before the button and released after it — Ctrl+Opt+drag is
+  Photoshop's brush-size scrub, fw ≥ 0.28.1), `"consumer"` (`cw`/`ccw` are
+  consumer usages).
 - `m`: sensitivity 1–10 (units per detent, multiplied by the wheel's own
   velocity acceleration). `inv` flips the direction.
 - `b`: the encoder button while this slot is selected — absent = nothing,

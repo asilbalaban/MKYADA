@@ -1578,6 +1578,26 @@ function EncSlotRow({
               onChange({ ...slot, step: Math.max(1, Math.min(30, Number(e.target.value) || 1)) })
             }
           />
+          <span className="text-fg-faint text-xs">Hold:</span>
+          {MODIFIERS.map((m) => {
+            const on = (slot.mods ?? []).includes(m);
+            return (
+              <Button
+                key={m}
+                variant={on ? "primary" : "default"}
+                role="switch"
+                aria-checked={on}
+                onClick={() =>
+                  onChange({
+                    ...slot,
+                    mods: on ? (slot.mods ?? []).filter((x) => x !== m) : [...(slot.mods ?? []), m],
+                  })
+                }
+              >
+                {modifierDisplay(m)}
+              </Button>
+            );
+          })}
           {toggle(slot.drag !== false, "Hold left button (drag)", () =>
             onChange({ ...slot, drag: slot.drag === false }),
           )}

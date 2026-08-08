@@ -93,14 +93,26 @@ export const ENC_PRESETS: EncPreset[] = [
   {
     id: "photoshop",
     label: "Photoshop",
-    note: "Brush size, zoom, pan, history scrubbing and layer hopping.",
+    note: "Brush size (scrub HUD), wheel zoom, scroll, pan and multi-step undo.",
     slots: [
-      { l: "BRUSH", t: "keys", cw: combo([], "]"), ccw: combo([], "["), m: 1, b: BTN_CLICK },
-      { l: "ZOOM", t: "keys", cw: combo(["WIN"], "="), ccw: combo(["WIN"], "-"), m: 1 },
+      // Brush size rides Photoshop's scrubby HUD (Ctrl+Opt+drag left/right),
+      // NOT the [ ] shortcuts: on Turkish-Q and friends the brackets need
+      // AltGr and Photoshop refuses them as shortcuts — the field bug where
+      // BRUSH did nothing. The HUD is layout-proof and previews the tip live.
+      // step 10: a single detent must travel far enough to read as a DRAG —
+      // macOS turns a short Ctrl+click into a right click (context menu).
+      // no wheel-press action: with a brush tool a bare click paints a dab
+      { l: "BRUSH", t: "move", axis: "x", step: 10, drag: true, mods: ["CTRL", "ALT"], m: 1 },
+      // Zoom is Opt+wheel (a Photoshop default on every layout and OS) —
+      // the Cmd+= route lands on the wrong key on non-US layouts.
+      { l: "ZOOM", t: "scroll", axis: "v", mods: ["ALT"], m: 1 },
       SCRL_V,
       PAN_H,
-      { l: "HIST", t: "keys", cw: combo(["SHIFT", "WIN"], "z"), ccw: combo(["ALT", "WIN"], "z"), m: 1 },
-      { l: "LAYER", t: "keys", cw: combo(["ALT"], "]"), ccw: combo(["ALT"], "["), m: 1 },
+      // Plain Cmd+Z is MULTI-step undo since Photoshop 2019; Opt+Cmd+Z is
+      // now "Toggle Last State" (the old one-step flip-flop — the field bug
+      // where HIST undid one step and then redid it).
+      UNDO,
+      VOL,
     ],
   },
   {
@@ -146,7 +158,7 @@ export function encPresetSlots(p: EncPreset): (EncModuleSlot | null)[] {
     if (c.t === "keys") {
       if (c.cw) c.cw = combo(c.cw);
       if (c.ccw) c.ccw = combo(c.ccw);
-    } else if (c.t === "scroll" && c.mods) {
+    } else if ((c.t === "scroll" || c.t === "move") && c.mods) {
       c.mods = fix(c.mods);
     }
     if (c.b?.t === "combo") c.b = { t: "combo", ...combo(c.b) };

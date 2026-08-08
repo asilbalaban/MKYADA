@@ -1802,6 +1802,45 @@ check("dial: closing tells the app (menu_ev close)",
       any(m.get("t") == "menu_ev" and m.get("ev") == "close" for m in voutbox),
       str(voutbox))
 
+# move slot with gesture modifiers (Ctrl+Opt+drag = Photoshop brush scrub):
+# mods go down BEFORE the button, ride the whole gesture, and the release
+# drops the button first, then the mods — the host never sees a bare drag
+_write_key1({"name": "PS", "kind": "enc_module",
+             "enc_module": {"slots": [
+                 {"l": "BRUSH", "t": "move", "axis": "x", "step": 3,
+                  "drag": True, "mods": ["CTRL", "ALT"], "m": 1},
+                 None, None, None, None, None]}})
+ui._enter_grid()
+ui.open_key_menu(1)
+_dnow = _t2.monotonic()
+ui.last_move = _dnow - 1.0
+sent_reports.clear()
+ui.enc.position += 1
+ui.tick(_dnow)
+_kbd_i = next((i for i, r in enumerate(sent_reports) if r[1] == 0x06), None)
+_btn_i = next((i for i, r in enumerate(sent_reports)
+               if r[1] == 0x02 and len(r[2]) == 3), None)
+check("dial: gesture mods go down before the drag button",
+      _kbd_i is not None and _btn_i is not None and _kbd_i < _btn_i
+      and sent_reports[_kbd_i][2][0] == 0x05,
+      str([(r[1], bytes(r[2])) for r in sent_reports]))
+sent_reports.clear()
+ui.tick(_dnow + 0.5)  # inside the LONGER modded-gesture window: still held
+check("dial: modded gesture outlives the plain-drag window",
+      not sent_reports and vapp.engine.rel_buttons, str(sent_reports))
+ui.tick(_dnow + 1.0)  # past MOD_DRAG_RELEASE_S
+_btn_i = next((i for i, r in enumerate(sent_reports)
+               if r[1] == 0x02 and len(r[2]) == 3), None)
+_kbd_i = next((i for i, r in enumerate(sent_reports) if r[1] == 0x06), None)
+check("dial: release drops the button first, then the mods",
+      _btn_i is not None and _kbd_i is not None and _btn_i < _kbd_i
+      and sent_reports[_kbd_i][2][0] == 0x00,
+      str([(r[1], bytes(r[2])) for r in sent_reports]))
+check("dial: no modifier left behind", vapp.engine.mods == 0)
+ui.nav.events.queue.append(FakeKeyEvent(uimod.K_BACK, True))
+ui.nav.events.queue.append(FakeKeyEvent(uimod.K_BACK, False))
+ui.tick(_t2.monotonic())
+
 # an all-empty module toasts instead of opening a dead screen
 _write_key1({"name": "Empty", "kind": "enc_module",
              "enc_module": {"slots": [None] * 6}})

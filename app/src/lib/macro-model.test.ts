@@ -663,12 +663,21 @@ describe("dial presets resolve through the keyboard layout", () => {
 
   it("altgr characters carry the alt_gr modifier", () => {
     applyLayoutMap(TRQ);
+    const prem = ENC_PRESETS.find((p) => p.id === "premiere")!;
+    const gain = encPresetSlots(prem).find((s) => s?.l === "GAIN");
+    if (gain?.t !== "keys") throw new Error("gain slot missing");
+    // "[" / "]" are AltGr+8 / AltGr+9 on this layout
+    expect(gain.cw).toEqual({ mods: ["ALT_GR"], key: "9" });
+    expect(gain.ccw).toEqual({ mods: ["ALT_GR"], key: "8" });
+  });
+
+  it("photoshop brush rides the scrub HUD, not the layout-hostile brackets", () => {
+    applyLayoutMap(TRQ);
     const ps = ENC_PRESETS.find((p) => p.id === "photoshop")!;
     const brush = encPresetSlots(ps).find((s) => s?.l === "BRUSH");
-    if (brush?.t !== "keys") throw new Error("brush slot missing");
-    // "[" / "]" are AltGr+8 / AltGr+9 on this layout
-    expect(brush.cw).toEqual({ mods: ["ALT_GR"], key: "9" });
-    expect(brush.ccw).toEqual({ mods: ["ALT_GR"], key: "8" });
+    if (brush?.t !== "move") throw new Error("brush slot missing");
+    expect(brush.drag).toBe(true);
+    expect(brush.mods).toEqual(["CTRL", "ALT"]);
   });
 
   it("named keys (arrows, space) pass through untouched", () => {

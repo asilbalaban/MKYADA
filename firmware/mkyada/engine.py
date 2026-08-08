@@ -139,6 +139,25 @@ class Engine:
             self.rel_buttons &= ~bit & 0xFF
         self._rel_report()
 
+    def hold_mods(self, mod_names):
+        """Press modifier keys and KEEP them down (Dial move gestures:
+        Ctrl+Opt+drag is Photoshop's brush-size scrub). Returns the modifier
+        bits so the caller can drop_mods() exactly what it added."""
+        from mkyada.hidmap import MOD_NAME
+        added = 0
+        for m in mod_names or ():
+            added |= MOD_NAME.get(str(m).lower(), 0)
+        if added:
+            self.mods |= added
+            self._kbd_report()
+            time.sleep(0.01)  # let the host see the modifiers before the drag
+        return added
+
+    def drop_mods(self, bits):
+        if bits:
+            self.mods &= ~bits & 0xFF
+            self._kbd_report()
+
     SCROLL_MAX_TICKS = 20  # per event/burst; matches the app's amount clamp
 
     def scroll(self, dy, dx=0):

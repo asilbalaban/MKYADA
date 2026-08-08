@@ -379,7 +379,9 @@ export type EncModuleBtn =
  *   around them (Cmd+scroll = zoom)
  * - move: relative cursor movement on one axis per detent; `drag` holds the
  *   left button through the turn gesture — for controls with no shortcut
- *   (DaVinci color wheels: hover the control, turn the encoder)
+ *   (DaVinci color wheels: hover the control, turn the encoder). `mods` are
+ *   held through the gesture too: Ctrl+Opt+drag is Photoshop's brush-size
+ *   scrub, the layout-proof answer to `[`/`]` needing AltGr on Turkish-Q
  * - consumer: media/volume usages per detent */
 export type EncModuleSlot = {
   /** OLED tile label, ≤6 chars (clamped again on the device) */
@@ -393,7 +395,7 @@ export type EncModuleSlot = {
 } & (
   | { t: "keys"; cw?: { mods: string[]; key: string }; ccw?: { mods: string[]; key: string } }
   | { t: "scroll"; axis: "v" | "h"; mods?: string[] }
-  | { t: "move"; axis: "x" | "y"; step?: number; drag?: boolean }
+  | { t: "move"; axis: "x" | "y"; step?: number; drag?: boolean; mods?: string[] }
   | { t: "consumer"; cw?: string; ccw?: string }
 );
 
