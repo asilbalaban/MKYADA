@@ -252,10 +252,15 @@ const TS = path.join(ROOT, "app", "src", "lib", "oled-icons.ts");
 const curPy = fs.existsSync(PY) ? fs.readFileSync(PY, "utf8") : null;
 const curTs = fs.existsSync(TS) ? fs.readFileSync(TS, "utf8") : null;
 
+// Compare with line endings normalized: git hands a Windows checkout CRLF
+// while the generator emits LF, so a raw compare reported every generated
+// file as stale on Windows and no local run of this check could ever pass.
+const lf = (s) => (s === null ? null : s.replace(/\r\n/g, "\n"));
+
 if (process.argv.includes("--check")) {
   const bad = [];
-  if (curPy !== py) bad.push("firmware/mkyada/icons.py");
-  if (curTs !== ts) bad.push("app/src/lib/oled-icons.ts");
+  if (lf(curPy) !== lf(py)) bad.push("firmware/mkyada/icons.py");
+  if (lf(curTs) !== lf(ts)) bad.push("app/src/lib/oled-icons.ts");
   if (bad.length) die(`${bad.join(", ")} kaynakla uyuşmuyor — ` +
                       "node scripts/build-icons.mjs çalıştırın");
   console.log(`[icons] güncel — ${parsed.icons.size} ikon, ${parsed.cats.length} kategori`);

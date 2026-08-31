@@ -158,7 +158,10 @@ const cur = fs.existsSync(OUT) ? fs.readFileSync(OUT, "utf8") : null;
 const n = baseKeys.length;
 
 if (process.argv.includes("--check")) {
-  if (cur !== text) {
+  // Line endings normalized: a Windows checkout is CRLF and the generator
+  // emits LF, so a raw compare could never pass locally there.
+  const lf = (s) => (s === null || s === undefined ? s : s.replace(/\r\n/g, "\n"));
+  if (lf(cur) !== lf(text)) {
     die("app/src/lib/oled-i18n.ts firmware/mkyada/i18n.py ile uyuşmuyor — " +
         "node scripts/build-oled-i18n.mjs çalıştırın");
   }

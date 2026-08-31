@@ -1103,17 +1103,26 @@ ui = vapp.ui
 voutbox = []
 vapp.proto.send = lambda obj: (voutbox.append(obj), True)[1]
 vapp.proto.ser = FakeSerial([])
-mac_dir = tempfile.mkdtemp()
+# The device's paths are always POSIX ("/macros/key1.json"), and the firmware
+# splits them accordingly — meta.stem_of() does path.rsplit("/", 1). Handing
+# it os.path.join's backslashes on Windows made every sidecar entry key on the
+# whole absolute path, so the meta tests failed there and only there while CI
+# (Linux) stayed green. Join the way the device does, on every platform.
+mac_dir = tempfile.mkdtemp().replace(os.sep, "/")
 LN = "abcdefgh"
 
 
+def mpath(name):
+    return "%s/%s" % (mac_dir, name)
+
+
 def vpath(k, l):
-    return os.path.join(mac_dir, "key%d%s.json" % (k, "" if l == 0 else "-" + LN[l]))
+    return mpath("key%d%s.json" % (k, "" if l == 0 else "-" + LN[l]))
 
 
 vapp.macro_path_for = vpath
-vapp.slot_path = lambda s, l: os.path.join(
-    mac_dir, "%s%s.json" % (s, "" if l == 0 else "-" + LN[l]))
+vapp.slot_path = lambda s, l: mpath(
+    "%s%s.json" % (s, "" if l == 0 else "-" + LN[l]))
 
 with open(vpath(1, 0), "w") as f:  # v4 stream file: name+speed in the header
     f.write(json.dumps({"format": "mkyada-macro", "version": 4, "stream": True,
@@ -1154,7 +1163,7 @@ check("split hard cut", ui._split_name("abcdefghijklmnop") == ("abcdefghij", "kl
 # the old whole-file rewrite could out-run the watchdog on a long recording
 import mkyada.meta as metamod  # noqa: E402
 
-metamod.PATH = os.path.join(mac_dir, "meta.json")
+metamod.PATH = mpath("meta.json")
 with open(vpath(1, 0), "rb") as f:
     v_before = f.read()
 res = ui.persist_speed(0, 0, 30)
@@ -1205,7 +1214,7 @@ check("play_file uses meta speed", _played.get("speed") == 3.0,
 # no copy-on-write of the whole file anymore. A key without a profile file
 # is unassigned in that profile, so its speed edit reports missing.
 def vprof_path(k, l):
-    return os.path.join(mac_dir, "p_test_key%d.json" % k)
+    return mpath("p_test_key%d.json" % k)
 
 
 _vpath_std = vapp.macro_path_for
@@ -1449,7 +1458,7 @@ ui.invalidate_labels()
 ui._dispatch(_t2.monotonic(), 0, uimod.K_BACK)
 check("menu-none BACK slot swallows the press",
       ui.state == uimod.S_SELECT and vplays == [], "state=%d" % ui.state)
-os.remove(os.path.join(mac_dir, "btn-back.json"))
+os.remove(mpath("btn-back.json"))
 ui.invalidate_labels()
 
 # direct-jump menu actions (fw 0.12.0): "settings" opens the settings menu,
@@ -1471,7 +1480,7 @@ vplays.clear()
 ui._dispatch(_t2.monotonic(), 0, uimod.K_CONFIRM)
 check("menu-settings CONFIRM slot opens settings",
       ui.state == uimod.S_SET_MENU and vplays == [], "state=%d" % ui.state)
-os.remove(os.path.join(mac_dir, "btn-confirm.json"))
+os.remove(mpath("btn-confirm.json"))
 ui.invalidate_labels()
 _lyr0 = vapp.layer
 ui.inject("layer_next")
@@ -2095,7 +2104,7 @@ ui._enter_grid()
 
 # per-context overrides: enc-cw@home plays on the layer picker; the other
 # direction of a half-assigned wheel is dead; unassigned BACK stays default
-vapp.slot_ctx_path = lambda s, c: os.path.join(mac_dir, "%s@%s.json" % (s, c))
+vapp.slot_ctx_path = lambda s, c: mpath("%s@%s.json" % (s, c))
 with open(vapp.slot_ctx_path("enc-cw", "home"), "w") as f:
     json.dump({"format": "mkyada-macro", "version": 2, "name": "vol+",
                "events": []}, f)
@@ -2130,7 +2139,7 @@ ui._enter_grid()
 # cleanup: drop the issue-19 slot files so earlier expectations stay valid
 for _f in ("btn-psh.json", "enc-ccw.json", "enc-cw@home.json"):
     try:
-        os.remove(os.path.join(mac_dir, _f))
+        os.remove(mpath(_f))
     except OSError:
         pass
 ui.invalidate_labels()
