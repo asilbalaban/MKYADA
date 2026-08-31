@@ -2,16 +2,23 @@
 #
 # Presents the RP2040-Zero to the host as:
 #   HID keyboard (stock, report ID 1)
-#   HID absolute-position mouse (custom) — two reports on one interface:
-#     report 2 (pointer): buttons(1B) + X(16-bit abs 0..32767) + Y(16-bit abs)
-#     report 4 (scroll): wheel(8-bit rel, vertical) + pan(8-bit rel, AC Pan)
-#     report 5 (rel pointer): buttons(1B) + dX(8-bit rel) + dY(8-bit rel) —
-#       nudges the cursor from wherever the user has it (Dial drag slots);
-#       an absolute report can't do that without knowing the position.
-#     Split on purpose: X/Y are absolute, so a wheel tick riding the same
-#     report would re-assert the last known position and teleport the cursor
-#     (a scroll-only macro used to jump the mouse to screen center). A
-#     dedicated scroll report leaves the cursor where the user has it.
+#   HID absolute-position mouse (custom) — three reports in TWO top-level
+#   collections on one interface:
+#     collection 1 — report 2 (pointer): buttons(1B) + X(16-bit abs 0..32767)
+#       + Y(16-bit abs), and report 4 (scroll): wheel(8-bit rel, vertical) +
+#       pan(8-bit rel, AC Pan)
+#     collection 2 — report 5 (rel pointer): buttons(1B) + dX(8-bit rel) +
+#       dY(8-bit rel) — nudges the cursor from wherever the user has it (Dial
+#       drag slots); an absolute report can't do that without knowing the
+#       position.
+#     Scroll is split from the pointer on purpose: X/Y are absolute, so a
+#     wheel tick riding the same report would re-assert the last known
+#     position and teleport the cursor (a scroll-only macro used to jump the
+#     mouse to screen center). A dedicated scroll report leaves the cursor
+#     where the user has it.
+#     The rel pointer is in its own COLLECTION on purpose: Windows binds
+#     mouhid.sys per top-level Usage(Mouse) collection and cannot handle one
+#     that declares X/Y both absolutely and relatively — see the descriptor.
 #   HID consumer control (stock, report ID 3) — media keys
 #   CDC serial: console (debug/REPL) + data (app protocol)
 #   USB MIDI: OFF by default, on with `"midi": true` in config.json. Named
@@ -95,6 +102,23 @@ ABS_MOUSE_DESCRIPTOR = bytes((
     0x95, 0x01,        #     Report Count (1)
     0x81, 0x06,        #     Input (Data, Variable, Relative)
     0xC0,              #   End Collection
+    0xC0,              # End Collection — mouse #1 (absolute pointer + wheel)
+    # The relative pointer gets its OWN top-level collection. It must not
+    # share the one above: Windows binds mouhid.sys per top-level
+    # Usage(Mouse) collection and asks the HID parser for that mouse's X/Y
+    # once. With report 2 declaring X/Y Absolute (16-bit, 0..32767) and
+    # report 5 declaring the same usages Relative (8-bit, -127..127) inside
+    # one collection it gets two contradictory answers, fails StartDevice,
+    # and the devnode lands in CM_PROB_FAILED_START — taking the absolute
+    # pointer and the wheel down with it, because a collection starts or
+    # fails as a unit. Split in two, each collection describes one
+    # unambiguous mouse and both start. (Field bug: fw 0.28.0-0.30.0 had no
+    # working mouse AT ALL on Windows — no macro cursor movement, no Dial
+    # zoom/scroll/drag. macOS binds per usage and tolerated it, which is
+    # why it shipped.)
+    0x05, 0x01,        # Usage Page (Generic Desktop)
+    0x09, 0x02,        # Usage (Mouse)
+    0xA1, 0x01,        # Collection (Application)
     0x85, 0x05,        #   Report ID (5) — relative pointer (Dial drag)
     0x09, 0x01,        #   Usage (Pointer)
     0xA1, 0x00,        #   Collection (Physical)
@@ -118,7 +142,7 @@ ABS_MOUSE_DESCRIPTOR = bytes((
     0x95, 0x02,        #     Report Count (2)
     0x81, 0x06,        #     Input (Data, Variable, Relative)
     0xC0,              #   End Collection
-    0xC0,              # End Collection
+    0xC0,              # End Collection — mouse #2 (relative pointer)
 ))
 
 abs_mouse = usb_hid.Device(
