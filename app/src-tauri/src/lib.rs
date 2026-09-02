@@ -1471,6 +1471,12 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::new().build())
         .setup(|app| {
             use tauri::Listener;
+            // Windows: tao's raw-input registration starves the WH_KEYBOARD_LL
+            // hook (macro recorder + F8) of key events whenever the main window
+            // has focus — mouse events still arrive, so recordings came out
+            // clickable but keyless. We never consume device events, so filter
+            // them always (tauri-apps/tauri#14770). No-op on other platforms.
+            app.set_device_event_filter(tauri::DeviceEventFilter::Always);
             #[cfg(target_os = "macos")]
             disable_app_nap();
             if let Some(w) = app.get_webview_window("main") {
