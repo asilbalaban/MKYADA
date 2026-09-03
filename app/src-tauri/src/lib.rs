@@ -1456,7 +1456,7 @@ fn disable_app_nap() {
 }
 
 pub fn run() {
-    tauri::Builder::default()
+    let mut app = tauri::Builder::default()
         // single-instance must be the first plugin: a second launch hands its
         // argv to us and exits, we surface the existing window instead
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
@@ -1471,12 +1471,6 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::new().build())
         .setup(|app| {
             use tauri::Listener;
-            // Windows: tao's raw-input registration starves the WH_KEYBOARD_LL
-            // hook (macro recorder + F8) of key events whenever the main window
-            // has focus — mouse events still arrive, so recordings came out
-            // clickable but keyless. We never consume device events, so filter
-            // them always (tauri-apps/tauri#14770). No-op on other platforms.
-            app.set_device_event_filter(tauri::DeviceEventFilter::Always);
             #[cfg(target_os = "macos")]
             disable_app_nap();
             if let Some(w) = app.get_webview_window("main") {
@@ -1652,15 +1646,28 @@ pub fn run() {
             window_set_pin,
         ])
         .build(tauri::generate_context!())
-        .expect("error while running tauri application")
-        .run(|app, event| {
-            // macOS: clicking the dock icon while the window is hidden in the
-            // tray should bring it back (standard Reopen behavior)
-            #[cfg(target_os = "macos")]
-            if let tauri::RunEvent::Reopen { .. } = event {
-                show_main(app);
-            }
-            #[cfg(not(target_os = "macos"))]
-            let _ = (app, event);
-        });
+        .expect("error while running tauri application");
+
+    // Windows: tao's raw-input registration starves the WH_KEYBOARD_LL hook
+    // (macro recorder + F8) of key events whenever the main window has focus —
+    // mouse events still arrive, so recordings came out clickable but keyless.
+    // We never consume device events, so filter them always
+    // (tauri-apps/tauri#14770). No-op on other platforms.
+    //
+    // It has to run on the built app, before `run`: the setup hook is called
+    // from inside the event loop's Ready event, and by then the runtime has
+    // been taken out of the App — `set_device_event_filter` unwraps that None
+    // and the app dies a second after launch.
+    app.set_device_event_filter(tauri::DeviceEventFilter::Always);
+
+    app.run(|app, event| {
+        // macOS: clicking the dock icon while the window is hidden in the
+        // tray should bring it back (standard Reopen behavior)
+        #[cfg(target_os = "macos")]
+        if let tauri::RunEvent::Reopen { .. } = event {
+            show_main(app);
+        }
+        #[cfg(not(target_os = "macos"))]
+        let _ = (app, event);
+    });
 }
