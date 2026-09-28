@@ -80,6 +80,8 @@ export function PlaybackBar({ className = "" }: { className?: string }) {
   // stops every start), so this replaces both the playing and stopped strips.
   if (remoteHold) {
     const k = remoteHold.resumeKey;
+    // nothing queued yet: offer the key stopped last, to play after the session
+    const again = k === null && lastStopped ? lastStopped : null;
     return (
       <div
         role="status"
@@ -91,15 +93,34 @@ export function PlaybackBar({ className = "" }: { className?: string }) {
           <span className="font-semibold">Remote desktop connected · macros are paused</span>
           <span className="text-fg-muted">
             {k !== null
-              ? `Key ${k} was stopped so you can use this computer. It starts again when the remote session ends.`
-              : "Keys won't play macros while someone is connected, so the computer stays usable."}
+              ? `Key ${k} plays when the remote session ends. Run another key to play that one instead.`
+              : "Nothing plays while someone is connected. Run a key to play it when the session ends."}
           </span>
         </span>
+        {error && <span className="text-label text-danger">{error}</span>}
+        {again && (
+          <Button
+            variant="primary"
+            disabled={!canPress}
+            loading={running}
+            title={pressDisabledReason ?? `Play key ${again.key} when the remote session ends`}
+            onClick={() => {
+              setRunning(true);
+              setError(null);
+              pressKey(again.key, { layer: again.layer })
+                .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+                .finally(() => setRunning(false));
+            }}
+          >
+            <Play size={14} aria-hidden />
+            Run key {again.key} after session
+          </Button>
+        )}
         {(playing || k !== null) && (
           <Button
             variant="danger-solid"
             disabled={!!playing && !canStop}
-            title={k !== null ? `Key ${k} won't start again when the session ends` : undefined}
+            title={k !== null ? `Key ${k} won't play when the session ends` : undefined}
             onClick={() => void (playing ? stopPlayback() : cancelResume())}
           >
             <Square size={14} aria-hidden fill="currentColor" />

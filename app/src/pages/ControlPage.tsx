@@ -82,15 +82,13 @@ function tileState(
     loading,
     canPress,
     pressReason,
-    holdReason,
-  }: { vision6: boolean; loading: boolean; canPress: boolean; pressReason: string | null; holdReason: string | null },
+  }: { vision6: boolean; loading: boolean; canPress: boolean; pressReason: string | null },
 ): TileState {
   if (!a || a.kind === "none") {
     if (loading) return { run: false, reason: "Still loading from the keypad", short: "Loading…", loading: true };
     return { run: false, reason: "Nothing is assigned to this key", short: "Not assigned" };
   }
   if (!canPress) return { run: false, reason: pressReason ?? "Can't press keys right now", short: "Needs a firmware update" };
-  if (holdReason) return { run: false, reason: holdReason, short: "Paused · remote desktop" };
   const hasVariants = !!(a.variants?.double || a.variants?.hold);
   if (vision6 && MENU_KINDS.has(a.kind) && !hasVariants) {
     return {
@@ -145,7 +143,7 @@ export function ControlPage() {
   const nav = useNav();
   const { hello, port, drive, layer: deviceLayer, status } = useDevice();
   const { activeProfile } = useProfiles();
-  const { playing, canPress, pressDisabledReason, holdReason, remoteHold, cancelResume, stopPlayback, pressKey } =
+  const { playing, canPress, pressDisabledReason, remoteHold, cancelResume, stopPlayback, pressKey } =
     usePlayback();
   const toast = useToast();
   const hotkey = useStopHotkey();
@@ -251,7 +249,7 @@ export function ControlPage() {
       ? LAYER_NAMES.indexOf(playing.layer)
       : -1;
 
-  async function run(n: number, gesture: PressGesture = "tap") {
+  async function run(n: number, gesture: PressGesture = "tap", immediate = false) {
     const id = `${n}:${gesture}`;
     const stopping = isPlaying(n);
     setPending(id);
@@ -259,7 +257,7 @@ export function ControlPage() {
       if (stopping) {
         await stopPlayback();
       } else {
-        await pressKey(n, { layer: profile ? null : view, gesture });
+        await pressKey(n, { layer: profile ? null : view, gesture, immediate });
         setFlash(id);
       }
     } catch (e) {
@@ -409,16 +407,14 @@ export function ControlPage() {
                 state={
                   !canPress
                     ? { run: false, reason: pressDisabledReason ?? "", short: "Needs a firmware update" }
-                    : holdReason
-                      ? { run: false, reason: holdReason, short: "Paused · remote desktop" }
-                      : { run: true }
+                    : { run: true }
                 }
                 runLabel="Switch layer"
                 playing={false}
                 loop={false}
                 busy={pending === `${n}:tap`}
                 done={flash === `${n}:tap`}
-                onRun={() => void run(n)}
+                onRun={() => void run(n, "tap", true)}
               />
             );
           }
@@ -427,10 +423,10 @@ export function ControlPage() {
             loading,
             canPress,
             pressReason: pressDisabledReason,
-            holdReason,
           });
           const me = isPlaying(n);
-          // stopped by a remote desktop connection, waiting to start again
+          // waiting for the remote desktop session to end (interrupted by it,
+          // or picked with Run during it)
           const paused =
             !me &&
             remoteHold?.resumeKey === n &&
@@ -454,7 +450,13 @@ export function ControlPage() {
               subtitle={hasA ? secondaryText(a) : undefined}
               icon={hasA ? <ActionIcon name={kindMeta(a.kind).icon} size={40} /> : undefined}
               state={finalState}
-              runLabel={settled && !me && busyOther === "switch" ? "Switch to this" : "Run"}
+              runLabel={
+                remoteHold
+                  ? "Run after remote session"
+                  : settled && !me && busyOther === "switch"
+                    ? "Switch to this"
+                    : "Run"
+              }
               playing={me}
               paused={paused}
               loop={me && !!playing?.loop}
@@ -560,7 +562,7 @@ function KeyTile({
   state: TileState;
   runLabel: string;
   playing: boolean;
-  /** stopped by remote desktop, resumes when it ends — offers Stop too */
+  /** plays when the remote desktop session ends — offers Stop too */
   paused?: boolean;
   loop: boolean;
   busy: boolean;
@@ -568,7 +570,8 @@ function KeyTile({
   onRun: () => void;
   variants?: VariantAction[];
 }) {
-  // A paused key looks and acts like a playing one: its button is Stop.
+  // A key waiting for the remote desktop session to end looks and acts like a
+  // playing one: its button is Stop (don't play it after all).
   const playing = live || paused;
   const enabled = playing || state.run;
   const face = (
@@ -578,7 +581,7 @@ function KeyTile({
       onClick={onRun}
       aria-label={
         paused
-          ? `Stop key ${n} · ${title} · paused for remote desktop, won't start again`
+          ? `Stop key ${n} · ${title} · waiting for the remote desktop session to end`
           : playing
             ? `Stop key ${n} · ${title}`
             : `${runLabel} · key ${n} · ${title}`
@@ -604,7 +607,7 @@ function KeyTile({
         {paused ? (
           <Badge tone="amber">
             <span className="inline-flex items-center gap-1">
-              <Pause size={12} aria-hidden /> Paused · remote desktop
+              <Pause size={12} aria-hidden /> Plays after remote session
             </span>
           </Badge>
         ) : playing ? (

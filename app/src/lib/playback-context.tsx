@@ -32,16 +32,19 @@ export interface PressOptions {
   /** layer letter ("a") or index (0); default: the keypad's current layer */
   layer?: string | number | null;
   gesture?: PressGesture;
+  /** press even during a remote desktop session (the layer key: switching
+   * layers plays nothing, so it isn't held) */
+  immediate?: boolean;
 }
 
 /** crd_watch.rs: macros are held while a remote desktop session is open. */
 export interface RemoteHold {
-  /** the key the connection interrupted; pressed again when it ends */
+  /** the key that plays when the session ends: the one the connection
+   * interrupted, or the one the user pressed Play on since (null = none) */
   resumeKey: number | null;
   resumeLayer: string | null;
+  resumeGesture: PressGesture | null;
 }
-
-const HOLD_REASON = "Macros are paused while a remote desktop is connected";
 
 export interface PlaybackState {
   /** the macro the keypad is playing right now, if any */
@@ -55,9 +58,7 @@ export interface PlaybackState {
   canPress: boolean;
   /** set while a remote desktop session holds playback (see RemoteHold) */
   remoteHold: RemoteHold | null;
-  /** why keys can't run right now because of remoteHold (null when free) */
-  holdReason: string | null;
-  /** drop the macro paused by remote desktop, so it doesn't start again */
+  /** drop the key waiting for the remote desktop session to end */
   cancelResume: () => Promise<void>;
   /** why pressKey is unavailable (null when canPress) */
   pressDisabledReason: string | null;
@@ -123,10 +124,21 @@ export function PlaybackProvider({
   // open; the UI mirrors it so Run buttons explain instead of flickering.
   const [remoteHold, setRemoteHold] = useState<RemoteHold | null>(null);
   useEffect(() => {
-    type Rd = { active: boolean; resume_key: number | null; resume_layer: string | null };
+    type Rd = {
+      active: boolean;
+      resume_key: number | null;
+      resume_layer: string | null;
+      resume_gesture: PressGesture | null;
+    };
     const apply = (s: Rd | null | undefined) =>
       setRemoteHold(
-        s?.active ? { resumeKey: s.resume_key ?? null, resumeLayer: s.resume_layer ?? null } : null,
+        s?.active
+          ? {
+              resumeKey: s.resume_key ?? null,
+              resumeLayer: s.resume_layer ?? null,
+              resumeGesture: s.resume_gesture ?? null,
+            }
+          : null,
       );
     let un: (() => void) | undefined;
     let dead = false;
@@ -139,7 +151,7 @@ export function PlaybackProvider({
       un?.();
     };
   }, []);
-  const holdReason = remoteHold ? HOLD_REASON : null;
+  const holding = remoteHold !== null;
   const cancelResume = useCallback(async () => {
     await invoke("remote_desktop_cancel_resume");
   }, []);
@@ -185,7 +197,17 @@ export function PlaybackProvider({
   const pressKey = useCallback(
     (key: number, opts: PressOptions = {}) => {
       if (pressDisabledReason) return Promise.reject(new Error(pressDisabledReason));
-      if (holdReason) return Promise.reject(new Error(holdReason));
+      // During remote desktop nothing may play now: the key becomes the one
+      // to play when the session ends (Rust presses it then).
+      if (holding && !opts.immediate) {
+        const layer =
+          typeof opts.layer === "number" ? String.fromCharCode(97 + opts.layer) : (opts.layer ?? null);
+        return invoke("remote_desktop_queue", { key, layer, gesture: opts.gesture ?? null })
+          .then(() => undefined)
+          .catch((e) => {
+            throw new Error(typeof e === "string" ? e : String(e));
+          });
+      }
       // Re-pressing a key whose multi action the app is running stops it,
       // like the physical re-press (the keypad itself may be between steps,
       // or busy with a step's part file, so it can't decide this).
@@ -216,7 +238,7 @@ export function PlaybackProvider({
         });
       });
     },
-    [pressDisabledReason, holdReason, subscribe],
+    [pressDisabledReason, holding, subscribe],
   );
 
   return (
@@ -228,7 +250,6 @@ export function PlaybackProvider({
         canStop: connected,
         canPress,
         remoteHold,
-        holdReason,
         cancelResume,
         pressDisabledReason,
         stopPlayback,

@@ -8,6 +8,8 @@
 //!
 //! When the session ends, the macro that was interrupted by the connection is
 //! pressed again (`{"t":"press"}`, proto v17), so a farming loop carries on.
+//! During the session the user may pick another key to play then (Play / Run
+//! again queue it via `remote_desktop_queue`) or cancel it (Stop).
 //! Every stop goes through `remote::stop_playback(app, "remote-desktop")`, the
 //! same path as the hotkey and the tray. The UI follows `remote-desktop:state`.
 //!
@@ -38,6 +40,8 @@ const STORE_KEY: &str = "stopOnRemoteDesktop";
 struct Play {
     key: Option<i64>,
     layer: Option<String>,
+    /// "double" | "hold" for a queued variant; None = a plain press
+    gesture: Option<String>,
 }
 
 #[derive(Default)]
@@ -56,12 +60,15 @@ static WATCH: Mutex<Watch> = Mutex::new(Watch {
     resume: None,
 });
 
-/// What the UI shows: whether playback is on hold, and which key will resume.
+/// What the UI shows: whether playback is on hold, and which key plays when
+/// the session ends (the one the connection interrupted, or whichever key the
+/// user chose to play next during the session).
 #[derive(Clone, Serialize)]
 pub struct RdState {
     pub active: bool,
     pub resume_key: Option<i64>,
     pub resume_layer: Option<String>,
+    pub resume_gesture: Option<String>,
 }
 
 fn snapshot(w: &Watch) -> RdState {
@@ -69,6 +76,7 @@ fn snapshot(w: &Watch) -> RdState {
         active: w.active,
         resume_key: w.resume.as_ref().and_then(|p| p.key),
         resume_layer: w.resume.as_ref().and_then(|p| p.layer.clone()),
+        resume_gesture: w.resume.as_ref().and_then(|p| p.gesture.clone()),
     }
 }
 
@@ -82,6 +90,34 @@ pub fn remote_desktop_state() -> RdState {
 #[tauri::command]
 pub fn remote_desktop_cancel_resume(app: AppHandle) {
     cancel_resume(&app);
+}
+
+/// Play / Run again pressed during a session: nothing may play now, so the key
+/// becomes the one to play when the session ends (replacing any earlier one —
+/// the keypad plays one macro at a time). Outside a session it's refused, and
+/// the app presses the key directly instead.
+#[tauri::command]
+pub fn remote_desktop_queue(
+    app: AppHandle,
+    key: i64,
+    layer: Option<String>,
+    gesture: Option<String>,
+) -> Result<RdState, String> {
+    let st = {
+        let mut w = WATCH.lock().unwrap();
+        if !w.active {
+            return Err("No remote desktop session is open".into());
+        }
+        w.resume = Some(Play {
+            key: Some(key),
+            layer,
+            gesture: gesture.filter(|g| g != "tap"),
+        });
+        snapshot(&w)
+    };
+    crate::dbg_log!("remote desktop: queued key {key}");
+    let _ = app.emit("remote-desktop:state", &st);
+    Ok(st)
 }
 
 pub fn cancel_resume(app: &AppHandle) {
@@ -146,6 +182,9 @@ fn disconnected(app: &AppHandle) {
         if let Some(l) = p.layer {
             msg["layer"] = json!(l);
         }
+        if let Some(g) = p.gesture {
+            msg["gesture"] = json!(g);
+        }
         let r = serial::send(&app.state::<DeviceManager>(), &msg);
         let _ = app.emit(
             "remote-desktop:resumed",
@@ -177,6 +216,7 @@ fn play_of(v: &Value) -> Play {
     Play {
         key: v.get("key").and_then(Value::as_i64),
         layer: v.get("layer").and_then(Value::as_str).map(str::to_string),
+        gesture: None,
     }
 }
 

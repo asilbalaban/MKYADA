@@ -1665,6 +1665,7 @@ pub fn run() {
             remote::stop_playback_now,
             crd_watch::remote_desktop_state,
             crd_watch::remote_desktop_cancel_resume,
+            crd_watch::remote_desktop_queue,
         ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application");
