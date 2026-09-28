@@ -1,4 +1,5 @@
 pub mod debuglog;
+mod crd_watch;
 mod device;
 mod layout;
 mod obs;
@@ -1491,6 +1492,7 @@ pub fn run() {
             }
             setup_tray(app)?;
             remote::init(app.handle());
+            crd_watch::init(app.handle());
             // macOS/Linux WebView2-overlay setup: harden click-through once the
             // overlay webview signals `overlay:ready`, and pre-create it hidden
             // at startup so it warm-inits undisturbed. (Windows draws the overlay

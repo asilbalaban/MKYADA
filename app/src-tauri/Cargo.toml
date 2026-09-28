@@ -1,6 +1,6 @@
 [package]
 name = "mkyada"
-version = "0.44.0"
+version = "0.45.0"
 description = "MKYADA — Macro Keypad You Always Dream About"
 authors = ["Asil Balaban"]
 license = "MIT"
@@ -62,6 +62,7 @@ windows = { version = "0.58", features = [
     "Win32_Graphics_GdiPlus",
     "Win32_UI_WindowsAndMessaging",
     "Win32_System_LibraryLoader",
+    "Win32_System_Diagnostics_ToolHelp",
 ] }
 
 # rdev and enigo both resolve keys through TSM/HIToolbox APIs that modern

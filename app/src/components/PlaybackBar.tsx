@@ -4,7 +4,7 @@
 // Renders nothing when idle.
 
 import { useEffect, useState } from "react";
-import { CircleStop, Play, Repeat, Square, X } from "lucide-react";
+import { CircleStop, MonitorUp, Play, Repeat, Square, X } from "lucide-react";
 import { Button, IconButton } from "./ui";
 import { useDevice } from "../lib/device";
 import { usePlayback } from "../lib/playback-context";
@@ -27,6 +27,9 @@ const VIA_TEXT: Record<string, string> = {
   tray: "from the tray",
   app: "from the app",
 };
+
+/** Stopped by crd_watch.rs: someone just connected over remote desktop. */
+const VIA_REMOTE_DESKTOP = "remote-desktop";
 
 export function PlaybackBar({ className = "" }: { className?: string }) {
   const { hello } = useDevice();
@@ -133,14 +136,32 @@ export function PlaybackBar({ className = "" }: { className?: string }) {
   }
 
   if (lastStopped) {
+    const byRemote = lastStopped.via === VIA_REMOTE_DESKTOP;
     const via = lastStopped.via ? VIA_TEXT[lastStopped.via] : null;
     return (
-      <div role="status" aria-live="polite" className={`${base} bg-panel`}>
-        <CircleStop size={16} aria-hidden className="shrink-0 text-fg-faint" />
-        <span className="min-w-0 flex-1 truncate text-fg">
-          Stopped key {lastStopped.key}
-          {via && <span className="text-fg-muted"> {via}</span>}
-        </span>
+      <div
+        role="status"
+        aria-live="polite"
+        className={`${base} ${byRemote ? "border border-warning-line bg-warning-bg" : "bg-panel"}`}
+      >
+        {byRemote ? (
+          <MonitorUp size={16} aria-hidden className="shrink-0 text-warning" />
+        ) : (
+          <CircleStop size={16} aria-hidden className="shrink-0 text-fg-faint" />
+        )}
+        {byRemote ? (
+          <span className="flex min-w-0 flex-1 flex-col text-fg">
+            <span className="font-semibold">Stopped key {lastStopped.key}</span>
+            <span className="text-fg-muted">
+              A remote desktop connection to this computer just started, so the macro was stopped.
+            </span>
+          </span>
+        ) : (
+          <span className="min-w-0 flex-1 truncate text-fg">
+            Stopped key {lastStopped.key}
+            {via && <span className="text-fg-muted"> {via}</span>}
+          </span>
+        )}
         {error && <span className="text-label text-danger">{error}</span>}
         {!canPress && pressDisabledReason && (
           <span className="text-label text-fg-faint">{pressDisabledReason}</span>

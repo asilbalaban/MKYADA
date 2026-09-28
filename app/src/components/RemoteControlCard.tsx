@@ -1,10 +1,12 @@
 // Settings card for the system-wide "stop playback" hotkey (remote.rs).
 // Shows the combo in force, records a new one, resets to the default and
-// reports when the OS refused to register it.
+// reports when the OS refused to register it. Also the switch for stopping
+// playback when a remote desktop session connects (crd_watch.rs).
 
 import { useEffect, useState } from "react";
-import { Keyboard, RotateCcw } from "lucide-react";
-import { Alert, Button, Card, SettingRow } from "./ui";
+import { Keyboard, MonitorUp, RotateCcw } from "lucide-react";
+import { Alert, Button, Card, SettingRow, Switch } from "./ui";
+import { getSetting, setSetting } from "../lib/settings";
 import { accelFromEvent, accelParts } from "../lib/playback";
 import { isMacPlatform, setStopHotkey, useStopHotkey } from "../lib/stop-hotkey";
 
@@ -23,8 +25,15 @@ function Keys({ accel }: { accel: string }) {
   );
 }
 
+/** settings.json key Rust reads on every new connection (default on). */
+const STOP_ON_RD_KEY = "stopOnRemoteDesktop";
+
 export function RemoteControlCard() {
   const status = useStopHotkey();
+  const [stopOnRd, setStopOnRd] = useState(true);
+  useEffect(() => {
+    void getSetting(STOP_ON_RD_KEY, true).then(setStopOnRd);
+  }, []);
   const [recording, setRecording] = useState(false);
   const [saving, setSaving] = useState(false);
   const [hint, setHint] = useState<string | null>(null);
@@ -86,6 +95,21 @@ export function RemoteControlCard() {
       description="Stop a running macro from anywhere, even over remote desktop or with MKYADA in the tray."
     >
       <div className="flex flex-col gap-3">
+        <SettingRow
+          icon={MonitorUp}
+          title="Stop when a remote desktop connects"
+          description="When someone connects to this computer over Chrome Remote Desktop, a running macro stops so they don't land in the middle of it. Macros started during the session keep running."
+          control={
+            <Switch
+              checked={stopOnRd}
+              onChange={(on) => {
+                setStopOnRd(on);
+                void setSetting(STOP_ON_RD_KEY, on);
+              }}
+              aria-label="Stop when a remote desktop connects"
+            />
+          }
+        />
         <SettingRow
           icon={Keyboard}
           title="Stop hotkey"

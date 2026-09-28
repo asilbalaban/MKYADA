@@ -32,7 +32,8 @@ export interface StoppedInfo {
   layer: string | null;
   /** "stop" (serial stop — the app, the hotkey or the tray) | "repress" */
   reason: string;
-  /** who asked for the stop, when this app sent it: "hotkey" | "tray" | "app" */
+  /** who asked for the stop, when this app sent it: "hotkey" | "tray" | "app"
+   * | "remote-desktop" (a remote desktop session connected) */
   via: string | null;
   at: number;
 }
