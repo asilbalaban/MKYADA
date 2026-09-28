@@ -1,6 +1,6 @@
 [package]
 name = "mkyada"
-version = "0.42.3"
+version = "0.43.0"
 description = "MKYADA — Macro Keypad You Always Dream About"
 authors = ["Asil Balaban"]
 license = "MIT"
@@ -43,6 +43,10 @@ tokio = { version = "1", features = ["sync", "time", "macros"] }
 tokio-tungstenite = { version = "0.24", default-features = false, features = ["connect"] }
 futures-util = "0.3"
 sha2 = "0.10"
+# system-wide "stop playback" hotkey for remote-desktop users (remote.rs).
+# Pinned to 2.3: 2.4 drags tauri itself up to 2.12, out of step with the
+# @tauri-apps/api the frontend ships.
+tauri-plugin-global-shortcut = "~2.3"
 # live system variables (CPU/RAM) for the feedback status strip
 
 # WASAPI mic-mute state for live feedback; GDI+ layered-window path overlay

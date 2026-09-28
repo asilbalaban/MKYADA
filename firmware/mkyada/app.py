@@ -104,7 +104,16 @@ gc.collect()  # the display stack litters the heap; start the app compacted
 
 DEBOUNCE_S = 0.02
 PING_TIMEOUT_S = 5.0
-PROTO_VERSION = 16 # v16: USB MIDI. A new config key "midi" (boot-time, like
+PROTO_VERSION = 17 # v17: remote control. New {"t":"press","key":N} runs a
+                   # key exactly like a physical press (layer key, variants
+                   # via "gesture", busy_other/on_repress while playing) for
+                   # users who reach the computer over remote desktop and
+                   # can't touch the keypad; "stop" now answers ok with
+                   # was_playing and also cancels a gesture still resolving;
+                   # play_start gains key/layer/loop/src, play_done gains
+                   # reason, hello gains playing (a reconnecting app sees a
+                   # running loop). All additive.
+                   # v16: USB MIDI. A new config key "midi" (boot-time, like
                    # usb_drive — set_cfg cannot patch it, it needs a reset)
                    # adds a MIDI interface named after the product, and hello
                    # mirrors it so the app only offers the feature to a board
@@ -373,6 +382,13 @@ class App:
         self.last_rx = 0.0
         self.playing_key = None  # 0-based index of the key that started playback
         self.pending_play = None  # (path, trigger) queued by restart/switch policies
+        # v17 remote control: the running playback as (path, key, layer idx,
+        # loop, on_repress) — hello reports it and a remote press compares
+        # against it — plus a queued remote press (key, layer idx, gesture)
+        # that spin() runs outside handle_msg, and why the playback stopped.
+        self.playing = None
+        self.remote = None
+        self.stop_why = None
         self._mem_report_at = 0  # last heap-telemetry print (console)
         self.upload = None  # in-flight fs_write: {"path", "tmp", "f", "seq"}
         self.upload_at = 0.0  # last chunk received (stale-upload reclaim)
@@ -758,7 +774,82 @@ class App:
                 # safe size instead of letting the host discover it by
                 # crashing the transfer. Older apps ignore the field.
                 "fs_chunk": FS_WRITE_CHUNK,
-                "layer": LAYER_NAMES[self.layer], "mode": self.mode}
+                "layer": LAYER_NAMES[self.layer], "mode": self.mode,
+                # v17: a reconnecting app must learn that a loop is running
+                # (identify is answered mid-playback) to offer a Stop button
+                "playing": self.playing_info()}
+
+    def playing_info(self):
+        p = self.playing
+        if not p:
+            return None
+        return {"file": p[0], "key": p[1], "layer": LAYER_NAMES[p[2]],
+                "loop": p[3]}
+
+    def parse_press(self, msg):
+        """Validate a remote press -> (key, layer idx, gesture), or None after
+        answering err. layer: index or letter, default the current layer."""
+        c = self.config
+        k = msg.get("key")
+        l = msg.get("layer")
+        if l is None:
+            l = self.layer
+        elif isinstance(l, str) and len(l) == 1 and l in LAYER_NAMES:
+            l = LAYER_NAMES.index(l)
+        g = msg.get("gesture") or "tap"
+        if not (isinstance(k, int) and 1 <= k <= c["key_count"]):
+            return self.fs_err("press", "bad_key", k)
+        if not (isinstance(l, int) and 0 <= l < c["layer_count"]):
+            return self.fs_err("press", "bad_layer", l)
+        if g not in ("tap", "double", "hold"):
+            return self.fs_err("press", "bad_gesture", g)
+        return (k, l, g)
+
+    def press_busy(self, msg):
+        """A remote press while a macro plays: the same file acts like a
+        physical re-press (stop / restart), another key obeys busy_other.
+        Returns True if the running playback must stop."""
+        r = self.parse_press(msg)
+        p = self.playing
+        if not r or not p:
+            return False
+        if self.macro_path_for(r[0], r[1]) == p[0]:
+            self.stop_why = "repress"
+            if p[4] == "restart":
+                self.remote = r  # the queued press answers when it runs
+            else:
+                self.proto.send({"t": "ok", "re": "press", "action": "stop"})
+            return True
+        if self.config["busy_other"] == "switch":
+            self.stop_why = "other"
+            self.remote = r
+            return True
+        self.fs_err("press", "busy", "another macro is playing")
+        return False
+
+    def remote_press(self, key_no, lidx, gesture):
+        """Run a queued remote press through on_edge's decision chain. Test
+        mode, host mode and a device-owned screen (OBS Center / Dial) do NOT
+        block it: those suppress the keypad's own keys, but a remote press is
+        an explicit request from the app itself. Keys whose press opens an
+        on-device menu answer err unsupported — nobody is at the keypad to
+        use it. Plays with trigger None, so nothing reads the (unpressed)
+        physical key: a remote press is a tap — hold-to-repeat and held
+        single keys/notes play once — and the gesture picks the variant."""
+        c = self.config
+        if self.updating or self.xfer or self.pin_watch:
+            return self.fs_err("press", "busy", "keypad busy")
+        if c["layer_key"] == key_no:
+            self.set_layer_idx((self.layer + 1) % c["layer_count"])
+            self.proto.send({"t": "ok", "re": "press", "action": "layer"})
+            return
+        if self.press_opens_menu(key_no, lidx):
+            return self.fs_err("press", "unsupported", "opens a keypad menu")
+        path = self.macro_path_for(key_no, lidx)
+        if not self._file_exists(path):
+            return self.fs_err("press", "not_assigned", path)
+        self.proto.send({"t": "ok", "re": "press", "action": "play"})
+        self.play_file(path, variant=gesture, key=key_no, layer=lidx)
 
     def handle_msg(self, msg, in_playback=False):
         """Process one serial message. Returns True if playback must stop."""
@@ -772,7 +863,18 @@ class App:
         elif t == "identify":
             self.proto.send(self.hello())
         elif t == "stop":
+            # v17: acknowledged, so the app can tell "stopped" from "nothing
+            # was running". Idle, it also drops queued plays (a press right
+            # before the stop must not start a loop after it).
+            if in_playback:
+                self.stop_why = "stop"
+            else:
+                self.remote = None
+                self.pending_play = None
+            self.proto.send({"t": "ok", "re": "stop", "was_playing": in_playback})
             return True
+        elif t == "press" and in_playback:
+            return self.press_busy(msg)
         elif in_playback:
             # file ops can't run mid-playback — tell the app instead of
             # letting it wait for a response that never comes
@@ -893,7 +995,13 @@ class App:
             path = "/" + str(msg.get("file", "")).lstrip("/")
             self.play_file(path, trigger=None,
                            speed=msg.get("speed"), repeat=msg.get("repeat"),
-                           hold=bool(msg.get("hold")))
+                           hold=bool(msg.get("hold")), src="host")
+        elif t == "press":
+            # v17 remote press: queued, never run inside handle_msg — spin()
+            # executes it like a key edge (see remote_press)
+            r = self.parse_press(msg)
+            if r:
+                self.remote = r
         elif t == "keys":
             self.engine.tap_combo(msg.get("mods"), str(msg.get("key", "")))
             self.proto.send({"t": "ok", "re": "keys"})
@@ -1438,7 +1546,19 @@ class App:
                               ev.get("d1", 0), ev.get("d2", 0))
 
     def play_file(self, path, trigger=None, speed=None, repeat=None,
-                  hold=False, variant=None):
+                  hold=False, variant=None, key=None, layer=None, src=None):
+        """trigger = physical key index (src "key"); key = logical key of a
+        remote press (src "remote", trigger None); src "host" = the app's
+        play command; otherwise "slot" (Vision 6 wheel / nav / menu)."""
+        if trigger is not None:
+            key = self.config["key_map"][trigger]
+            src = "key"
+        elif key is not None:
+            src = "remote"
+        elif src is None:
+            src = "slot"
+        if layer is None:
+            layer = self.layer
         f = None
         try:
             gc.collect()
@@ -1484,7 +1604,8 @@ class App:
         # a stray "variants" in a stream header is ignored and plays as tap.
         variants = data.get("variants") if stream_pos is None else None
         if isinstance(variants, dict) and variants and (
-                trigger is not None or variant in ("double", "hold")):
+                trigger is not None or key is not None
+                or variant in ("double", "hold")):
             if trigger is not None:
                 choice = self.resolve_variant(trigger, variants,
                                               data.get("settings") or {})
@@ -1492,9 +1613,7 @@ class App:
                 choice = variant if isinstance(variants.get(variant), dict) else "tap"
             if self.proto.connected:
                 self.proto.send({"t": "key_action", "file": path,
-                                 "key": (self.config["key_map"][trigger]
-                                         if trigger is not None else None),
-                                 "layer": LAYER_NAMES[self.layer],
+                                 "key": key, "layer": LAYER_NAMES[layer],
                                  "variant": choice})
             if choice != "tap":
                 v = variants.get(choice) or {}
@@ -1512,14 +1631,17 @@ class App:
             if f:
                 f.close()
             menu = data.get("menu")
-            self.proto.send({"t": "play_start", "file": path})
+            self.proto.send({"t": "play_start", "file": path, "key": key,
+                             "layer": LAYER_NAMES[layer], "loop": False,
+                             "src": src})
             if self.ui:
                 self.ui_call("inject", menu)
             else:
                 # core6 has no menu UI, but a "go to layer X" key must still
                 # switch layers (issue #30). Other menu actions stay no-ops.
                 self.menu_layer_jump(menu)
-            self.proto.send({"t": "play_done", "file": path, "stopped": False})
+            self.proto.send({"t": "play_done", "file": path, "stopped": False,
+                             "reason": "done"})
             return
 
         settings = data.get("settings") or {}
@@ -1577,28 +1699,35 @@ class App:
         hold_repeat = bool(hold_repeat)
 
         self.playing_key = trigger
+        self.playing = (path, key, layer, loop, on_repress)
+        self.stop_why = None
         self.led.set(state=ledmod.LOOPING if loop else ledmod.PLAYING)
-        self.proto.send({"t": "play_start", "file": path})
+        self.proto.send({"t": "play_start", "file": path, "key": key,
+                         "layer": LAYER_NAMES[layer], "loop": loop,
+                         "src": src})
         self.ui_call("on_play_start", trigger, path)
         stopped = False
 
         def should_stop():
             # Same key again: stop (or queue a restart). Another macro key:
-            # per config, ignore it or switch to its macro. Host plays
-            # (trigger None) stop on any key.
+            # per config, ignore it or switch to its macro. Plays without a
+            # key (host / slot) stop on any key. A remote press's key counts
+            # as "the same key" for the physical re-press too.
             self.feed()
             for i, pressed in self.buttons.scan():
                 if not pressed:
                     continue
-                if trigger is None or i == trigger:
-                    if trigger is not None and on_repress == "restart":
-                        self.pending_play = (path, trigger)
+                kn = self.config["key_map"][i]
+                if key is None or kn == key:
+                    if key is not None and on_repress == "restart":
+                        self.pending_play = (path, i)
+                    self.stop_why = "repress" if key is not None else "other"
                     return True
-                if trigger is not None and self.config["busy_other"] == "switch":
-                    key_no = self.config["key_map"][i]
-                    if self.config["layer_key"] == key_no:
+                if self.config["busy_other"] == "switch":
+                    if self.config["layer_key"] == kn:
                         continue
-                    self.pending_play = (self.macro_path(key_no), i)
+                    self.pending_play = (self.macro_path(kn), i)
+                    self.stop_why = "other"
                     return True
             # Process the whole batch even once a stop is seen: a file
             # request polled alongside the stop must still get its "busy"
@@ -1611,6 +1740,11 @@ class App:
             return stop
 
         try:
+            # A stop / press that arrived while the gesture was resolving sat
+            # in the inbox (pump() only queues) — honour it before playing,
+            # or a stop sent mid-hold would miss the loop it meant to end.
+            if self.inbox and self.sweep_inbox():
+                raise StopPlayback()
             if (not loop and int(repeat) == 1
                     and ((plain_tap and (hold or (hold_repeat and trigger is not None)))
                          or (momentary and (hold or trigger is not None)))):
@@ -1642,11 +1776,13 @@ class App:
             stopped = True
         except MemoryError:
             stopped = True
+            self.stop_why = "error"
             gc.collect()
             self.led.error()
             self.proto.send({"t": "err", "re": "play", "code": "oom", "msg": path})
         except OSError:
             stopped = True
+            self.stop_why = "error"
             self.led.error()
             self.proto.send({"t": "err", "re": "play", "code": "io", "msg": path})
         except ValueError as e:
@@ -1655,17 +1791,38 @@ class App:
             # report layout after a partial update. Fail the key soft; a
             # power cycle re-runs boot.py and heals the mismatch.
             stopped = True
+            self.stop_why = "error"
             self.led.error()
             self.proto.send({"t": "err", "re": "play", "code": "hid", "msg": str(e)})
         finally:
             if f:
                 f.close()
             self.playing_key = None
+            self.playing = None
             events = data = None
             gc.collect()
             self.set_mode(self.mode)  # restore idle/host LED
-            self.proto.send({"t": "play_done", "file": path, "stopped": stopped})
+            # reason (v17): done | repress (same key again, physical or
+            # remote) | stop (serial stop) | other (another key took over,
+            # or any key ended a keyless play) | error
+            self.proto.send({"t": "play_done", "file": path, "stopped": stopped,
+                             "reason": (self.stop_why or "stop") if stopped
+                             else "done"})
             self.ui_call("on_play_done")
+
+    def sweep_inbox(self):
+        """Handle only the stop/press messages parked in the inbox (the rest
+        keep waiting for the main loop). True if playback must stop."""
+        stop = False
+        keep = []
+        for m in self.inbox:
+            if m.get("t") in ("stop", "press"):
+                if self.handle_msg(m, in_playback=True):
+                    stop = True
+            else:
+                keep.append(m)
+        self.inbox = keep
+        return stop
 
     # --- key handling ---
     def on_edge(self, i, pressed):
@@ -1719,13 +1876,13 @@ class App:
                 return
             self.play_file(self.macro_path(key_no), trigger=i)
 
-    def press_opens_menu(self, key_no):
+    def press_opens_menu(self, key_no, layer=None):
         """Whether pressing this key should open its wheel menu instead of
         playing (Vision 6 slider kinds). Safe on core6 (no ui)."""
         if not self.ui:
             return False
         try:
-            return self.ui.wants_press_menu(key_no)
+            return self.ui.wants_press_menu(key_no, layer)
         except Exception:
             return False
 
@@ -1825,9 +1982,14 @@ class App:
             else:
                 for i, pressed in self.buttons.scan():
                     self.on_edge(i, pressed)
-            # restart/switch policies queue the next macro instead of
-            # recursing inside the playback stack
-            while self.pending_play:
+            # restart/switch policies (and remote presses, v17) queue the
+            # next macro instead of recursing inside the playback stack
+            while self.pending_play or self.remote:
+                if self.remote:
+                    r = self.remote
+                    self.remote = None
+                    self.remote_press(*r)
+                    continue
                 path, trig = self.pending_play
                 self.pending_play = None
                 self.play_file(path, trigger=trig)

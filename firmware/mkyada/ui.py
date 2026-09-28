@@ -968,10 +968,12 @@ class Ui:
     # "run" a poor default
     PRESS_MENU_KINDS = ("volume", "mic_level", "obs_center", "enc_module")
 
-    def wants_press_menu(self, key_no):
+    def wants_press_menu(self, key_no, layer=None):
         """True if pressing key `key_no` should open its wheel menu (slider
-        kinds) rather than play its macro. Called from App.on_edge."""
-        kind, _ = self.kind_sub(self.app.layer, key_no - 1)
+        kinds) rather than play its macro. Called from App.on_edge (and a
+        v17 remote press, which may name another layer)."""
+        kind, _ = self.kind_sub(self.app.layer if layer is None else layer,
+                                key_no - 1)
         return kind in self.PRESS_MENU_KINDS
 
     def open_key_menu(self, key_no):

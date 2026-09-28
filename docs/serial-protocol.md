@@ -1,4 +1,49 @@
-# MKYADA serial protocol (v16)
+# MKYADA serial protocol (v17)
+
+v17 is the **remote control** release: people who reach the keypad's computer
+over a remote desktop (Chrome Remote Desktop) can't touch the keys, so a
+looping macro would lock them out. All changes are additive.
+
+- **`{"t":"press","key":N,"layer"?:…,"gesture"?:…}`** runs a numbered key the
+  way a physical press does. `layer` is an index or a letter (default: the
+  current layer; a profile redirects paths as usual), `gesture` is
+  `tap` (default) | `double` | `hold` and picks the key-logic variant
+  directly. Queued and executed from the main loop, never inside the message
+  handler. Replies:
+  - `{"t":"ok","re":"press","action":"play"}` then the usual
+    `play_start`/`play_done` (plus `key_action` when the key has variants);
+  - `action:"layer"` for the layer key (cycles to the next layer);
+  - `action:"stop"` when it re-pressed the playing key (see below);
+  - `err` codes: `bad_key`, `bad_layer`, `bad_gesture`, `not_assigned` (no
+    macro file), `unsupported` (Vision 6 keys whose press opens an on-device
+    menu — volume / mic level / OBS Center / Dial — nobody is at the keypad
+    to use it), `busy` (file transfer, wiring wizard, or another macro is
+    playing and `busy_other` is `ignore`), `updating`.
+  - Test mode (Keys page, Devices → Test keys), host mode and a device-owned screen (OBS
+    Center / Dial open) do **not** block a remote press — they suppress the
+    keypad's own keys, but a remote press is an explicit request from the app.
+  - **While-held semantics:** there is no physical key to hold, so a remote
+    press is a tap: hold-to-repeat keys and held single keys / momentary MIDI
+    notes play **once**. Loops (`repeat: 0`) run until `stop` or a re-press.
+  - No `btn` edge is streamed for a remote press, so computer-side kinds
+    (launch/command/sound/webhook) only run through `key_action` (variants).
+- **A press during playback** is not dropped. Same macro file as the running
+  one → a physical re-press (`on_repress`: stop, or restart = the press is
+  queued again); another key → `busy_other` (`ignore` → `err busy`,
+  `switch` → the playback stops and the press is queued). A physical press of
+  the key a remote press started also counts as its re-press.
+- **`stop` answers** `{"t":"ok","re":"stop","was_playing":true|false}`. It
+  also cancels a playback whose tap/double/hold gesture was still resolving
+  (the stop used to sit in the inbox until the macro had played). Idle, it
+  drops a queued `press`/restart.
+- **`play_start`** gains `key` (logical key or null), `layer` (letter),
+  `loop` (bool) and `src`: `key` (physical press), `remote` (`press`),
+  `host` (`play` command) or `slot` (Vision 6 wheel / nav / menu).
+- **`play_done`** gains `reason`: `done` | `repress` (same key again) |
+  `stop` (serial stop) | `other` (another key took over, or any key ended a
+  keyless play) | `error`.
+- **`hello.playing`** is `{"file","key","layer","loop"}` while a macro plays
+  (`identify` is answered mid-playback), else `null`.
 
 v16 (firmware 0.29.0) is the **USB MIDI** release. No new message types; one
 config key, one `hello` field, one macro event type and one Dial slot type:
@@ -294,7 +339,8 @@ STANDALONE ──(host_enter)──► HOST ──(host_leave | CDC disconnect |
 | `{"t":"ping"}` | Reply `pong`; refreshes the host-mode watchdog |
 | `{"t":"host_enter"}` / `{"t":"host_leave"}` | Switch mode; reply `ok` |
 | `{"t":"play","file":"macros/key1.json","speed":1.5,"repeat":2}` | Play a file from the drive. `speed`/`repeat` optional (default: the macro's own `settings`; `repeat: 0` = loop). v5: optional `"hold": true` — a plain single-key macro is pressed and **held until `stop`** (real-keyboard hold; the sender must send `stop` on the key's up edge) |
-| `{"t":"stop"}` | Abort current playback |
+| `{"t":"stop"}` | Abort current playback. v17: replies `{"t":"ok","re":"stop","was_playing":bool}` |
+| `{"t":"press","key":3,"layer":"a","gesture":"tap"}` | v17. Remote key press — see the v17 notes at the top |
 | `{"t":"keys","mods":["CTRL","SHIFT"],"key":"s"}` | Tap a combo directly (no file) |
 | `{"t":"get_config"}` | Reply with `config` |
 | `{"t":"set_cfg","patch":{"layer_names":["Oyun"],"show_layer":true}}` | v14. Patch display-level config fields LIVE — applied, persisted into config.json and repainted with **no reload** (issue: a layer rename used to cold-restart the board and re-read every macro). Whitelist: `layer_names`, `show_layer`, `show_profile`, `wheel_layers`, `timeout`, `lang`. Values are validated/normalized like `load_config` does. Replies `ok` + a fresh `config` announcement; unknown fields → `err bad_field`, bad values → `err bad_value`. Structural fields (key_count, layers, pins, model, usb_drive, enc_swap) stay on the config-write + `reload` path on purpose |
@@ -328,8 +374,8 @@ STANDALONE ──(host_enter)──► HOST ──(host_leave | CDC disconnect |
 | `{"t":"pin","pin":"GP13","down":true}` | fw 0.7.0. While `pin_detect` is armed: a watched GPIO changed — the wiring wizard assigns it to the key being probed |
 | `{"t":"btn","key":2,"phys":4,"layer":"a","edge":"down"}` | Every press/release. `key` = logical (after `key_map`), `phys` = GPIO number. Host mode: always; standalone: since v2, while an app is connected |
 | `{"t":"key_action","file":"/macros/key2.json","key":2,"layer":"a","variant":"double"}` | v2. A key with key-logic `variants` resolved its gesture (`tap` \| `double` \| `hold`) in standalone mode. The app uses it to run host-side variants (launch/command/sound). Since fw 0.9.0 a Vision 6 module slot resolving its own gesture announces the same message with `"key": null` and the slot's file path |
-| `{"t":"play_start","file":"/macros/key1.json"}` | Playback began |
-| `{"t":"play_done","file":"/macros/key1.json","stopped":false}` | Playback ended (`stopped: true` = aborted) |
+| `{"t":"play_start","file":"/macros/key1.json","key":1,"layer":"a","loop":false,"src":"key"}` | Playback began. `key`/`layer`/`loop`/`src` since v17 |
+| `{"t":"play_done","file":"/macros/key1.json","stopped":false,"reason":"done"}` | Playback ended (`stopped: true` = aborted). `reason` since v17 |
 | `{"t":"config", ...config.json fields...}` | Reply to `get_config` |
 | `{"t":"ok","re":"reload"}` | Command acknowledged |
 | `{"t":"err","re":"play","code":"not_found","msg":"/macros/key9.json"}` | Codes: `not_found`, `bad_json`, `bad_format`, `oom`, `io`, `hid` (USB stack rejected a report — boot.py descriptor older than engine.py after a partial update; power-cycle to heal) |
@@ -341,7 +387,8 @@ STANDALONE ──(host_enter)──► HOST ──(host_leave | CDC disconnect |
 
 ## Playback interaction rules
 
-- During playback the device still answers `ping`/`identify` and honors `stop`.
+- During playback the device still answers `ping`/`identify` and honors `stop`
+  and (v17) `press`.
 - **Panic stop:** pressing the key that started the macro (standalone), or any
   key (host-commanded playback), aborts it and releases all pressed inputs.
 - `fs_*` commands during playback are answered with `err busy` (so the app

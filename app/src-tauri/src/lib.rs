@@ -8,6 +8,7 @@ mod permissions;
 mod player;
 mod profiles;
 mod recorder;
+mod remote;
 mod sound;
 mod updater;
 mod vars;
@@ -60,12 +61,16 @@ fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
         false,
         None::<&str>,
     )?;
+    // Remote-desktop users can't press the keypad to end a looping macro —
+    // this works with the window hidden (see remote.rs)
+    let stop = MenuItem::with_id(app, "stop", "Stop playback", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit MKYADA", true, None::<&str>)?;
     let menu = Menu::with_items(
         app,
         &[
             &show,
             &PredefinedMenuItem::separator(app)?,
+            &stop,
             &pause,
             &PredefinedMenuItem::separator(app)?,
             &quit,
@@ -78,6 +83,7 @@ fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
         .show_menu_on_left_click(true)
         .on_menu_event(move |app, event| match event.id.as_ref() {
             "show" => show_main(app),
+            "stop" => remote::stop_playback(app, "tray"),
             "pause" => {
                 let paused = pause_handle.is_checked().unwrap_or(false);
                 // profiles.tsx listens and stops answering key presses
@@ -1469,6 +1475,13 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_store::Builder::new().build())
+        // system-wide "stop playback" hotkey (remote.rs); the shortcut itself
+        // is registered in setup, once the store can be read
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(|app, s, e| remote::on_shortcut(app, s, e.state))
+                .build(),
+        )
         .setup(|app| {
             use tauri::Listener;
             #[cfg(target_os = "macos")]
@@ -1477,6 +1490,7 @@ pub fn run() {
                 let _ = w.set_title(&format!("MKYADA v{}", env!("CARGO_PKG_VERSION")));
             }
             setup_tray(app)?;
+            remote::init(app.handle());
             // macOS/Linux WebView2-overlay setup: harden click-through once the
             // overlay webview signals `overlay:ready`, and pre-create it hidden
             // at startup so it warm-inits undisturbed. (Windows draws the overlay
@@ -1644,6 +1658,9 @@ pub fn run() {
             overlay_show,
             overlay_hide,
             window_set_pin,
+            remote::stop_hotkey_status,
+            remote::stop_hotkey_set,
+            remote::stop_playback_now,
         ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application");

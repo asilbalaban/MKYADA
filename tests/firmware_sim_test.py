@@ -610,6 +610,228 @@ app.proto.ser = None
 app.buttons.scan = _orig_scan
 app.engine.play = _orig_play
 
+# --- remote control (proto v17): press / stop reply / playing state --------
+# Users on a remote desktop can't touch the keypad: the app must be able to
+# stop a looping macro and "press" a key exactly like a physical press.
+def _ev(k):
+    return [{"delay": 0, "type": "key", "action": "down", "key": k},
+            {"delay": 0, "type": "key", "action": "up", "key": k}]
+
+def rc_file(settings, variants=None, events=None):
+    f = tempfile.NamedTemporaryFile("w", suffix=".json", delete=False)
+    d = {"format": "mkyada-macro", "version": 3, "settings": settings,
+         "events": events or _ev("a")}
+    if variants:
+        d["variants"] = variants
+    json.dump(d, f)
+    f.close()
+    return f.name
+
+rc_paths = {}
+_orig_mpf = app.macro_path_for
+app.macro_path_for = lambda k, l: rc_paths.get((k, l), "/nonexistent/key%d.json" % k)
+app.macro_path = lambda k: app.macro_path_for(k, app.layer)
+app.config["key_map"] = list(range(1, 7))
+app.config["layer_key"] = None
+app.config["layer_count"] = 3
+app.config["busy_other"] = "ignore"
+app.layer = 0
+app.pending_play = None
+app.remote = None
+app.inbox = []
+app.proto.ser = FakeSerial([])  # connected: key_action is only sent then
+app.last_rx = _time.monotonic()
+rc_out = []
+app.proto.send = lambda obj: (rc_out.append(obj), True)[1]
+rc_inbox = []
+app.proto.poll = lambda: [rc_inbox.pop(0)] if rc_inbox else []
+app.buttons.scan = lambda: []
+rc_played = []
+rc_seen = {}
+
+def rc_engine(evs, **kw):
+    """Record the played keys; a loop keeps asking should_stop until told."""
+    rc_played.append([e.get("key") for e in evs])
+    rc_seen["hello"] = app.hello().get("playing")
+    for _ in range(50):
+        if kw["should_stop"]():
+            raise StopPlayback()
+        if not rc_inbox:
+            return
+
+app.engine.play = rc_engine
+
+def rc_by(t, **kv):
+    return [m for m in rc_out
+            if m.get("t") == t and all(m.get(k) == v for k, v in kv.items())]
+
+# validation errors answer err re:"press" and queue nothing
+for bad, code in (({"key": 0}, "bad_key"), ({"key": 9}, "bad_key"),
+                  ({"key": "2"}, "bad_key"), ({"key": 2, "layer": 7}, "bad_layer"),
+                  ({"key": 2, "layer": "z"}, "bad_layer"),
+                  ({"key": 2, "gesture": "triple"}, "bad_gesture")):
+    rc_out.clear()
+    app.handle_msg(dict(bad, t="press"))
+    check("press rejects %s" % code, rc_by("err", re="press", code=code)
+          and app.remote is None, str(rc_out))
+
+# idle press is queued, never run inside handle_msg
+rc_paths[(2, 0)] = rc_file({}, variants={"double": {"events": _ev("d")},
+                                         "hold": {"events": _ev("h")}})
+rc_out.clear()
+app.handle_msg({"t": "press", "key": 2})
+check("press queued, not played in handle_msg",
+      app.remote == (2, 0, "tap") and not rc_by("play_start"), str(rc_out))
+app.handle_msg({"t": "press", "key": 2, "layer": "b", "gesture": "hold"})
+check("press layer letter + gesture", app.remote == (2, 1, "hold"), str(app.remote))
+# a stop right after a press drops the queued press
+rc_out.clear()
+app.handle_msg({"t": "stop"})
+check("idle stop replies was_playing false",
+      rc_by("ok", re="stop", was_playing=False), str(rc_out))
+check("idle stop drops queued press", app.remote is None)
+
+# gestures pick the variant directly (no physical key is read)
+for g, want in (("tap", "a"), ("double", "d"), ("hold", "h")):
+    rc_out.clear()
+    rc_played.clear()
+    app.remote_press(2, 0, g)
+    check("press %s plays its variant" % g, rc_played == [[want, want]], str(rc_played))
+    check("press %s announces key_action" % g,
+          rc_by("key_action", key=2, variant=g, layer="a"), str(rc_out))
+    check("press %s ok play" % g, rc_by("ok", re="press", action="play"), str(rc_out))
+st = rc_by("play_start")
+check("play_start carries key/layer/loop/src",
+      st and st[-1].get("key") == 2 and st[-1].get("layer") == "a"
+      and st[-1].get("loop") is False and st[-1].get("src") == "remote", str(st))
+check("play_done reason done", rc_by("play_done", reason="done", stopped=False), str(rc_out))
+
+# a looping key: hello reports it, a serial stop ends it and is acknowledged
+rc_paths[(3, 0)] = rc_file({"repeat": 0})
+rc_out.clear()
+rc_inbox[:] = [{"t": "ping"}, {"t": "stop"}]
+app.remote_press(3, 0, "tap")
+check("hello.playing during a loop",
+      rc_seen.get("hello") == {"file": rc_paths[(3, 0)], "key": 3,
+                               "layer": "a", "loop": True}, str(rc_seen))
+check("loop play_start loop:true", rc_by("play_start", loop=True, key=3), str(rc_out))
+check("stop mid-loop acknowledged", rc_by("ok", re="stop", was_playing=True), str(rc_out))
+check("stop mid-loop reason stop", rc_by("play_done", stopped=True, reason="stop"), str(rc_out))
+check("hello.playing cleared after", app.hello().get("playing") is None)
+
+# pressing the playing key remotely = physical re-press (stop)
+rc_out.clear()
+rc_inbox[:] = [{"t": "press", "key": 3}]
+app.remote_press(3, 0, "tap")
+check("remote re-press stops the loop",
+      rc_by("play_done", stopped=True, reason="repress")
+      and rc_by("ok", re="press", action="stop") and app.remote is None, str(rc_out))
+
+# on_repress "restart": the re-press queues the same press again
+rc_paths[(4, 0)] = rc_file({"repeat": 0, "on_repress": "restart"})
+rc_out.clear()
+rc_inbox[:] = [{"t": "press", "key": 4, "gesture": "double"}]
+app.remote_press(4, 0, "tap")
+check("remote re-press restart queues it", app.remote == (4, 0, "double")
+      and rc_by("play_done", reason="repress"), str((app.remote, rc_out)))
+app.remote = None
+
+# another key while busy: busy_other ignore -> err busy, loop keeps going
+rc_out.clear()
+rc_inbox[:] = [{"t": "press", "key": 2}, {"t": "stop"}]
+app.remote_press(3, 0, "tap")
+check("other key ignored -> err busy", rc_by("err", re="press", code="busy")
+      and rc_by("play_done", reason="stop") and app.remote is None, str(rc_out))
+# ...busy_other switch -> stops and queues the other key's press
+app.config["busy_other"] = "switch"
+rc_out.clear()
+rc_inbox[:] = [{"t": "press", "key": 2, "gesture": "hold"}]
+app.remote_press(3, 0, "tap")
+check("other key switch queues it", app.remote == (2, 0, "hold")
+      and rc_by("play_done", reason="other"), str((app.remote, rc_out)))
+app.remote = None
+app.config["busy_other"] = "ignore"
+# a bad press mid-playback is refused without stopping anything
+rc_out.clear()
+rc_inbox[:] = [{"t": "press", "key": 99}, {"t": "stop"}]
+app.remote_press(3, 0, "tap")
+check("bad press mid-loop doesn't stop", rc_by("err", re="press", code="bad_key")
+      and rc_by("play_done", reason="stop"), str(rc_out))
+
+# a physical press of the remotely started key is a re-press too
+rc_out.clear()
+_phys = [[(2, True)]]
+app.buttons.scan = lambda: _phys.pop(0) if _phys else []
+app.remote_press(3, 0, "tap")
+check("physical key re-presses a remote loop",
+      rc_by("play_done", reason="repress"), str(rc_out))
+app.buttons.scan = lambda: []
+
+# test mode doesn't block a remote press (explicit user action)
+app.test_mode = True
+rc_out.clear()
+app.remote_press(2, 0, "tap")
+check("remote press plays in test mode", rc_by("play_start", src="remote"), str(rc_out))
+app.test_mode = False
+
+# layer key cycles the layer; menu keys and missing files are refused
+app.config["layer_key"] = 6
+rc_out.clear()
+app.remote_press(6, 0, "tap")
+check("remote layer key cycles", app.layer == 1
+      and rc_by("ok", re="press", action="layer"), str(rc_out))
+app.set_layer_idx(0)
+app.config["layer_key"] = None
+_orig_pom = app.press_opens_menu
+app.press_opens_menu = lambda k, l=None: True
+rc_out.clear()
+app.remote_press(2, 0, "tap")
+check("menu key -> err unsupported", rc_by("err", re="press", code="unsupported")
+      and not rc_by("play_start"), str(rc_out))
+app.press_opens_menu = _orig_pom
+rc_out.clear()
+app.remote_press(5, 2, "tap")
+check("unassigned key -> err not_assigned",
+      rc_by("err", re="press", code="not_assigned"), str(rc_out))
+app.xfer = True
+rc_out.clear()
+app.remote_press(2, 0, "tap")
+check("press during transfer -> err busy", rc_by("err", re="press", code="busy")
+      and not rc_by("play_start"), str(rc_out))
+app.xfer = False
+
+# a stop that lands while a physical gesture is still resolving (pump()
+# parks it in the inbox) must cancel the playback that follows
+rc_paths[(1, 0)] = rc_file({"repeat": 0, "double_ms": 20},
+                           variants={"double": {"events": _ev("d")}})
+app.buttons.stable[0] = True
+def _release_scan():
+    app.buttons.stable[0] = False
+    return []
+app.buttons.scan = _release_scan
+rc_inbox[:] = [{"t": "stop"}]
+rc_out.clear()
+rc_played.clear()
+app.play_file(rc_paths[(1, 0)], trigger=0)
+check("stop during gesture resolution cancels the loop",
+      not rc_played and rc_by("play_done", stopped=True, reason="stop")
+      and rc_by("ok", re="stop", was_playing=True), str((rc_played, rc_out)))
+check("physical play_start src key", rc_by("play_start", src="key", key=1), str(rc_out))
+check("inbox emptied of the stop", not any(m.get("t") == "stop" for m in app.inbox))
+
+# the app's play command reports src host
+rc_out.clear()
+app.handle_msg({"t": "play", "file": rc_paths[(2, 0)].lstrip("/")})
+check("host play src host", rc_by("play_start", src="host", key=None), str(rc_out))
+
+app.inbox = []
+app.buttons.scan = _orig_scan
+app.engine.play = _orig_play
+app.proto.poll = _orig_poll
+app.proto.ser = None
+app.proto.send = lambda obj: (outbox.append(obj), True)[1]
+del app.macro_path_for, app.macro_path  # back to the real methods
+
 # --- v4 stream macro files (proto v4): header line + one event per line ---
 def stream_macro_file(events, settings=None):
     f = tempfile.NamedTemporaryFile("w", suffix=".json", delete=False)
@@ -768,7 +990,7 @@ app.proto.send = _orig_send
 app.proto.ser = None
 
 # --- serial "led" op (proto v2): app feedback override --------------------
-check("hello reports proto v16", app.hello()["proto"] == 16, str(app.hello()["proto"]))
+check("hello reports proto v17", app.hello()["proto"] == 17, str(app.hello()["proto"]))
 # hello reports the PORT, not the config key: boot.py can refuse MIDI (a
 # visible drive, or key 1 held at power-on) while config still says true, and
 # an "On" switch over a board that cannot send anything is a lie.
