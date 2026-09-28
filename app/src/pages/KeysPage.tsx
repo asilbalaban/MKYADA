@@ -804,7 +804,7 @@ export function KeysPage() {
         ? "Save your changes first · this runs what's saved on the keypad"
         : !playback.canPress
           ? (playback.pressDisabledReason ?? "Remote press is unavailable")
-          : null;
+          : playback.holdReason;
   const runButton = runPlaying ? (
     <Tooltip side="bottom" content="Stop the macro this key is playing">
       <Button

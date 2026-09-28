@@ -76,13 +76,20 @@ type TileState =
 /** Whether a key can be pressed from here, and if not, why. */
 function tileState(
   a: Assignment | undefined,
-  { vision6, loading, canPress, pressReason }: { vision6: boolean; loading: boolean; canPress: boolean; pressReason: string | null },
+  {
+    vision6,
+    loading,
+    canPress,
+    pressReason,
+    holdReason,
+  }: { vision6: boolean; loading: boolean; canPress: boolean; pressReason: string | null; holdReason: string | null },
 ): TileState {
   if (!a || a.kind === "none") {
     if (loading) return { run: false, reason: "Still loading from the keypad", short: "Loading…", loading: true };
     return { run: false, reason: "Nothing is assigned to this key", short: "Not assigned" };
   }
   if (!canPress) return { run: false, reason: pressReason ?? "Can't press keys right now", short: "Needs a firmware update" };
+  if (holdReason) return { run: false, reason: holdReason, short: "Paused · remote desktop" };
   const hasVariants = !!(a.variants?.double || a.variants?.hold);
   if (vision6 && MENU_KINDS.has(a.kind) && !hasVariants) {
     return {
@@ -137,7 +144,7 @@ export function ControlPage() {
   const nav = useNav();
   const { hello, port, drive, layer: deviceLayer, status } = useDevice();
   const { activeProfile } = useProfiles();
-  const { playing, canPress, pressDisabledReason, stopPlayback, pressKey } = usePlayback();
+  const { playing, canPress, pressDisabledReason, holdReason, stopPlayback, pressKey } = usePlayback();
   const toast = useToast();
   const hotkey = useStopHotkey();
   const snap = useKeysSnapshot(drive?.path);
@@ -398,9 +405,11 @@ export function ControlPage() {
                 subtitle={`Layer key · switches the keypad to ${layerText(next)}`}
                 icon={<Layers size={22} aria-hidden className="text-accent" />}
                 state={
-                  canPress
-                    ? { run: true }
-                    : { run: false, reason: pressDisabledReason ?? "", short: "Needs a firmware update" }
+                  !canPress
+                    ? { run: false, reason: pressDisabledReason ?? "", short: "Needs a firmware update" }
+                    : holdReason
+                      ? { run: false, reason: holdReason, short: "Paused · remote desktop" }
+                      : { run: true }
                 }
                 runLabel="Switch layer"
                 playing={false}
@@ -411,7 +420,13 @@ export function ControlPage() {
               />
             );
           }
-          const state = tileState(a, { vision6, loading, canPress, pressReason: pressDisabledReason });
+          const state = tileState(a, {
+            vision6,
+            loading,
+            canPress,
+            pressReason: pressDisabledReason,
+            holdReason,
+          });
           const me = isPlaying(n);
           // The keypad runs one macro at a time: with another one occupying
           // it, busy_other decides whether a press is refused or takes over.

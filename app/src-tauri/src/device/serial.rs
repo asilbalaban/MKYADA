@@ -331,6 +331,8 @@ pub fn connect(app: AppHandle, mgr: &DeviceManager, port: &str) -> Result<(), St
                         // thread — the webview that would otherwise trigger them
                         // is suspended when the app is in the background.
                         crate::sound::on_device_msg(&v);
+                        // no macro may run while a remote desktop session is open
+                        crate::crd_watch::on_device_msg(&app, &v);
                         // The board names the biggest fs_write chunk its heap
                         // can hold in one contiguous block (fw 0.19.1+).
                         if v.get("t").and_then(Value::as_str) == Some("hello") {

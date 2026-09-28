@@ -39,6 +39,7 @@ export function PlaybackBar({ className = "" }: { className?: string }) {
     dismissStopped,
     canStop,
     canPress,
+    remoteHold,
     pressDisabledReason,
     stopPlayback,
     pressKey,
@@ -73,6 +74,35 @@ export function PlaybackBar({ className = "" }: { className?: string }) {
   const base =
     "flex min-h-14 flex-wrap items-center gap-x-4 gap-y-2 rounded-card py-2.5 pl-4 pr-2.5 text-sm " +
     className;
+
+  // A remote desktop session is open: nothing plays until it ends (Rust
+  // stops every start), so this replaces both the playing and stopped strips.
+  if (remoteHold) {
+    const k = remoteHold.resumeKey;
+    return (
+      <div
+        role="status"
+        aria-live="polite"
+        className={`${base} border border-warning-line bg-warning-bg`}
+      >
+        <MonitorUp size={16} aria-hidden className="shrink-0 text-warning" />
+        <span className="flex min-w-0 flex-1 flex-col text-fg">
+          <span className="font-semibold">Remote desktop connected · macros are paused</span>
+          <span className="text-fg-muted">
+            {k !== null
+              ? `Key ${k} was stopped so you can use this computer. It starts again when the remote session ends.`
+              : "Keys won't play macros while someone is connected, so the computer stays usable."}
+          </span>
+        </span>
+        {playing && (
+          <Button variant="danger-solid" disabled={!canStop} onClick={() => void stopPlayback()}>
+            <Square size={14} aria-hidden fill="currentColor" />
+            Stop
+          </Button>
+        )}
+      </div>
+    );
+  }
 
   if (showPlaying) {
     const layer = layerLabel(playing.layer, names);
@@ -153,7 +183,7 @@ export function PlaybackBar({ className = "" }: { className?: string }) {
           <span className="flex min-w-0 flex-1 flex-col text-fg">
             <span className="font-semibold">Stopped key {lastStopped.key}</span>
             <span className="text-fg-muted">
-              A remote desktop connection to this computer just started, so the macro was stopped.
+              Stopped because a remote desktop was connected to this computer.
             </span>
           </span>
         ) : (

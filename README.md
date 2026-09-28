@@ -106,10 +106,11 @@ would run forever. The app covers that:
   window hidden or in the tray. Change it in *Settings → Application → Remote
   control*.
 - **Tray** — the tray menu has **Stop playback**.
-- **Stop on connect** — when someone connects to the computer over Chrome
-  Remote Desktop, a running macro stops and the bar says why, so they don't
-  land in the middle of a loop. Macros started during the session keep
-  running. Turn it off in *Settings → Application → Remote control*.
+- **Paused during remote desktop** — while someone is connected over Chrome
+  Remote Desktop, no macro plays (a running one stops, keys and *Run* are
+  held), so the computer stays usable. When the session ends, the macro the
+  connection stopped starts again. Turn it off in *Settings → Application →
+  Remote control*.
 
 Remote run and stop need a keypad on the current firmware (serial protocol
 v17); on older firmware the Control page asks for an update. The
@@ -249,7 +250,7 @@ STLs and print notes live in [hardware/case/](hardware/case/).
 - **Tuş vuruşunun ötesinde** — bir tuşu uygulama/dosya/URL açmaya, terminal komutu çalıştırmaya, ses çalmaya (basılı tutunca durdur/kıs/baştan başlat), kaydırma & yakınlaştırmaya, mikrofon kontrolüne (sustur/aç/değiştir/**bas-konuş**), **OBS Studio** kontrolüne (sahne, kayıt, yayın, mikrofon) ya da webhook'a atayın; birkaçını aralarında bekleme ile zincirleyerek tek bir çok adımlı aksiyon yapın. Tüm liste: [docs/actions.md](docs/actions.md).
 - **Vision 6 ekranı** — 128×64 OLED'de canlı makro adları, katman seçici, makro başına hız ayarı ve ayarlar menüsü; hepsi döner tekerlekle. Encoder ve BACK/CONFIRM tuşları da kendi makrolarını taşır. Ayrıntı: [docs/vision6.md](docs/vision6.md).
 - **Kaydet & düzenle** — klavye + mouse kaydı, event bazında düzenleme, çoklu satır seçimi, geri al/ileri al, mouse yolunu gerçek ekranda 1:1 çizme, hız / tekrar ayarı.
-- **Uzaktan kontrol** — *Control* sayfası herhangi bir tuşu uygulamadan, fiziksel basışla birebir aynı şekilde çalıştırır; her sayfadaki oynatma çubuğu, genel durdurma kısayolu (varsayılan **Ctrl+Alt+Shift+S**) ve tepsideki *Stop playback* çalan makroyu durdurur. Chrome Remote Desktop ile bağlantı kurulduğu anda çalan makro da kendiliğinden durur. Chrome Remote Desktop ile bağlanıp fiziksel tuşa uzanamayanlar için.
+- **Uzaktan kontrol** — *Control* sayfası herhangi bir tuşu uygulamadan, fiziksel basışla birebir aynı şekilde çalıştırır; her sayfadaki oynatma çubuğu, genel durdurma kısayolu (varsayılan **Ctrl+Alt+Shift+S**) ve tepsideki *Stop playback* çalan makroyu durdurur. Chrome Remote Desktop bağlantısı açık olduğu sürece makro oynatılmaz; bağlantı kesilince durdurulan makro yeniden başlar. Chrome Remote Desktop ile bağlanıp fiziksel tuşa uzanamayanlar için.
 - **Arka planda çalışır** — pencereyi kapatmak uygulamayı kapatmaz, sistem tepsisine gönderir; tuş aksiyonları ve profiller çalışmaya devam eder. İsteğe bağlı "açılışta başlat" seçeneği de var.
 - **Kendin yap** — 6 switch'i RP2040-Zero'ya lehimle, kutuyu 3D yazıcıda bas, firmware'i yükle.
 

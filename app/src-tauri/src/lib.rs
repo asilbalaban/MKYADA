@@ -1663,6 +1663,7 @@ pub fn run() {
             remote::stop_hotkey_status,
             remote::stop_hotkey_set,
             remote::stop_playback_now,
+            crd_watch::remote_desktop_state,
         ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application");

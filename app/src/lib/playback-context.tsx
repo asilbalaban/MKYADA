@@ -11,6 +11,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { ipc } from "./ipc";
 import {
@@ -33,6 +34,15 @@ export interface PressOptions {
   gesture?: PressGesture;
 }
 
+/** crd_watch.rs: macros are held while a remote desktop session is open. */
+export interface RemoteHold {
+  /** the key the connection interrupted; pressed again when it ends */
+  resumeKey: number | null;
+  resumeLayer: string | null;
+}
+
+const HOLD_REASON = "Macros are paused while a remote desktop is connected";
+
 export interface PlaybackState {
   /** the macro the keypad is playing right now, if any */
   playing: PlayingInfo | null;
@@ -43,6 +53,10 @@ export interface PlaybackState {
   canStop: boolean;
   /** remote key presses need firmware proto >= 17 */
   canPress: boolean;
+  /** set while a remote desktop session holds playback (see RemoteHold) */
+  remoteHold: RemoteHold | null;
+  /** why keys can't run right now because of remoteHold (null when free) */
+  holdReason: string | null;
   /** why pressKey is unavailable (null when canPress) */
   pressDisabledReason: string | null;
   stopPlayback: () => Promise<void>;
@@ -103,6 +117,28 @@ export function PlaybackProvider({
     };
   }, []);
 
+  // Remote desktop hold: Rust stops anything that starts while a session is
+  // open; the UI mirrors it so Run buttons explain instead of flickering.
+  const [remoteHold, setRemoteHold] = useState<RemoteHold | null>(null);
+  useEffect(() => {
+    type Rd = { active: boolean; resume_key: number | null; resume_layer: string | null };
+    const apply = (s: Rd | null | undefined) =>
+      setRemoteHold(
+        s?.active ? { resumeKey: s.resume_key ?? null, resumeLayer: s.resume_layer ?? null } : null,
+      );
+    let un: (() => void) | undefined;
+    let dead = false;
+    void invoke<Rd>("remote_desktop_state").then(apply).catch(() => {});
+    void listen<Rd>("remote-desktop:state", (e) => apply(e.payload))
+      .then((f) => (dead ? f() : (un = f)))
+      .catch(() => {});
+    return () => {
+      dead = true;
+      un?.();
+    };
+  }, []);
+  const holdReason = remoteHold ? HOLD_REASON : null;
+
   // no keypad, nothing playing
   useEffect(() => {
     if (!port) setTrack(EMPTY_TRACK);
@@ -142,6 +178,7 @@ export function PlaybackProvider({
   const pressKey = useCallback(
     (key: number, opts: PressOptions = {}) => {
       if (pressDisabledReason) return Promise.reject(new Error(pressDisabledReason));
+      if (holdReason) return Promise.reject(new Error(holdReason));
       // Re-pressing a key whose multi action the app is running stops it,
       // like the physical re-press (the keypad itself may be between steps,
       // or busy with a step's part file, so it can't decide this).
@@ -172,7 +209,7 @@ export function PlaybackProvider({
         });
       });
     },
-    [pressDisabledReason, subscribe],
+    [pressDisabledReason, holdReason, subscribe],
   );
 
   return (
@@ -183,6 +220,8 @@ export function PlaybackProvider({
         dismissStopped,
         canStop: connected,
         canPress,
+        remoteHold,
+        holdReason,
         pressDisabledReason,
         stopPlayback,
         pressKey,

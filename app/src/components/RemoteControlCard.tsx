@@ -1,7 +1,7 @@
 // Settings card for the system-wide "stop playback" hotkey (remote.rs).
 // Shows the combo in force, records a new one, resets to the default and
 // reports when the OS refused to register it. Also the switch for stopping
-// playback when a remote desktop session connects (crd_watch.rs).
+// playback while a remote desktop session is open (crd_watch.rs).
 
 import { useEffect, useState } from "react";
 import { Keyboard, MonitorUp, RotateCcw } from "lucide-react";
@@ -97,8 +97,8 @@ export function RemoteControlCard() {
       <div className="flex flex-col gap-3">
         <SettingRow
           icon={MonitorUp}
-          title="Stop when a remote desktop connects"
-          description="When someone connects to this computer over Chrome Remote Desktop, a running macro stops so they don't land in the middle of it. Macros started during the session keep running."
+          title="Pause macros during remote desktop"
+          description="While someone is connected over Chrome Remote Desktop, no macro plays, so they can use the computer. A macro stopped by the connection starts again when the session ends."
           control={
             <Switch
               checked={stopOnRd}
@@ -106,7 +106,7 @@ export function RemoteControlCard() {
                 setStopOnRd(on);
                 void setSetting(STOP_ON_RD_KEY, on);
               }}
-              aria-label="Stop when a remote desktop connects"
+              aria-label="Pause macros during remote desktop"
             />
           }
         />
