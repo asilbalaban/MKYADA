@@ -12,6 +12,7 @@ import {
   Keyboard,
   Layers,
   MonitorSmartphone,
+  Pause,
   Play,
   Repeat,
   Square,
@@ -144,7 +145,8 @@ export function ControlPage() {
   const nav = useNav();
   const { hello, port, drive, layer: deviceLayer, status } = useDevice();
   const { activeProfile } = useProfiles();
-  const { playing, canPress, pressDisabledReason, holdReason, stopPlayback, pressKey } = usePlayback();
+  const { playing, canPress, pressDisabledReason, holdReason, remoteHold, cancelResume, stopPlayback, pressKey } =
+    usePlayback();
   const toast = useToast();
   const hotkey = useStopHotkey();
   const snap = useKeysSnapshot(drive?.path);
@@ -428,6 +430,11 @@ export function ControlPage() {
             holdReason,
           });
           const me = isPlaying(n);
+          // stopped by a remote desktop connection, waiting to start again
+          const paused =
+            !me &&
+            remoteHold?.resumeKey === n &&
+            (!!profile || remoteHold.resumeLayer === null || remoteHold.resumeLayer === viewLetter);
           // The keypad runs one macro at a time: with another one occupying
           // it, busy_other decides whether a press is refused or takes over.
           const blocked = state.run && settled && !me && busyOther === "ignore";
@@ -449,10 +456,17 @@ export function ControlPage() {
               state={finalState}
               runLabel={settled && !me && busyOther === "switch" ? "Switch to this" : "Run"}
               playing={me}
+              paused={paused}
               loop={me && !!playing?.loop}
               busy={pending === `${n}:tap`}
               done={flash === `${n}:tap` && !me}
-              onRun={() => void run(n)}
+              onRun={() =>
+                paused
+                  ? void cancelResume().catch((e) =>
+                      toast.error("Couldn't stop the macro", e instanceof Error ? e.message : String(e)),
+                    )
+                  : void run(n)
+              }
               variants={
                 hasA && finalState.run && !me
                   ? (["double", "hold"] as const)
@@ -531,7 +545,8 @@ function KeyTile({
   icon,
   state,
   runLabel,
-  playing,
+  playing: live,
+  paused = false,
   loop,
   busy,
   done,
@@ -545,19 +560,29 @@ function KeyTile({
   state: TileState;
   runLabel: string;
   playing: boolean;
+  /** stopped by remote desktop, resumes when it ends — offers Stop too */
+  paused?: boolean;
   loop: boolean;
   busy: boolean;
   done: boolean;
   onRun: () => void;
   variants?: VariantAction[];
 }) {
+  // A paused key looks and acts like a playing one: its button is Stop.
+  const playing = live || paused;
   const enabled = playing || state.run;
   const face = (
     <button
       type="button"
       disabled={!enabled || busy}
       onClick={onRun}
-      aria-label={playing ? `Stop key ${n} · ${title}` : `${runLabel} · key ${n} · ${title}`}
+      aria-label={
+        paused
+          ? `Stop key ${n} · ${title} · paused for remote desktop, won't start again`
+          : playing
+            ? `Stop key ${n} · ${title}`
+            : `${runLabel} · key ${n} · ${title}`
+      }
       aria-pressed={playing}
       className={cx(
         "group/tile flex min-h-[216px] w-full flex-1 flex-col gap-4 rounded-card p-4 text-left outline-none",
@@ -576,7 +601,13 @@ function KeyTile({
         >
           {n}
         </span>
-        {playing ? (
+        {paused ? (
+          <Badge tone="amber">
+            <span className="inline-flex items-center gap-1">
+              <Pause size={12} aria-hidden /> Paused · remote desktop
+            </span>
+          </Badge>
+        ) : playing ? (
           <Badge tone="solid">
             <span className="inline-flex items-center gap-1">
               {loop ? <Repeat size={12} aria-hidden /> : <Play size={12} aria-hidden />}

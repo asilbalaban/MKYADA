@@ -109,7 +109,7 @@ would run forever. The app covers that:
 - **Paused during remote desktop** — while someone is connected over Chrome
   Remote Desktop, no macro plays (a running one stops, keys and *Run* are
   held), so the computer stays usable. When the session ends, the macro the
-  connection stopped starts again. Turn it off in *Settings → Application →
+  connection stopped starts again, unless you press its **Stop** meanwhile. Turn it off in *Settings → Application →
   Remote control*.
 
 Remote run and stop need a keypad on the current firmware (serial protocol

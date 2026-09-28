@@ -57,6 +57,8 @@ export interface PlaybackState {
   remoteHold: RemoteHold | null;
   /** why keys can't run right now because of remoteHold (null when free) */
   holdReason: string | null;
+  /** drop the macro paused by remote desktop, so it doesn't start again */
+  cancelResume: () => Promise<void>;
   /** why pressKey is unavailable (null when canPress) */
   pressDisabledReason: string | null;
   stopPlayback: () => Promise<void>;
@@ -138,6 +140,9 @@ export function PlaybackProvider({
     };
   }, []);
   const holdReason = remoteHold ? HOLD_REASON : null;
+  const cancelResume = useCallback(async () => {
+    await invoke("remote_desktop_cancel_resume");
+  }, []);
 
   // no keypad, nothing playing
   useEffect(() => {
@@ -163,6 +168,8 @@ export function PlaybackProvider({
   const stopPlayback = useCallback(async () => {
     via.current = { source: "app", at: Date.now() };
     sequenceRuns.cancelAll();
+    // a Stop pressed during remote desktop also means "don't resume it"
+    void invoke("remote_desktop_cancel_resume").catch(() => {});
     await ipc.deviceSend({ t: "stop" });
   }, []);
 
@@ -222,6 +229,7 @@ export function PlaybackProvider({
         canPress,
         remoteHold,
         holdReason,
+        cancelResume,
         pressDisabledReason,
         stopPlayback,
         pressKey,

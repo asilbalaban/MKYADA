@@ -40,6 +40,7 @@ export function PlaybackBar({ className = "" }: { className?: string }) {
     canStop,
     canPress,
     remoteHold,
+    cancelResume,
     pressDisabledReason,
     stopPlayback,
     pressKey,
@@ -94,8 +95,13 @@ export function PlaybackBar({ className = "" }: { className?: string }) {
               : "Keys won't play macros while someone is connected, so the computer stays usable."}
           </span>
         </span>
-        {playing && (
-          <Button variant="danger-solid" disabled={!canStop} onClick={() => void stopPlayback()}>
+        {(playing || k !== null) && (
+          <Button
+            variant="danger-solid"
+            disabled={!!playing && !canStop}
+            title={k !== null ? `Key ${k} won't start again when the session ends` : undefined}
+            onClick={() => void (playing ? stopPlayback() : cancelResume())}
+          >
             <Square size={14} aria-hidden fill="currentColor" />
             Stop
           </Button>

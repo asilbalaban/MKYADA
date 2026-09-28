@@ -77,6 +77,25 @@ pub fn remote_desktop_state() -> RdState {
     snapshot(&WATCH.lock().unwrap())
 }
 
+/// The user stopped the paused macro (Stop on its tile or the bar, the hotkey,
+/// the tray): it stays stopped instead of starting again when the session ends.
+#[tauri::command]
+pub fn remote_desktop_cancel_resume(app: AppHandle) {
+    cancel_resume(&app);
+}
+
+pub fn cancel_resume(app: &AppHandle) {
+    let st = {
+        let mut w = WATCH.lock().unwrap();
+        if w.resume.take().is_none() {
+            return;
+        }
+        snapshot(&w)
+    };
+    crate::dbg_log!("remote desktop: resume cancelled");
+    let _ = app.emit("remote-desktop:state", &st);
+}
+
 pub fn init(app: &AppHandle) {
     let app = app.clone();
     let _ = std::thread::Builder::new()

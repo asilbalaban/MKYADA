@@ -39,6 +39,10 @@ pub struct HotkeyState(Mutex<HotkeyStatus>);
 /// Send `stop` to the connected keypad and tell the UI (source = "hotkey" |
 /// "tray"). Never fails loudly: there may simply be no keypad.
 pub fn stop_playback(app: &AppHandle, source: &str) {
+    // a deliberate stop also drops a macro paused for remote desktop
+    if source != "remote-desktop" {
+        crate::crd_watch::cancel_resume(app);
+    }
     let mgr = app.state::<DeviceManager>();
     let r = serial::send(&mgr, &json!({"t": "stop"}));
     crate::dbg_log!("stop playback ({source}): {:?}", r.as_ref().err());
