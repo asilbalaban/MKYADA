@@ -796,6 +796,33 @@ export const SLOT_BUILTIN_ACTION: Record<ModuleSlot, MenuAction> = {
   "btn-psh": "confirm", // the wheel push is handled like CONFIRM on the device
 };
 
+/** What each module control's built-in (on-device) behavior does, per screen,
+ * worded to finish "Built-in: …". Shared by the Keys and Profiles pages so the
+ * two can't drift apart. */
+export const SLOT_BUILTINS: Record<SlotContext, Record<ModuleSlot, string>> = {
+  grid: {
+    "enc-cw": "moves the selection right",
+    "enc-ccw": "moves the selection left",
+    "btn-back": "opens the layer screen",
+    "btn-confirm": "opens the selected key's speed editor",
+    "btn-psh": "speed editor; once anything is customized: toggles select mode",
+  },
+  home: {
+    "enc-cw": "scrolls toward SETTINGS",
+    "enc-ccw": "scrolls toward layer A",
+    "btn-back": "returns to the key grid",
+    "btn-confirm": "activates the highlighted layer",
+    "btn-psh": "activates the highlighted layer",
+  },
+  menu: {
+    "enc-cw": "moves down / increases",
+    "enc-ccw": "moves up / decreases",
+    "btn-back": "goes back one level",
+    "btn-confirm": "confirms the entry",
+    "btn-psh": "confirms the entry",
+  },
+};
+
 /** True when a module-slot assignment is exactly the control's concrete
  * built-in action with no extra gestures — i.e. equivalent to leaving it
  * un-overridden, so it need not be stored (issue #26). */

@@ -17,6 +17,7 @@ import {
   SLOT_BUILTIN_ACTION,
 } from "../src/lib/macro-model";
 import { serializeForDevice } from "../src/lib/recorder-model";
+import pkg from "../package.json";
 import { MODULE_SLOTS } from "../src/lib/types";
 import type {
   Assignment,
@@ -40,7 +41,12 @@ export interface Fixture {
   appVersion: string;
 }
 
-const APP_VERSION = "0.31.0";
+// The app version comes from package.json so the About tab never shows a stale
+// number in the published docs. The firmware one mirrors firmware/VERSION,
+// which lives outside Vite's root (the dev server won't serve it); bump it
+// with the firmware so the Devices hero stays "up to date".
+const APP_VERSION: string = pkg.version;
+const FW_VERSION = "0.31.0";
 
 // -------------------------------------------------------------- assignments ---
 // key number (per layer) -> what it does. Chosen to show the range of action
@@ -84,7 +90,16 @@ const CORE6_KEYS: Record<number, Record<string, Assignment>> = {
     1: { kind: "combo", mods: ["cmd"], key: "c", label: "Copy" },
     2: { kind: "text", text: "All the best,\nAsil", label: "Signature" },
     3: { kind: "launch", target: "https://github.com/asilbalaban/MKYADA", label: "Open repo" },
-    4: { kind: "media", usage: "PLAY_PAUSE", label: "Play / Pause" },
+    // key logic: the Control page offers Double press / Long press for it
+    4: {
+      kind: "media",
+      usage: "PLAY_PAUSE",
+      label: "Play / Pause",
+      variants: {
+        double: { kind: "media", usage: "next_track", label: "Next track" },
+        hold: { kind: "media", usage: "prev_track", label: "Previous track" },
+      },
+    },
     5: { kind: "recorded", name: RECORDED.name!, macro: RECORDED, label: "Post the clip" },
   },
   // layer B — smart-home & shell
@@ -119,7 +134,12 @@ const VISION6_KEYS: Record<number, Record<string, Assignment>> = {
         ],
       },
     },
-    5: { kind: "media", usage: "MUTE", label: "Mute" },
+    5: {
+      kind: "media",
+      usage: "MUTE",
+      label: "Mute",
+      variants: { hold: { kind: "media", usage: "play_pause", label: "Play / Pause" } },
+    },
     6: { kind: "recorded", name: RECORDED.name!, macro: RECORDED, label: "Post the clip" },
   },
   // layer B — "Edit"
@@ -147,7 +167,15 @@ const VISION6_KEYS: Record<number, Record<string, Assignment>> = {
     1: { kind: "command", command: "npm test", label: "Test" },
     2: { kind: "command", command: "git push", label: "Push" },
     3: { kind: "text", text: "console.log()", label: "console.log" },
-    4: { kind: "launch", target: "https://localhost:1420", label: "Open dev" },
+    // a mixed multi action: a HID step the keypad plays, then a computer step
+    4: {
+      kind: "sequence",
+      label: "Save & push",
+      steps: [
+        { a: { kind: "combo", mods: ["cmd"], key: "s" }, delayMs: 300 },
+        { a: { kind: "command", command: "git push" }, delayMs: 0 },
+      ],
+    },
     5: { kind: "keystroke", key: "f5", label: "Reload" },
     6: { kind: "combo", mods: ["cmd"], key: "p", label: "Go to file" },
   },
@@ -259,7 +287,8 @@ function core6(): Fixture {
   };
   const hello: Hello = {
     t: "hello",
-    fw: "0.25.0",
+    fw: FW_VERSION,
+    midi: false, // firmware ≥ 0.29 reports it; off by default
     proto: 12,
     format: "mkyada-config",
     uid: "E6605481DB334C2A",
@@ -296,7 +325,8 @@ function vision6(): Fixture {
     busy_other: "ignore",
     model: "vision6",
     pins: null,
-    nav: ["GP2", "GP3", "GP4"],
+    // null = the model's standard PSH/BACK/CONFIRM order (GP4/GP5/GP6)
+    nav: null,
     enc_swap: false,
     lang: "en",
     show_layer: true,
@@ -312,7 +342,8 @@ function vision6(): Fixture {
   };
   const hello: Hello = {
     t: "hello",
-    fw: "0.25.0",
+    fw: FW_VERSION,
+    midi: false, // firmware ≥ 0.29 reports it; off by default
     proto: 12,
     format: "mkyada-config",
     uid: "E6605481DB119A7F",
@@ -322,7 +353,9 @@ function vision6(): Fixture {
     layer_mode: "toggle",
     usb_drive: true,
     model: "vision6",
-    nav: ["GP2", "GP3", "GP4"],
+    // the firmware reports the effective nav order: encoder on GP2/GP3,
+    // PSH/BACK/CONFIRM on GP4/GP5/GP6 (firmware/mkyada/models.py)
+    nav: ["GP4", "GP5", "GP6"],
     show_layer: true,
     show_profile: true,
     wheel_layers: false,

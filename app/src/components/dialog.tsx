@@ -77,22 +77,30 @@ function ConfirmDialog({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-scrim p-4 animate-[hz-scrim-in_180ms_cubic-bezier(0.2,0,0,1)]"
       onMouseDown={(e) => e.target === e.currentTarget && onClose(false)}
     >
+      {/* Hezk Dialog: cream surface, 20px title, hairline footer. */}
       <div
         role="alertdialog"
         aria-modal="true"
-        aria-label={opts.title}
-        className="bg-panel border border-line rounded-xl shadow-2xl w-[26rem] max-w-[90vw] p-5 flex flex-col gap-3"
+        aria-labelledby="confirm-title"
+        aria-describedby="confirm-message"
+        className="flex w-[30rem] max-w-full flex-col overflow-hidden rounded-card bg-panel shadow-overlay animate-[hz-fade-in_180ms_cubic-bezier(0.2,0,0,1)]"
       >
-        <h2 className="text-base font-semibold text-fg">{opts.title}</h2>
-        <p className="text-sm text-fg-muted whitespace-pre-line leading-relaxed">{opts.message}</p>
-        <div className="flex justify-end gap-2 mt-2">
+        <div className="flex flex-col gap-2 px-6 pb-5 pt-5">
+          <h2 id="confirm-title" className="text-h3 font-strong text-fg">
+            {opts.title}
+          </h2>
+          <p id="confirm-message" className="whitespace-pre-line text-sm leading-relaxed text-fg-muted">
+            {opts.message}
+          </p>
+        </div>
+        <div className="flex justify-end gap-2 border-t border-line px-6 py-3.5">
           <Button onClick={() => onClose(false)}>{opts.cancelLabel ?? "Cancel"}</Button>
           <Button
             ref={confirmRef}
-            variant={opts.danger ? "danger" : "primary"}
+            variant={opts.danger ? "danger-solid" : "primary"}
             onClick={() => onClose(true)}
           >
             {opts.confirmLabel ?? "OK"}

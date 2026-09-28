@@ -57,7 +57,7 @@ export function parseBackup(text: string): Backup {
   try {
     data = JSON.parse(text);
   } catch {
-    throw new Error("That file isn't valid JSON — pick a MKYADA backup file.");
+    throw new Error("That file isn't valid JSON. Pick a MKYADA backup file.");
   }
   const b = data as Partial<Backup>;
   if (!b || typeof b !== "object" || b.format !== BACKUP_FORMAT) {
@@ -69,7 +69,7 @@ export function parseBackup(text: string): Backup {
     );
   }
   if (!b.config || typeof b.config !== "object") {
-    throw new Error("This backup has no keypad settings in it — it may be truncated.");
+    throw new Error("This backup has no keypad settings in it. It may be truncated.");
   }
   return {
     format: BACKUP_FORMAT,

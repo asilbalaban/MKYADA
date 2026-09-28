@@ -27,10 +27,11 @@ export function useToast(): ToastApi {
   return api;
 }
 
-const KIND_STYLE: Record<ToastKind, { border: string; icon: ReactNode }> = {
-  success: { border: "border-success-line", icon: <CheckCircle2 size={18} className="text-success shrink-0" /> },
-  error: { border: "border-danger-line", icon: <XCircle size={18} className="text-danger shrink-0" /> },
-  info: { border: "border-info-line", icon: <Info size={18} className="text-info shrink-0" /> },
+// Hezk Toast: charcoal chip, cream text, the kind shows only in the icon.
+const KIND_ICON: Record<ToastKind, ReactNode> = {
+  success: <CheckCircle2 size={18} aria-hidden className="text-success-on-dark shrink-0" />,
+  error: <XCircle size={18} aria-hidden className="text-danger-on-dark shrink-0" />,
+  info: <Info size={18} aria-hidden className="text-lavender shrink-0" />,
 };
 
 export function ToastProvider({ children }: { children: ReactNode }) {
@@ -54,34 +55,34 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     <ToastContext.Provider value={api}>
       {children}
       <div
-        className="fixed bottom-4 right-4 z-50 flex flex-col gap-2 w-80 pointer-events-none"
+        className="fixed bottom-4 right-4 z-50 flex flex-col items-end gap-2 w-[min(400px,calc(100vw-32px))] pointer-events-none"
         role="status"
         aria-live="polite"
       >
-        {toasts.map((t) => {
-          const s = KIND_STYLE[t.kind];
-          return (
-            <div
-              key={t.id}
-              className={`pointer-events-auto flex items-start gap-2.5 bg-panel border ${s.border} rounded-lg shadow-lg px-3 py-2.5`}
-            >
-              {s.icon}
-              <div className="flex-1 min-w-0">
-                <p className="text-sm text-fg font-medium">{t.title}</p>
-                {t.detail && (
-                  <p className="text-xs text-fg-muted mt-0.5 break-words whitespace-pre-line">{t.detail}</p>
-                )}
-              </div>
-              <button
-                aria-label="Dismiss"
-                className="text-fg-faint hover:text-fg shrink-0"
-                onClick={() => setToasts((all) => all.filter((x) => x.id !== t.id))}
-              >
-                <X size={14} />
-              </button>
+        {toasts.map((t) => (
+          <div
+            key={t.id}
+            className="pointer-events-auto flex w-full items-start gap-3 rounded-card bg-inverse py-3 pl-4 pr-2 text-inverse-fg shadow-overlay animate-[hz-fade-in_180ms_cubic-bezier(0.2,0,0,1)]"
+          >
+            <span className="mt-px">{KIND_ICON[t.kind]}</span>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-strong">{t.title}</p>
+              {t.detail && (
+                <p className="mt-0.5 whitespace-pre-line break-words text-[13px] leading-snug text-inverse-muted">
+                  {t.detail}
+                </p>
+              )}
             </div>
-          );
-        })}
+            <button
+              type="button"
+              aria-label="Dismiss"
+              className="-my-0.5 flex size-6 shrink-0 items-center justify-center rounded-badge text-inverse-muted transition-colors hover:bg-inverse-line hover:text-inverse-fg"
+              onClick={() => setToasts((all) => all.filter((x) => x.id !== t.id))}
+            >
+              <X size={14} />
+            </button>
+          </div>
+        ))}
       </div>
     </ToastContext.Provider>
   );

@@ -3,9 +3,19 @@
 
 import { createContext, useContext } from "react";
 
-export type Page = "devices" | "setup" | "keys" | "recorder" | "profiles" | "settings";
+export type Page = "control" | "devices" | "keys" | "recorder" | "profiles" | "settings";
 
-export const NavContext = createContext<(p: Page) => void>(() => {});
+/** Settings tabs a caller can deep-link to (ids of SettingsPage's TABS). */
+export type SettingsTab = "keypad" | "integrations" | "app" | "about";
+
+export type NavOptions = {
+  /** Open Settings on this tab instead of the one that was open last. */
+  tab?: SettingsTab;
+};
+
+export type Navigate = (p: Page, opts?: NavOptions) => void;
+
+export const NavContext = createContext<Navigate>(() => {});
 
 export function useNav() {
   return useContext(NavContext);

@@ -28,7 +28,7 @@ Bring-up-verified pinout (mirrors `hardware/oled-bringup/SCHEMATIC.md`):
 | RGB LED | GP16 | on-board WS2812 |
 
 A key soldered to a different GPIO is fine — assign it in the app under
-**Devices → Setup → Wiring** (writes `config.json "pins"`).
+**Devices → Fix wiring → Choose pins** (writes `config.json "pins"`).
 
 Runtime: CircuitPython **10.2.x** (the tier the display stack is validated
 on). The firmware zip / app installer ships every needed library (`lib/`)
@@ -237,7 +237,7 @@ ask for a bare, full-width name on a key whose kind has a default picture.
 
 Since firmware 0.25.0 the field can also be the picture instead of a name:
 `"icon": "px:183c7effc3c30000"` is those same eight rows written out in hex,
-drawn by hand on the app's 8×8 grid (Keys → the key → **Draw your own**).
+drawn by hand on the app's 8×8 grid (Keys → the key → **Appearance** → **Draw your own**).
 `icons.get()` decodes it rather than looking it up, so a drawing needs no
 second file and no index — it rides inside the macro it belongs to, travels
 with a backup, and goes away with a delete. A malformed one reads as "no icon"

@@ -345,7 +345,7 @@
       </div>
       <div class="card"><div class="icon"><svg class="ic"><use href="#i-sliders"/></svg></div>
         <h3><span lang="en">A real editor</span><span lang="tr">Gerçek bir düzenleyici</span></h3>
-        <p><span lang="en">Every coordinate, delay and key is editable. Select 60 rows with one shift-click and delete them. Straighten paths, rescale timing, optimize for the device.</span><span lang="tr">Her koordinat, gecikme ve tuş düzenlenebilir. Shift ile tek tıkta 60 satırı seçip silin. Yolları düzleştirin, süreyi ölçekleyin, cihaz için optimize edin.</span></p>
+        <p><span lang="en">Every coordinate, delay and key is editable. Select 60 rows with one shift-click and delete them. Straighten paths, rescale timing, shrink it to fit the keypad.</span><span lang="tr">Her koordinat, gecikme ve tuş düzenlenebilir. Shift ile tek tıkta 60 satırı seçip silin. Yolları düzleştirin, süreyi ölçekleyin, klavyeye sığacak şekilde küçültün.</span></p>
       </div>
       <div class="card"><div class="icon"><svg class="ic"><use href="#i-circle-play"/></svg></div>
         <h3><span lang="en">Playback, your rules</span><span lang="tr">Oynatma, sizin kurallarınız</span></h3>
@@ -479,29 +479,57 @@
 
 <div class="divider"></div>
 
+<!-- ============ REMOTE CONTROL ============ -->
+<section id="remote">
+  <div class="wrap statement reveal seq">
+    <p class="kicker"><span lang="en">Remote control</span><span lang="tr">Uzaktan kontrol</span></p>
+    <h2 data-split><span lang="en">Out of reach? Still in control.</span><span lang="tr">Uzakta mısınız? Kontrol yine sizde.</span></h2>
+    <p class="lead">
+      <span lang="en">Plenty of keypads sit on a computer you reach over Chrome Remote Desktop, a game box running a macro on loop. From there you can't press the physical key, so the app does it for you. The Control page, the first thing the app opens, shows every key as a big tile: Run presses it on the keypad exactly like your finger would, still as real hardware input, and the playing tile turns into Stop.</span>
+      <span lang="tr">Pek çok klavye, Chrome Remote Desktop ile bağlandığınız bir bilgisayarda durur; döngüde makro çalıştıran bir oyun kasası gibi. Oradan fiziksel tuşa basamazsınız, o yüzden bunu uygulama yapar. Uygulamanın açıldığı ilk sayfa olan Control, her tuşu büyük bir kart olarak gösterir: Run, tuşa klavyenin üzerinde parmağınızla basmışsınız gibi basar, yine gerçek donanım girdisiyle; çalan kart Stop'a dönüşür.</span>
+    </p>
+    <div class="modes seq-late" data-stagger>
+      <div class="mode"><svg class="ic ic-f"><use href="#i-play"/></svg><b><span lang="en">Run</span><span lang="tr">Çalıştır</span></b><span class="mode-d"><span lang="en">Press any key, any layer, from the app. Double and long press too.</span><span lang="tr">Herhangi bir tuşa, herhangi bir katmanda uygulamadan basın. Çift ve uzun basış da.</span></span></div>
+      <div class="mode"><svg class="ic"><use href="#i-stop"/></svg><b><span lang="en">Stop bar</span><span lang="tr">Durdurma çubuğu</span></b><span class="mode-d"><span lang="en">On every page while a macro plays. Then Run again.</span><span lang="tr">Makro çalarken her sayfada. Ardından Run again.</span></span></div>
+      <div class="mode"><svg class="ic"><use href="#i-keyboard"/></svg><b><span lang="en">Stop hotkey</span><span lang="tr">Durdurma kısayolu</span></b><span class="mode-d"><span lang="en">Ctrl+Alt+Shift+S by default, even with the window hidden.</span><span lang="tr">Varsayılan Ctrl+Alt+Shift+S, pencere gizliyken bile.</span></span></div>
+      <div class="mode"><svg class="ic"><use href="#i-tray"/></svg><b><span lang="en">Tray</span><span lang="tr">Tepsi</span></b><span class="mode-d"><span lang="en">Stop playback, one click from the system tray.</span><span lang="tr">Stop playback, sistem tepsisinden tek tık.</span></span></div>
+    </div>
+    <figure class="big-shot seq-late">
+      <div class="tilt"><div class="tilt-inner"><img src="images/screens/vision6-control-playing.png" width="1280" height="800" loading="lazy" decoding="async" alt="Control page while key 6 loops, with the playback bar and its Stop button on top"><span class="shine" aria-hidden="true"></span></div></div>
+      <figcaption><span lang="en">Control, key 6 looping: Stop on the tile, in the bar, or with the hotkey</span><span lang="tr">Control, 6. tuş döngüde: kartta, çubukta ya da kısayolla durdurun</span></figcaption>
+    </figure>
+  </div>
+</section>
+
+<div class="divider"></div>
+
 <!-- ============ THE APP ============ -->
 <section id="app">
   <div class="wrap statement reveal seq">
     <p class="kicker"><span lang="en">The desktop app</span><span lang="tr">Masaüstü uygulaması</span></p>
     <h2 data-split><span lang="en">Powerful underneath.<br>Friendly on top.</span><span lang="tr">Altında güç.<br>Üstünde sadelik.</span></h2>
     <p class="lead">
-      <span lang="en">Assign a key by simply pressing the shortcut you want, no menus to dig through. Light and dark themes, live key testing, a setup wizard that summarizes your keypad at a glance, and firmware updates delivered inside the app. It even stays on top of your game while you fine-tune coordinates. And closing the window doesn't close MKYADA, it lives on in the system tray.</span>
-      <span lang="tr">Tuş atamak için istediğiniz kısayola basmanız yeter, menülerde kaybolmak yok. Açık ve koyu tema, canlı tuş testi, kurulumunuzu tek bakışta özetleyen sihirbaz ve uygulama içinden gelen bellenim güncellemeleri. Koordinatlarda ince ayar yaparken oyununuzun üstünde bile kalır. Ve pencereyi kapatmak MKYADA'yı kapatmaz, sistem tepsisinde yaşamaya devam eder.</span>
+      <span lang="en">Assign a key by simply pressing the shortcut you want, no menus to dig through. Run any key from the app, test every key live, fix swapped wiring without a soldering iron, and get firmware updates delivered inside the app. One Devices page holds it all: setup, key test, wiring, troubleshooting and your other keypads. It even stays on top of your game while you fine-tune coordinates. And closing the window doesn't close MKYADA, it lives on in the system tray.</span>
+      <span lang="tr">Tuş atamak için istediğiniz kısayola basmanız yeter, menülerde kaybolmak yok. Her tuşu uygulamadan çalıştırın, tüm tuşları canlı test edin, ters lehimlenmiş kabloları havyasız düzeltin, bellenim güncellemeleri uygulamanın içinden gelsin. Hepsi tek bir Devices sayfasında: kurulum, tuş testi, kablolama, sorun giderme ve diğer klavyeleriniz. Koordinatlarda ince ayar yaparken oyununuzun üstünde bile kalır. Ve pencereyi kapatmak MKYADA'yı kapatmaz, sistem tepsisinde yaşamaya devam eder.</span>
     </p>
     <div class="slider" data-slider>
       <div class="slider-viewport">
         <div class="slider-track">
           <figure>
-            <div class="tilt"><div class="tilt-inner"><img src="images/screens/core6-devices.png" width="1280" height="800" loading="lazy" decoding="async" alt="Devices screen"><span class="shine" aria-hidden="true"></span></div></div>
-            <figcaption><span lang="en">Devices · nickname, model, firmware &amp; one-click updates</span><span lang="tr">Cihazlar · takma ad, model, bellenim ve tek tıkla güncelleme</span></figcaption>
+            <div class="tilt"><div class="tilt-inner"><img src="images/screens/core6-control.png" width="1280" height="800" loading="lazy" decoding="async" alt="Control screen, every key as a tile with Run"><span class="shine" aria-hidden="true"></span></div></div>
+            <figcaption><span lang="en">Control · every key as a tile, run it from the app</span><span lang="tr">Control · her tuş bir kart, uygulamadan çalıştırın</span></figcaption>
           </figure>
           <figure>
-            <div class="tilt"><div class="tilt-inner"><img src="images/screens/vision6-setup.png" width="1280" height="800" loading="lazy" decoding="async" alt="Setup screen"><span class="shine" aria-hidden="true"></span></div></div>
-            <figcaption><span lang="en">Setup · a wizard that summarizes your keypad at a glance</span><span lang="tr">Kurulum · tuş takımınızı tek bakışta özetleyen sihirbaz</span></figcaption>
+            <div class="tilt"><div class="tilt-inner"><img src="images/screens/core6-devices.png" width="1280" height="800" loading="lazy" decoding="async" alt="Devices screen, Setup tab"><span class="shine" aria-hidden="true"></span></div></div>
+            <figcaption><span lang="en">Devices · nickname, firmware &amp; one-click updates, setup at a glance</span><span lang="tr">Cihazlar · takma ad, bellenim ve tek tıkla güncelleme, kurulum tek bakışta</span></figcaption>
+          </figure>
+          <figure>
+            <div class="tilt"><div class="tilt-inner"><img src="images/screens/vision6-devices-test.png" width="1280" height="800" loading="lazy" decoding="async" alt="Devices screen, Test keys tab"><span class="shine" aria-hidden="true"></span></div></div>
+            <figcaption><span lang="en">Devices · Test keys: every press lights up, wheel and buttons too</span><span lang="tr">Cihazlar · Tuş testi: her basış yanar, tekerlek ve düğmeler de</span></figcaption>
           </figure>
           <figure>
             <div class="tilt"><div class="tilt-inner"><img src="images/screens/vision6-keys.png" width="1280" height="800" loading="lazy" decoding="async" alt="Keys screen, Vision 6"><span class="shine" aria-hidden="true"></span></div></div>
-            <figcaption><span lang="en">Keys · every key at one glance, press-to-capture assignment</span><span lang="tr">Tuşlar · tüm tuşlar tek bakışta, bas-yakala atama</span></figcaption>
+            <figcaption><span lang="en">Keys · press-to-capture assignment, tabs for press, double, long press and looks</span><span lang="tr">Tuşlar · bas-yakala atama, basış, çift, uzun basış ve görünüm sekmeleri</span></figcaption>
           </figure>
           <figure>
             <div class="tilt"><div class="tilt-inner"><img src="images/screens/core6-recorder.png" width="1280" height="800" loading="lazy" decoding="async" alt="Recorder screen with a recorded macro"><span class="shine" aria-hidden="true"></span></div></div>
@@ -509,7 +537,7 @@
           </figure>
           <figure>
             <div class="tilt"><div class="tilt-inner"><img src="images/screens/core6-profiles.png" width="1280" height="800" loading="lazy" decoding="async" alt="Profiles screen"><span class="shine" aria-hidden="true"></span></div></div>
-            <figcaption><span lang="en">Profiles · the active window picks the assignments</span><span lang="tr">Profiller · atamaları öndeki pencere seçer</span></figcaption>
+            <figcaption><span lang="en">Profiles · the active window picks the keys, each profile its own grid</span><span lang="tr">Profiller · tuşları öndeki pencere seçer, her profilin kendi tuş ızgarası</span></figcaption>
           </figure>
           <figure>
             <div class="tilt"><div class="tilt-inner"><img src="images/screens/vision6-settings.png" width="1280" height="800" loading="lazy" decoding="async" alt="Settings, Keypad tab"><span class="shine" aria-hidden="true"></span></div></div>
@@ -521,7 +549,7 @@
           </figure>
           <figure>
             <div class="tilt"><div class="tilt-inner"><img src="images/screens/vision6-settings-app.png" width="1280" height="800" loading="lazy" decoding="async" alt="Settings, Application tab"><span class="shine" aria-hidden="true"></span></div></div>
-            <figcaption><span lang="en">Settings · Application: permissions, theme, tray &amp; startup</span><span lang="tr">Ayarlar · Uygulama: izinler, tema, tepsi ve açılış</span></figcaption>
+            <figcaption><span lang="en">Settings · Application: permissions, tray &amp; startup, stop hotkey</span><span lang="tr">Ayarlar · Uygulama: izinler, tepsi ve açılış, durdurma kısayolu</span></figcaption>
           </figure>
         </div>
       </div>

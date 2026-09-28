@@ -3,7 +3,7 @@
 
 import { ReactNode, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, ChevronRight, FolderOpen, Keyboard, Mic, Play, Plus, Send, Star, Trash2, Volume2 } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, FolderOpen, Keyboard, Mic, MousePointerClick, Play, Plus, Send, Star, Timer, Trash2, Volume2 } from "lucide-react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { SOUND_EXTENSIONS, playSound } from "../lib/sound";
 import { readTextFile } from "../lib/fs";
@@ -35,8 +35,8 @@ import { ENC_PRESET_GROUPS, ENC_PRESETS, encPresetSlots } from "../lib/enc-prese
 import { displayKey, untypeableChars } from "../lib/layout";
 import { allKinds, categoryLabel, wheelPreview, wheelSpec } from "../lib/kind-registry";
 import { OledPreview } from "./OledPreview";
-import { Badge, Button, ControlField, Field, IconSelect, Input, Select } from "./ui";
-import type { IconOption } from "./ui";
+import { Alert, Badge, Button, ControlField, EmptyState, Field, IconSelect, Input, Select, Tabs, Tooltip } from "./ui";
+import type { IconOption, Tab } from "./ui";
 import {
   HTTP_METHOD_ICON,
   MEDIA_ICON,
@@ -44,6 +44,8 @@ import {
   MIC_ICON,
   SOUND_HOLD_ICON,
 } from "./action-icons";
+
+const SUB_LABEL = "text-label font-medium tracking-label text-fg [font-stretch:90%]";
 
 const HTTP_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"] as const;
 
@@ -97,15 +99,15 @@ export function KeyCapture({
     <button
       type="button"
       onClick={() => setArmed(!armed)}
-      aria-label={armed ? "Listening — press the key to assign" : "Set key"}
-      className={`flex items-center gap-2 rounded-md border px-3 py-2 text-sm transition-colors self-start
+      aria-label={armed ? "Listening · press the key to assign" : "Set key"}
+      className={`flex items-center gap-2 rounded-control border px-3 py-2 text-sm transition-colors self-start
         ${armed
-          ? "border-accent bg-accent/10 text-accent"
-          : "border-line border-dashed bg-panel2 text-fg hover:border-accent/60"}`}
+          ? "border-accent bg-selected text-accent-ink"
+          : "border-line border-dashed bg-panel2 text-fg hover:border-accent"}`}
     >
       <Keyboard size={14} aria-hidden className={armed ? "animate-pulse" : ""} />
       {armed ? (
-        withMods ? "Press the shortcut now — hold the modifiers, hit the key…" : "Press the key now…"
+        withMods ? "Press the shortcut now. Hold the modifiers, hit the key…" : "Press the key now…"
       ) : (
         <>
           {value ? (
@@ -130,9 +132,14 @@ export function AssignmentEditor({
   allowVariants = true,
   fwVersion,
   layerCount = 0,
+  appearance,
 }: {
   value: Assignment;
   onChange: (a: Assignment) => void;
+  /** The key's name/icon block (AssignmentPanel). Rendered after the action
+   * and its behavior, before the wheel-menu preview — what a key does comes
+   * first, how it's labelled second. Top level only. */
+  appearance?: ReactNode;
   /** Rendering a sequence step or key-logic variant: no nesting, no
    * behavior options, no key logic of its own. */
   nested?: boolean;
@@ -160,6 +167,9 @@ export function AssignmentEditor({
   layerCount?: number;
 }) {
   const [importError, setImportError] = useState("");
+  // Which editor tab is open (Press / Double press / Long press / Behavior).
+  // Survives switching keys; falls back to Press when a tab doesn't apply.
+  const [tab, setTab] = useState("press");
   // Action kinds, grouped by category (from the registry). On a module slot,
   // "Not assigned" reads as "keep the control's built-in action" — the concrete
   // built-in is pre-selected under Device menu, so this is just the
@@ -192,15 +202,6 @@ export function AssignmentEditor({
   const showBehavior =
     value.kind !== "none" && value.kind !== "nothing" && !kindRequiresHost(value.kind);
   const showKeyLogic = allowVariants && (value.kind !== "none" || slotMode);
-  const summaryParts: string[] = [];
-  if (value.variants?.double) summaryParts.push(`double: ${describeAssignment(value.variants.double)}`);
-  if (value.variants?.hold) summaryParts.push(`hold: ${describeAssignment(value.variants.hold)}`);
-  if (value.behavior?.on_repress === "restart") summaryParts.push("restart on re-press");
-  if (showBehavior && !hasVariants && !slotMode) {
-    const rep = value.behavior?.hold_repeat ?? holdRepeatDefault(value.kind);
-    if (rep) summaryParts.push("repeat while held");
-  }
-  const behaviorSummary = summaryParts.length ? summaryParts.join(" · ") : "Default";
 
   async function importMacro() {
     setImportError("");
@@ -220,54 +221,75 @@ export function AssignmentEditor({
     }
   }
 
-  return (
+  // Standalone vs needs-the-app: a status badge on the action's header row
+  // instead of a full-width tinted strip under the picker.
+  const hostBadge =
+    value.kind !== "none" && value.kind !== "nothing" && value.kind !== "sequence" ? (
+      kindRequiresHost(value.kind) ? (
+        <Tooltip content="Runs only while the MKYADA app is open on this computer" side="bottom">
+          <Badge tone="amber" dot>
+            Needs the MKYADA app
+          </Badge>
+        </Tooltip>
+      ) : (
+        <Tooltip content="Runs on the keypad itself · no app needed" side="bottom">
+          <Badge tone="green" dot>
+            Works standalone
+          </Badge>
+        </Tooltip>
+      )
+    ) : null;
+
+  const actionBlock = (
     <div className="flex flex-col gap-3">
-      <ControlField label="Action type">
-        <div className="flex flex-col gap-2">
-          <IconSelect
-            className="w-full"
-            ariaLabel="Action type"
-            value={value.kind}
-            options={kindOptions}
-            onChange={(kind) => {
-              if (kind === "none") onChange({ kind: "none" });
-              else if (kind === "nothing") onChange({ kind: "nothing" });
-              else if (kind === "keystroke") onChange({ kind: "keystroke", key: "" });
-              else if (kind === "combo") onChange({ kind: "combo", mods: [], key: "" });
-              else if (kind === "text") onChange({ kind: "text", text: "" });
-              else if (kind === "media") onChange({ kind: "media", usage: "play_pause" });
-              else if (kind === "volume") onChange({ kind: "volume" });
-              else if (kind === "mic_level") onChange({ kind: "mic_level" });
-              else if (kind === "scroll") onChange({ kind: "scroll", dir: "up" });
-              else if (kind === "midi")
-                onChange({ kind: "midi", msg: "note", ch: 0, d1: 60, d2: 100, mode: "momentary" });
-              else if (kind === "menu") onChange({ kind: "menu", action: "confirm" });
-              else if (kind === "launch") onChange({ kind: "launch", target: "" });
-              else if (kind === "command") onChange({ kind: "command", command: "" });
-              else if (kind === "sound") onChange({ kind: "sound", file: "" });
-              else if (kind === "mic") onChange({ kind: "mic", mode: "toggle" });
-              else if (kind === "webhook") onChange({ kind: "webhook", url: "" });
-              else if (kind === "obs") onChange({ kind: "obs", action: "setScene", sceneName: "" });
-              else if (kind === "obs_center") onChange({ kind: "obs_center", center: { encoder: "mic" } });
-              else if (kind === "enc_module") onChange({ kind: "enc_module", slots: [] });
-              else if (kind === "sequence")
-                onChange({ kind: "sequence", steps: [{ a: { kind: "keystroke", key: "" }, delayMs: 0 }] });
-              else importMacro();
-            }}
-          />
-          {value.kind !== "none" && value.kind !== "nothing" && value.kind !== "sequence" && (
-            kindRequiresHost(value.kind) ? (
-              <Badge tone="amber">needs the MKYADA app running on this computer</Badge>
-            ) : (
-              <Badge tone="green">works standalone — no app needed</Badge>
-            )
+      <div className="flex min-w-0 flex-col gap-2">
+        <div className="flex min-h-6 flex-wrap items-center justify-between gap-x-3 gap-y-1">
+          {nested ? (
+            <span className={SUB_LABEL}>Action type</span>
+          ) : (
+            <h3 className="text-title font-semibold text-fg">
+              What this {slotMode ? "control" : "key"} does
+            </h3>
           )}
+          {hostBadge}
         </div>
-      </ControlField>
+        <IconSelect
+          className="w-full"
+          ariaLabel="Action type"
+          size={nested ? "md" : "lg"}
+          value={value.kind}
+          options={kindOptions}
+          onChange={(kind) => {
+            if (kind === "none") onChange({ kind: "none" });
+            else if (kind === "nothing") onChange({ kind: "nothing" });
+            else if (kind === "keystroke") onChange({ kind: "keystroke", key: "" });
+            else if (kind === "combo") onChange({ kind: "combo", mods: [], key: "" });
+            else if (kind === "text") onChange({ kind: "text", text: "" });
+            else if (kind === "media") onChange({ kind: "media", usage: "play_pause" });
+            else if (kind === "volume") onChange({ kind: "volume" });
+            else if (kind === "mic_level") onChange({ kind: "mic_level" });
+            else if (kind === "scroll") onChange({ kind: "scroll", dir: "up" });
+            else if (kind === "midi")
+              onChange({ kind: "midi", msg: "note", ch: 0, d1: 60, d2: 100, mode: "momentary" });
+            else if (kind === "menu") onChange({ kind: "menu", action: "confirm" });
+            else if (kind === "launch") onChange({ kind: "launch", target: "" });
+            else if (kind === "command") onChange({ kind: "command", command: "" });
+            else if (kind === "sound") onChange({ kind: "sound", file: "" });
+            else if (kind === "mic") onChange({ kind: "mic", mode: "toggle" });
+            else if (kind === "webhook") onChange({ kind: "webhook", url: "" });
+            else if (kind === "obs") onChange({ kind: "obs", action: "setScene", sceneName: "" });
+            else if (kind === "obs_center") onChange({ kind: "obs_center", center: { encoder: "mic" } });
+            else if (kind === "enc_module") onChange({ kind: "enc_module", slots: [] });
+            else if (kind === "sequence")
+              onChange({ kind: "sequence", steps: [{ a: { kind: "keystroke", key: "" }, delayMs: 0 }] });
+            else importMacro();
+          }}
+        />
+      </div>
 
       {value.kind === "nothing" && (
         <p className="text-xs text-fg-faint">
-          This control is turned off — pressing or turning it does nothing at all, not even
+          This control is turned off. Pressing or turning it does nothing at all, not even
           the built-in menu navigation.
         </p>
       )}
@@ -302,7 +324,7 @@ export function AssignmentEditor({
                 <Button
                   key={m}
                   variant={value.mods.includes(m) ? "primary" : "default"}
-                  title={m === "WIN" ? "Windows key / macOS Command — same key on the keypad" : undefined}
+                  title={m === "WIN" ? "Windows key / macOS Command · same key on the keypad" : undefined}
                   onClick={() =>
                     onChange({
                       ...value,
@@ -332,7 +354,7 @@ export function AssignmentEditor({
             return bad.length > 0 ? (
               <p className="text-warning text-xs mt-1">
                 The keypad can't type these characters on your keyboard layout
-                (they need an input method): {bad.join(" ")} — they will be skipped.
+                (they need an input method): {bad.join(" ")}. They will be skipped.
               </p>
             ) : null;
           })()}
@@ -353,14 +375,14 @@ export function AssignmentEditor({
       {value.kind === "volume" && (
         <p className="text-xs text-fg-faint">
           Pressing the key mutes/unmutes the computer (works standalone). On a Vision 6, turn
-          the wheel to this key and press to open a volume slider — the exact percentage needs
+          the wheel to this key and press to open a volume slider. The exact percentage needs
           the MKYADA app running; without it the wheel just nudges the volume up and down.
         </p>
       )}
 
       {value.kind === "mic_level" && (
         <p className="text-xs text-fg-faint">
-          Pressing the key on a Vision 6 opens a microphone input-level slider — turn the wheel to
+          Pressing the key on a Vision 6 opens a microphone input-level slider. Turn the wheel to
           set the recording gain. Needs the MKYADA app running (there's no standalone mic-gain control).
         </p>
       )}
@@ -398,7 +420,7 @@ export function AssignmentEditor({
               <span className="text-xs text-fg-faint">1–20 notches</span>
             </div>
           </Field>
-          <Field label="Hold modifiers (optional — e.g. Alt to zoom in Illustrator)">
+          <Field label="Hold modifiers · optional, e.g. Alt to zoom in Illustrator">
             <div className="flex gap-2">
               {MODIFIERS.map((m) => {
                 const on = (value.mods ?? []).includes(m);
@@ -424,7 +446,7 @@ export function AssignmentEditor({
           </Field>
           {(value.dir === "left" || value.dir === "right") && (
             <p className="text-xs text-fg-faint">
-              Horizontal scroll uses the mouse's pan channel — most apps that
+              Horizontal scroll uses the mouse's pan channel. Most apps that
               support side-scrolling (timelines, wide canvases) pick it up.
             </p>
           )}
@@ -472,7 +494,7 @@ export function AssignmentEditor({
           <p className="text-xs text-fg-faint mt-1">
             {slotMode
               ? `Drives the on-screen navigation, whatever else is customized${
-                  builtinDesc ? ` — built-in here: ${builtinDesc}` : ""
+                  builtinDesc ? ` · built-in here: ${builtinDesc}` : ""
                 }.`
               : "Lets a normal key drive the on-screen menu, just like the wheel and the CONFIRM / BACK buttons. Only does something on a screen model."}
           </p>
@@ -537,7 +559,7 @@ export function AssignmentEditor({
             </div>
             <p className="text-fg-faint text-xs mt-1">
               Pressing the key opens the ★ default on the computer. Works while the MKYADA app is
-              running (also minimized) — the keypad alone can't open apps.
+              running (also minimized). The keypad alone can't open apps.
               {targets.length > 1
                 ? " The Vision 6 wheel lists all of them: tap to open one, hold to make it the default."
                 : " Add more targets to pick between them on the Vision 6 wheel."}
@@ -693,7 +715,7 @@ export function AssignmentEditor({
               )}
             </div>
             <p className="text-fg-faint text-xs mt-1">
-              Tap the key to play the ★ default on this computer's speakers — sounds can overlap.
+              Tap the key to play the ★ default on this computer's speakers. Sounds can overlap.
               Works while the MKYADA app is running (also minimized).
               {files.length > 1
                 ? " The Vision 6 wheel lists all of them by name (or file name): tap to play one, hold to make it the key's default."
@@ -748,10 +770,15 @@ export function AssignmentEditor({
       {value.kind === "enc_module" && <EncModuleFields value={value} onChange={onChange} />}
 
       {value.kind === "recorded" && (
-        <div className="flex items-center gap-2 text-sm">
-          <span className="text-fg inline-flex items-center gap-1"><Play size={13} aria-hidden /> {value.name}</span>
-          <span className="text-fg-faint text-xs">({value.macro.events.length} events)</span>
-          <Button onClick={importMacro}>Replace…</Button>
+        <div className="flex items-center gap-2.5 rounded-control border border-line bg-raised py-2 pl-3 pr-2 text-sm">
+          <Play size={14} aria-hidden className="shrink-0 text-fg-muted" />
+          <span className="min-w-0 truncate font-medium text-fg">{value.name}</span>
+          <Badge>
+            {value.macro.events.length} {value.macro.events.length === 1 ? "event" : "events"}
+          </Badge>
+          <Button size="sm" className="ml-auto" onClick={importMacro}>
+            Replace…
+          </Button>
         </div>
       )}
 
@@ -759,104 +786,180 @@ export function AssignmentEditor({
         <SequenceEditor value={value.steps} onChange={(steps) => onChange({ ...value, steps })} />
       )}
 
-      {!nested && (showBehavior || showKeyLogic) && (
-        <Collapsible title="Behavior & key logic" summary={behaviorSummary}>
-          {showBehavior && (
-            <div className="flex flex-wrap gap-3">
-              <Field label="Press again while playing">
+      {importError && <p className="text-danger text-xs">{importError}</p>}
+    </div>
+  );
+
+  // A sequence step / key-logic variant is just the action itself.
+  if (nested) return actionBlock;
+
+  const wheelBlock =
+    !slotMode && allowMenu && value.kind !== "none" && value.kind !== "nothing" ? (
+      <div className="flex flex-col gap-3">
+        <p className="text-label text-fg-faint">
+          What turning the wheel to this key and pressing shows on the keypad's screen
+        </p>
+        {/* Explanation sits right beside the screenshot, but never narrower
+          * than ~12rem — a narrow column wraps it under the preview instead
+          * of squeezing it into a ragged strip. */}
+        <div className="flex flex-wrap items-start gap-4">
+          <OledPreview preview={wheelPreview(value)} scale={1.5} />
+          <div className="flex min-w-48 max-w-md flex-1 flex-col gap-1 text-xs">
+            <p className="text-fg-muted">{wheelSpec(value.kind).summary}</p>
+            {wheelSpec(value.kind).standaloneFallback && (
+              <p className="text-fg-faint">{wheelSpec(value.kind).standaloneFallback}</p>
+            )}
+          </div>
+        </div>
+      </div>
+    ) : null;
+
+  // Gestures get their own tabs (issue: double/long press were buried in a
+  // collapsed "Behavior & key logic" section nobody found). Each tab shows its
+  // state in the label — a dot when set, "Off" when not.
+  const control = slotMode ? "control" : "key";
+  const variantsFwWarning =
+    hasVariants && fwVersion && !fwSupportsVariants(fwVersion, slotMode) ? (
+      <Alert tone="warning">
+        Double and long press need firmware {slotMode ? "0.9.0" : "0.3.0"} · update on the
+        Devices page.
+      </Alert>
+    ) : null;
+  const gestureTab = (which: "double" | "hold") => (
+    <GestureEditor
+      which={which}
+      control={control}
+      value={value.variants?.[which]}
+      allowMenu={allowMenu}
+      layerCount={layerCount}
+      onChange={(v) => onChange({ ...value, variants: setVariant(value.variants, which, v) })}
+      notes={
+        <>
+          {variantsFwWarning}
+          {slotMode && value.kind === "none" && (
+            <p className="text-label text-fg-faint">
+              The tap keeps its built-in menu action · only the gestures are customized.
+            </p>
+          )}
+        </>
+      }
+    />
+  );
+  const holdRepeatOn = value.behavior?.hold_repeat ?? holdRepeatDefault(value.kind);
+  const behaviorCustom =
+    value.behavior?.on_repress === "restart" ||
+    (!hasVariants && !slotMode && holdRepeatOn !== holdRepeatDefault(value.kind));
+  const dot = (
+    <span aria-label="set" className="size-1.5 shrink-0 rounded-full bg-accent" />
+  );
+  const off = <span className="text-label font-normal text-fg-disabled">Off</span>;
+
+  const tabs: (Tab & { body: ReactNode })[] = [
+    {
+      id: "press",
+      label: showKeyLogic ? "Press" : "Action",
+      body: actionBlock,
+    },
+  ];
+  if (showKeyLogic) {
+    tabs.push(
+      {
+        id: "double",
+        label: "Double press",
+        badge: value.variants?.double ? dot : off,
+        body: gestureTab("double"),
+      },
+      {
+        id: "hold",
+        label: "Long press",
+        badge: value.variants?.hold ? dot : off,
+        body: gestureTab("hold"),
+      },
+    );
+  }
+  if (showBehavior) {
+    tabs.push({
+      id: "behavior",
+      label: "Behavior",
+      badge: behaviorCustom ? dot : undefined,
+      body: (
+        <div className="flex flex-col gap-4">
+          <div className="grid grid-cols-[repeat(auto-fit,minmax(14rem,1fr))] gap-3">
+            <Field
+              label="Press again while playing"
+              hint={`Pressing the ${control} while its macro still runs`}
+            >
+              <Select
+                value={value.behavior?.on_repress ?? "stop"}
+                onChange={(e) =>
+                  onChange({
+                    ...value,
+                    behavior: {
+                      ...value.behavior,
+                      on_repress: e.target.value as "stop" | "restart",
+                    },
+                  })
+                }
+              >
+                <option value="stop">Stop the macro</option>
+                <option value="restart">Restart it from the top</option>
+              </Select>
+            </Field>
+            {!hasVariants && !slotMode && (
+              <Field label="While the key is held down">
                 <Select
-                  value={value.behavior?.on_repress ?? "stop"}
+                  value={holdRepeatOn ? "repeat" : "once"}
                   onChange={(e) =>
                     onChange({
                       ...value,
-                      behavior: {
-                        ...value.behavior,
-                        on_repress: e.target.value as "stop" | "restart",
-                      },
+                      behavior: { ...value.behavior, hold_repeat: e.target.value === "repeat" },
                     })
                   }
                 >
-                  <option value="stop">Stop the macro</option>
-                  <option value="restart">Restart it from the top</option>
+                  <option value="once">Play once</option>
+                  <option value="repeat">Repeat · like holding a letter key</option>
                 </Select>
               </Field>
-              {!hasVariants && !slotMode && (
-                <Field label="While the key is held down">
-                  <Select
-                    value={(value.behavior?.hold_repeat ?? holdRepeatDefault(value.kind)) ? "repeat" : "once"}
-                    onChange={(e) =>
-                      onChange({
-                        ...value,
-                        behavior: { ...value.behavior, hold_repeat: e.target.value === "repeat" },
-                      })
-                    }
-                  >
-                    <option value="once">Play once</option>
-                    <option value="repeat">Repeat — like holding a letter key</option>
-                  </Select>
-                </Field>
-              )}
-            </div>
-          )}
-
-          {showKeyLogic && (
-            <div className={`flex flex-col gap-3${showBehavior ? " border-t border-line pt-3" : ""}`}>
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-semibold text-fg-muted">
-                  Key logic — extra actions on the same {slotMode ? "control" : "key"}
-                </span>
-                {hasVariants && fwVersion && !fwSupportsVariants(fwVersion, slotMode) && (
-                  <Badge tone="amber">
-                    needs firmware {slotMode ? "0.9.0" : "0.3.0"} — update on the Devices page
-                  </Badge>
-                )}
-              </div>
-              {slotMode && value.kind === "none" && (
-                <p className="text-xs text-fg-faint">
-                  The tap keeps its built-in menu action — only the gestures below are customized.
-                </p>
-              )}
-              <VariantSlot
-                label="Double press"
-                hint="A quick tap then waits a moment before firing — only when this is set."
-                value={value.variants?.double}
-                allowMenu={allowMenu}
-                layerCount={layerCount}
-                onChange={(v) => onChange({ ...value, variants: setVariant(value.variants, "double", v) })}
-              />
-              <VariantSlot
-                label="Long press (hold)"
-                hint="Fires after holding the key ~0.4 s. Replaces the hold-to-repeat option."
-                value={value.variants?.hold}
-                allowMenu={allowMenu}
-                layerCount={layerCount}
-                onChange={(v) => onChange({ ...value, variants: setVariant(value.variants, "hold", v) })}
-              />
-            </div>
-          )}
-        </Collapsible>
-      )}
-
-      {!nested && !slotMode && allowMenu && value.kind !== "none" && value.kind !== "nothing" && (
-        <div className="flex flex-col gap-2 border-t border-line pt-3">
-          <span className="text-xs font-semibold text-fg-muted">
-            Wheel menu — what turning the wheel to this key and pressing shows on screen
-          </span>
-          {/* Half the width each: the screenshot was wide enough to squeeze the
-            * explanation into a narrow ragged column beside it. */}
-          <div className="grid grid-cols-2 items-start gap-3">
-            <OledPreview preview={wheelPreview(value)} scale={1.5} />
-            <div className="flex min-w-0 flex-col gap-1 text-xs">
-              <p className="text-fg-muted">{wheelSpec(value.kind).summary}</p>
-              {wheelSpec(value.kind).standaloneFallback && (
-                <p className="text-fg-faint">{wheelSpec(value.kind).standaloneFallback}</p>
-              )}
-            </div>
+            )}
           </div>
+          {hasVariants && !slotMode && (
+            <Alert tone="info" title="Hold to repeat is off for this key">
+              A {value.variants?.hold ? "long press" : "double press"} is set, so the keypad
+              has to tell the gestures apart · holding the key can't also repeat it. Remove the
+              gesture to get the option back.
+            </Alert>
+          )}
         </div>
-      )}
+      ),
+    });
+  }
 
-      {importError && <p className="text-danger text-xs">{importError}</p>}
+  // How the key is labelled, and what the wheel shows for it: each its own
+  // tab so Press holds only what the key does.
+  if (appearance) {
+    tabs.push({
+      id: "appearance",
+      label: "Appearance",
+      badge: value.label || value.icon !== undefined ? dot : undefined,
+      body: appearance,
+    });
+  }
+  if (wheelBlock) tabs.push({ id: "wheel", label: "Wheel menu", body: wheelBlock });
+
+  if (tabs.length === 1) return <div className="flex flex-col gap-3">{tabs[0].body}</div>;
+  const active = tabs.find((t) => t.id === tab) ?? tabs[0];
+  return (
+    <div className="flex flex-col gap-4">
+      <Tabs
+        idPrefix="assign"
+        label={`What the ${control} does`}
+        tabs={tabs}
+        value={active.id}
+        onChange={setTab}
+        size="sm"
+      >
+        <div className="flex flex-col gap-3 pt-1">{active.body}</div>
+      </Tabs>
     </div>
   );
 }
@@ -908,7 +1011,7 @@ function WebhookFields({
         headers: value.headers ?? null,
         body: value.body ?? null,
       });
-      setTest({ ok: true, text: `Worked — the server answered HTTP ${status}.` });
+      setTest({ ok: true, text: `Worked. The server answered HTTP ${status}.` });
     } catch (e) {
       setTest({ ok: false, text: String(e) });
     }
@@ -939,7 +1042,7 @@ function WebhookFields({
           />
         </div>
         <p className="text-fg-faint text-xs mt-1">
-          Pressing the key sends this request from the computer — turn on a light, post to
+          Pressing the key sends this request from the computer: turn on a light, post to
           Discord/Telegram, anything with an HTTP API. Works while the MKYADA app is running
           (also minimized).
         </p>
@@ -985,7 +1088,7 @@ function WebhookFields({
           value={value.body ?? ""}
           placeholder='{"content": "Key pressed!"}'
           onChange={(e) => onChange({ ...value, body: e.target.value || undefined })}
-          className="w-full rounded-md border border-line bg-panel2 px-3 py-2 text-sm font-mono text-fg
+          className="w-full rounded-control border border-line bg-panel2 px-3 py-2 text-sm font-mono text-fg
             placeholder:text-fg-faint focus:outline-none focus:border-accent"
         />
         <p className="text-fg-faint text-xs mt-1">
@@ -1074,7 +1177,7 @@ function WebhookFields({
           )}
         </div>
         <p className="text-fg-faint text-xs mt-1">
-          The key press sends the request above; the Vision 6 wheel lists it with these —
+          The key press sends the request above; the Vision 6 wheel lists it with these:
           tap to send one, hold to make it the default. To edit an alternative's method,
           headers or body, star it into the main form first.
         </p>
@@ -1317,7 +1420,7 @@ function ObsCenterFields({
           })}
         </div>
         <p className="text-fg-faint text-xs mt-1">
-          The screen reflows around what you turn off — fewer widgets means a bigger timer.
+          The screen reflows around what you turn off. Fewer widgets means a bigger timer.
         </p>
       </Field>
 
@@ -1364,7 +1467,7 @@ function ObsCenterFields({
                   });
                 }}
               >
-                <option value="">— key does nothing —</option>
+                <option value="">Key does nothing</option>
                 {(Object.keys(OBS_ACTION_LABELS) as ObsAction[]).map((a) => (
                   <option key={a} value={a}>
                     {OBS_ACTION_LABELS[a]}
@@ -1432,10 +1535,10 @@ const ENC_SLOT_TYPES = [
 ];
 
 const MIDI_CC_MODES: { id: MidiCcMode; label: string }[] = [
-  { id: "rel_2c", label: "Relative — two's complement (Reaper Relative 1)" },
-  { id: "rel_bin", label: "Relative — binary offset (Reaper Relative 2)" },
-  { id: "rel_sm", label: "Relative — sign magnitude (Reaper Relative 3)" },
-  { id: "rel_mackie", label: "Relative — Mackie V-Pot" },
+  { id: "rel_2c", label: "Relative · two's complement (Reaper Relative 1)" },
+  { id: "rel_bin", label: "Relative · binary offset (Reaper Relative 2)" },
+  { id: "rel_sm", label: "Relative · sign magnitude (Reaper Relative 3)" },
+  { id: "rel_mackie", label: "Relative · Mackie V-Pot" },
   { id: "abs", label: "Absolute 0–127 (can jump)" },
 ];
 
@@ -1482,7 +1585,7 @@ function EncSlotRow({
     </Button>
   );
   return (
-    <div className="border-line flex flex-col gap-2 rounded-md border p-2">
+    <div className="border-line flex flex-col gap-2 rounded-control border p-2">
       <div className="flex items-center gap-2">
         <span className="text-fg-faint w-7 shrink-0 text-xs">K{i + 1}</span>
         <Select
@@ -1491,7 +1594,7 @@ function EncSlotRow({
           value={slot?.t ?? ""}
           onChange={(e) => changeType(e.target.value)}
         >
-          <option value="">— empty slot —</option>
+          <option value="">Empty slot</option>
           {ENC_SLOT_TYPES.map((t) => (
             <option key={t.id} value={t.id}>
               {t.label}
@@ -1699,7 +1802,7 @@ function EncSlotRow({
             <p className="text-fg-faint w-full text-xs">
               Absolute counts the value on the keypad, so it jumps the first time you turn it if
               the DAW is somewhere else. Pick a relative mode unless your target only accepts
-              absolute — and set the matching mode on the DAW side too.
+              absolute, and set the matching mode on the DAW side too.
             </p>
           )}
         </div>
@@ -1720,7 +1823,7 @@ function EncSlotRow({
               onChange({ ...slot, b: { t: "combo", mods: [], key: "" } });
             }}
           >
-            <option value="">— nothing —</option>
+            <option value="">Nothing</option>
             <option value="combo">Shortcut</option>
             <option value="click">Left click</option>
             <option value="consumer">Media key</option>
@@ -1753,9 +1856,9 @@ function EncSlotRow({
 }
 
 const MIDI_MSGS = [
-  { id: "note" as const, label: "Note — pads, clip & scene launch, Looper" },
-  { id: "cc" as const, label: "Control Change — faders, knobs, toggles" },
-  { id: "pc" as const, label: "Program Change — recall a preset" },
+  { id: "note" as const, label: "Note · pads, clip & scene launch, Looper" },
+  { id: "cc" as const, label: "Control Change · faders, knobs, toggles" },
+  { id: "pc" as const, label: "Program Change · recall a preset" },
 ];
 
 /** 0-127 spinner with the app's clamp, used for every MIDI data byte. */
@@ -1849,7 +1952,7 @@ function MidiFields({
                 onChange({ ...value, ch: 0, d1: note, d2: 127, mode: "momentary" });
               }}
             >
-              <option value="">— not a transport button —</option>
+              <option value="">Not a transport button</option>
               {MCU_NOTES.map((m) => (
                 <option key={m.note} value={String(m.note)}>
                   {m.label}
@@ -1859,13 +1962,13 @@ function MidiFields({
             <p className="text-xs text-fg-faint mt-1">
               Shortcut to the note numbers Mackie Control uses. Pick "Mackie Control" as a control
               surface in Logic, Cubase, Studio One or Pro Tools and transport works with no
-              mapping — the one route into the DAWs that have no MIDI-learn.
+              mapping. It is the one route into the DAWs that have no MIDI-learn.
             </p>
           </ControlField>
           <MidiByte
             label="Note"
             value={value.d1}
-            hint={`${midiNoteName(value.d1)} — 60 is middle C`}
+            hint={`${midiNoteName(value.d1)} · 60 is middle C`}
             onChange={(d1) => onChange({ ...value, d1 })}
           />
           <MidiByte
@@ -1890,7 +1993,7 @@ function MidiFields({
               </Button>
             </div>
             <p className="text-xs text-fg-faint mt-1">
-              Hold is what Ableton's Looper and drum-rack pads expect — the note lasts exactly as
+              Hold is what Ableton's Looper and drum-rack pads expect: the note lasts exactly as
               long as your finger. Tap suits one-shot samples that retrigger on every press.
             </p>
           </Field>
@@ -1923,7 +2026,7 @@ function MidiFields({
       )}
 
       <p className="text-xs text-fg-faint">
-        Needs <strong>MIDI</strong> switched on for this keypad in Settings — it is off by default
+        Needs <strong>MIDI</strong> switched on for this keypad in Settings. It is off by default
         and takes effect after a restart. Then MIDI-learn it in your DAW: hit Cmd/Ctrl+M in Ableton,
         right-click the parameter in FL, or use the Actions list in Reaper.
       </p>
@@ -1964,7 +2067,7 @@ function EncModuleFields({
             setAppliedPreset(p.id);
           }}
         >
-          <option value="">— pick a program —</option>
+          <option value="">Pick a program</option>
           {ENC_PRESET_GROUPS.map((g) => (
             <optgroup key={g.id} label={g.label}>
               {ENC_PRESETS.filter((p) => p.group === g.id).map((p) => (
@@ -1978,11 +2081,11 @@ function EncModuleFields({
         <p className="text-fg-faint text-xs mt-1">
           {applied
             ? `${applied.note} Every slot stays editable below.`
-            : "Fills the six slots with that program's stock shortcuts — defaults, every slot stays editable below."}
+            : "Fills the six slots with that program's stock shortcuts as defaults. Every slot stays editable below."}
         </p>
       </Field>
 
-      <Field label="Slots — the six keys pick one, the wheel drives it">
+      <Field label="Slots · the six keys pick one, the wheel drives it">
         <div className="flex flex-col gap-2">
           {slots.map((s, i) => (
             <EncSlotRow key={i} i={i} slot={s} onChange={(n) => setSlot(i, n)} />
@@ -1991,46 +2094,10 @@ function EncModuleFields({
         <p className="text-fg-faint text-xs mt-1">
           Pressing this key opens the Dial on the keypad screen. While it's open the six
           physical keys select a slot instead of running their normal actions; BACK closes it.
-          Everything is plain HID — it works even with the app closed.
+          Everything is plain HID. It works even with the app closed.
         </p>
       </Field>
     </>
-  );
-}
-
-/** Bordered, collapsed-by-default section with a title and a one-line summary
- * of what's inside — used to fold the advanced Behavior / key-logic controls
- * away so the editor reads cleanly for the common case. */
-function Collapsible({
-  title,
-  summary,
-  children,
-}: {
-  title: string;
-  summary?: string;
-  children: ReactNode;
-}) {
-  const [open, setOpen] = useState(false);
-  return (
-    <div className="border-t border-line pt-3">
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        aria-expanded={open}
-        className="flex w-full items-center gap-2 text-left"
-      >
-        <ChevronRight
-          size={14}
-          aria-hidden
-          className={`shrink-0 text-fg-faint transition-transform ${open ? "rotate-90" : ""}`}
-        />
-        <span className="text-xs font-semibold text-fg-muted">{title}</span>
-        {!open && summary && (
-          <span className="ml-1 min-w-0 flex-1 truncate text-xs text-fg-faint">{summary}</span>
-        )}
-      </button>
-      {open && <div className="mt-3 flex flex-col gap-3">{children}</div>}
-    </div>
   );
 }
 
@@ -2052,42 +2119,61 @@ function fwSupportsVariants(fw: string, slot = false): boolean {
   return maj > 0 || min >= (slot ? 9 : 3);
 }
 
-function VariantSlot({
-  label,
-  hint,
+/** One gesture tab (double press / long press): an empty state with an
+ * "Assign an action" button, or that gesture's full action editor. */
+function GestureEditor({
+  which,
+  control,
   value,
   allowMenu = false,
   layerCount = 0,
   onChange,
+  notes,
 }: {
-  label: string;
-  hint: string;
+  which: "double" | "hold";
+  control: "key" | "control";
   value?: Assignment;
   /** Offer device-menu actions inside this variant (Vision 6). */
   allowMenu?: boolean;
   /** Layer count for the "Go to layer X" device-menu actions. */
   layerCount?: number;
   onChange: (a: Assignment | undefined) => void;
+  notes?: ReactNode;
 }) {
+  const name = which === "double" ? "double press" : "long press";
+  const hint =
+    which === "double"
+      ? `Two quick presses. Once this is set, a single press waits a moment before firing, to rule out a second one.`
+      : `Hold the ${control} for about 0.4 s. Replaces hold-to-repeat.`;
   if (!value) {
     return (
-      <Button className="self-start" onClick={() => onChange({ kind: "keystroke", key: "" })}>
-        <Plus size={14} aria-hidden /> Add {label.toLowerCase()} action
-      </Button>
+      <div className="flex flex-col gap-3">
+        {notes}
+        <div className="rounded-card border border-dashed border-line-strong">
+          <EmptyState
+            icon={which === "double" ? <MousePointerClick size={26} aria-hidden /> : <Timer size={26} aria-hidden />}
+            title={`No ${name} action`}
+            description={hint}
+            action={
+              <Button variant="primary" onClick={() => onChange({ kind: "keystroke", key: "" })}>
+                <Plus size={16} aria-hidden /> Assign an action
+              </Button>
+            }
+          />
+        </div>
+      </div>
     );
   }
   return (
-    <div className="rounded-md border border-line bg-panel2 p-3 flex flex-col gap-2">
-      <div className="flex items-center gap-2">
-        <span className="text-xs font-semibold text-fg-muted">
-          {label} · {describeAssignment(value)}
-        </span>
-        <Button variant="danger" className="ml-auto" onClick={() => onChange(undefined)} title={`Remove ${label.toLowerCase()} action`}>
-          <Trash2 size={13} aria-hidden />
+    <div className="flex flex-col gap-3">
+      {notes}
+      <div className="flex items-start justify-between gap-3">
+        <p className="text-label text-fg-faint">{hint}</p>
+        <Button size="sm" variant="danger" onClick={() => onChange(undefined)}>
+          <Trash2 size={14} aria-hidden /> Remove
         </Button>
       </div>
       <AssignmentEditor nested allowMenu={allowMenu} layerCount={layerCount} value={value} onChange={onChange} />
-      <p className="text-xs text-fg-faint">{hint}</p>
     </div>
   );
 }
@@ -2130,7 +2216,7 @@ function SequenceEditor({
     <div className="flex flex-col gap-2">
       <div className="flex items-center gap-2 flex-wrap">
         {pure ? (
-          <Badge tone="green">runs on the keypad — works standalone</Badge>
+          <Badge tone="green">runs on the keypad · works standalone</Badge>
         ) : (
           <Badge tone="amber">
             step {hostSteps.join(", ")} need{hostSteps.length === 1 ? "s" : ""} the MKYADA app running
@@ -2139,13 +2225,13 @@ function SequenceEditor({
         {compiled && (
           <span className={`text-xs ${overBudget ? "text-danger" : "text-fg-faint"}`}>
             {compiled.events.length} events · {(bytes / 1024).toFixed(1)} KB
-            {overBudget && " — too big for the keypad, trim some steps"}
+            {overBudget && " · too big for the keypad, trim some steps"}
           </span>
         )}
       </div>
 
       {value.map((step, i) => (
-        <div key={i} className="rounded-md border border-line bg-panel2 p-3 flex flex-col gap-2">
+        <div key={i} className="rounded-control border border-line bg-panel2 p-3 flex flex-col gap-2">
           <div className="flex items-center gap-2">
             <span className="text-xs font-semibold text-fg-muted">
               Step {i + 1} · {describeAssignment(step.a)}

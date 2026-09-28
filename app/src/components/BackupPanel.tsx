@@ -77,7 +77,7 @@ export function BackupPanel() {
         } catch {
           // A macro that can't be read must not silently vanish from a
           // backup the user will trust later.
-          throw new Error(`Couldn't read macros/${file} — try again.`);
+          throw new Error(`Couldn't read macros/${file}. Try again.`);
         }
       }
       const backup: Backup = {
@@ -109,7 +109,7 @@ export function BackupPanel() {
       await ipc.fileWriteText(path, JSON.stringify(backup, null, 2));
       toast.success(
         "Backup saved",
-        `${describeBackup(backup)} — from ${name}.`,
+        `${describeBackup(backup)} · from ${name}.`,
       );
     } catch (e) {
       toast.error("Backup failed", String(e));
@@ -201,7 +201,7 @@ export function BackupPanel() {
       await disconnect().catch(() => {});
       toast.success(
         "Backup restored",
-        "The keypad is restarting — it will reconnect in a few seconds.",
+        "The keypad is restarting and will reconnect in a few seconds.",
       );
     } catch (e) {
       toast.error("Restore failed", String(e));
@@ -211,18 +211,16 @@ export function BackupPanel() {
   }
 
   return (
-    <Card title="Backup & restore">
+    <Card
+      title="Backup & restore"
+      description="One JSON file with this keypad's macros, key settings, layer names, profiles and nickname"
+    >
       {!hello || !drive ? (
         <p className="text-sm text-fg-muted py-2">
           Connect a keypad to back it up or restore one.
         </p>
       ) : (
         <div className="flex flex-col gap-3">
-          <p className="text-sm text-fg-muted">
-            A backup is a single JSON file holding this keypad&apos;s macros, key settings, layer
-            names, profiles and nickname. Restore it onto the same keypad later, or onto another{" "}
-            {MODEL_META[model!].label} to set it up in one go.
-          </p>
           <div className="flex items-center gap-2">
             <Button variant="primary" onClick={() => void exportBackup()} disabled={!!busy}>
               <Download size={14} aria-hidden /> Back up to a file
@@ -241,9 +239,9 @@ export function BackupPanel() {
               </span>
             )}
           </div>
-          <p className="text-xs text-fg-faint">
-            Your computer&apos;s own settings — sound output, OBS connection, window behaviour —
-            aren&apos;t part of a keypad backup.
+          <p className="text-label text-fg-faint">
+            Restore onto this keypad or another {MODEL_META[model!].label} · app settings like
+            sound output, OBS and window behavior aren&apos;t included
           </p>
         </div>
       )}

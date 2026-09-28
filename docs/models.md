@@ -23,9 +23,15 @@ The desktop app adapts to whichever model is connected:
 
 - **Keys** — the Vision 6 adds a **Module controls** grid (encoder →/←, BACK,
   CONFIRM, wheel-push) that you assign just like keys, plus a per-layer
-  on-screen name. The Core 6 shows the six keys and its layer key.
-- **Setup** — the Vision 6 wires the encoder and nav buttons and tests them;
-  the Core 6 picks a layer key.
+  on-screen name and a **Wheel menu** tab in the key editor. The Core 6 shows
+  the six keys and its layer key.
+- **Profiles** — the same Module controls grid appears under a profile on the
+  Vision 6; the Core 6 has no wheel or nav buttons, so it never shows it.
+- **Devices** — on the Vision 6, *Test keys* also checks the wheel and nav
+  buttons and *Fix wiring* covers them; on the Core 6 the *Setup* tab picks a
+  layer key.
+- **Control** — both models get the same page for running keys from the app;
+  the Vision 6 lists its layers by name.
 - **Settings → Keypad** — the Vision 6 exposes screen options (layer band,
   profile band, auto-return timeout, wheel acceleration); the Core 6
   shows only the drive-hide (finished-product) toggle.

@@ -64,8 +64,8 @@ export const ENC_PRESETS: EncPreset[] = [
   {
     id: "davinci",
     group: "video",
-    label: "DaVinci Resolve — Color",
-    note: "Hover a color wheel or slider, turn to drag it — plus jog, zoom and scroll.",
+    label: "DaVinci Resolve · Color",
+    note: "Hover a color wheel or slider, turn to drag it, plus jog, zoom and scroll.",
     slots: [
       // Resolve's color controls have no shortcuts: the drag slots ARE the
       // encoder ring. Hover lift/gamma/gain (or any slider), turn the wheel.
@@ -80,7 +80,7 @@ export const ENC_PRESETS: EncPreset[] = [
   {
     id: "premiere",
     group: "video",
-    label: "Premiere Pro — Edit",
+    label: "Premiere Pro · Edit",
     note: "Jog & shuttle the timeline, zoom, nudge clips, ride clip gain.",
     slots: [
       JOG,
@@ -95,7 +95,7 @@ export const ENC_PRESETS: EncPreset[] = [
     id: "finalcut",
     group: "video",
     label: "Final Cut Pro",
-    note: "Jog, nudge, zoom, clip volume and undo — all on the wheel.",
+    note: "Jog, nudge, zoom, clip volume and undo, all on the wheel.",
     slots: [
       JOG,
       { l: "NUDGE", t: "keys", cw: combo([], "."), ccw: combo([], ","), m: 1 },
@@ -135,7 +135,7 @@ export const ENC_PRESETS: EncPreset[] = [
     id: "timeline",
     group: "video",
     label: "Timeline basics (any editor)",
-    note: "Jog, zoom, scroll both ways, volume and undo — works almost everywhere.",
+    note: "Jog, zoom, scroll both ways, volume and undo. Works almost everywhere.",
     slots: [
       JOG,
       { l: "ZOOM", t: "keys", cw: combo(["WIN"], "="), ccw: combo(["WIN"], "-"), m: 1 },
@@ -161,7 +161,7 @@ export const ENC_PRESETS: EncPreset[] = [
   {
     id: "ableton",
     group: "music",
-    label: "Ableton Live — Session",
+    label: "Ableton Live · Session",
     note: "Walk clips and scenes, launch with a press, zoom and scroll the grid.",
     slots: [
       { l: "CLIP", t: "keys", cw: combo([], "right"), ccw: combo([], "left"), m: 1, b: BTN_ENTER },
@@ -229,7 +229,7 @@ export const ENC_PRESETS: EncPreset[] = [
     id: "midimix",
     group: "music",
     label: "MIDI mixer (any DAW)",
-    note: "Six MIDI-learnable knobs — wiggle one, click the parameter, done. Needs MIDI on.",
+    note: "Six MIDI-learnable knobs. Wiggle one, click the parameter, done. Needs MIDI on.",
     slots: [
       // General MIDI's conventional controller numbers. With MIDI-learn the
       // exact number rarely matters; what matters is that the six are

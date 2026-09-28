@@ -5,20 +5,10 @@ import { listen } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   AppWindow,
-  Gauge,
-  HardDrive,
-  Music,
+  ChevronRight,
   Info,
   Keyboard,
-  Layers,
-  Monitor,
-  Moon,
-  Pin,
   Plug,
-  Power,
-  Rocket,
-  RotateCw,
-  Sun,
   Video,
   type LucideIcon,
 } from "lucide-react";
@@ -36,28 +26,32 @@ import {
   setObsConfig,
   setRunInBackground,
   setSoundSecondary,
-  setThemePref,
   setWheelAccel,
-  ThemePref,
   useAlwaysOnTop,
   useAutostart,
   useObsConfig,
   useRunInBackground,
   useSoundSecondary,
-  useThemePref,
   useWheelAccel,
 } from "../lib/settings";
-import { Badge, Button, Card, Field, Input, Select, Spinner, Tabs } from "../components/ui";
+import {
+  Alert,
+  Badge,
+  Button,
+  Card,
+  Field,
+  Input,
+  Select,
+  SettingRow,
+  Spinner,
+  Switch,
+  Tabs,
+} from "../components/ui";
 import { PermissionsCard } from "../components/Permissions";
+import { RemoteControlCard } from "../components/RemoteControlCard";
 import { BackupPanel } from "../components/BackupPanel";
 import { useToast } from "../components/toast";
 import { useConfirm } from "../components/dialog";
-
-const THEME_OPTIONS: { value: ThemePref; label: string; icon: typeof Sun }[] = [
-  { value: "system", label: "System", icon: Monitor },
-  { value: "light", label: "Light", icon: Sun },
-  { value: "dark", label: "Dark", icon: Moon },
-];
 
 function SoundOutputCard() {
   const secondary = useSoundSecondary();
@@ -79,15 +73,21 @@ function SoundOutputCard() {
     : [...(secondary ? [secondary] : []), ...outputs];
 
   return (
-    <Card title="Sound output">
-      <div className="flex flex-col gap-2">
-        <Field label="Also play sound keys into">
+    <Card
+      title="Sound output"
+      description="Sound keys always play on your default output"
+    >
+      <div className="flex max-w-md flex-col gap-2">
+        <Field
+          label="Also play sound keys into"
+          hint="Pick a virtual device (BlackHole, VB-Cable) and route it into OBS or your call, so others hear the soundboard too."
+        >
           <Select
             value={secondary ?? ""}
             onChange={(e) => setSoundSecondary(e.target.value || null)}
             aria-label="Secondary output device for sound keys"
           >
-            <option value="">Off — default output only</option>
+            <option value="">Off · default output only</option>
             {options.map((n) => (
               <option key={n} value={n}>
                 {n}
@@ -95,37 +95,7 @@ function SoundOutputCard() {
             ))}
           </Select>
         </Field>
-        <p className="text-xs text-fg-faint">
-          Sounds always play on your default output. Pick a virtual device
-          (e.g. BlackHole or VB-Cable) here and route it into OBS or your
-          call, so your audience hears the soundboard at the same time you
-          do.
-        </p>
       </div>
-    </Card>
-  );
-}
-
-function AppearanceCard() {
-  const pref = useThemePref();
-  return (
-    <Card title="Appearance">
-      <div className="flex gap-2" role="radiogroup" aria-label="Theme">
-        {THEME_OPTIONS.map((o) => (
-          <Button
-            key={o.value}
-            variant={pref === o.value ? "primary" : "default"}
-            role="radio"
-            aria-checked={pref === o.value}
-            onClick={() => setThemePref(o.value)}
-          >
-            <o.icon size={14} aria-hidden /> {o.label}
-          </Button>
-        ))}
-      </div>
-      <p className="text-xs text-fg-faint mt-2">
-        System follows your OS appearance automatically.
-      </p>
     </Card>
   );
 }
@@ -136,64 +106,30 @@ function WindowCard() {
   const autostart = useAutostart();
   return (
     <Card title="Window">
-      <div className="flex flex-col gap-4">
-        <div className="flex items-center justify-between gap-4">
-          <div className="flex flex-col gap-0.5 text-sm">
-            <span className="text-fg font-medium">Always on top</span>
-            <span className="text-xs text-fg-faint">
-              Keep MKYADA above other windows (like a game) while you fine-tune macro
-              coordinates.
-            </span>
-          </div>
-          <Button
-            variant={pinned ? "primary" : "default"}
-            role="switch"
-            aria-checked={pinned}
-            onClick={() => setAlwaysOnTop(!pinned)}
-          >
-            <Pin size={14} aria-hidden className={pinned ? "" : "rotate-45"} />
-            {pinned ? "On" : "Off"}
-          </Button>
-        </div>
-
-        <div className="flex items-center justify-between gap-4">
-          <div className="flex flex-col gap-0.5 text-sm">
-            <span className="text-fg font-medium">Keep running in the background</span>
-            <span className="text-xs text-fg-faint">
-              Closing the window hides MKYADA to the system tray, so key actions
-              (open app, run command, sounds) and per-app profiles keep working.
-              Quit for real from the tray icon.
-            </span>
-          </div>
-          <Button
-            variant={runBg ? "primary" : "default"}
-            role="switch"
-            aria-checked={runBg}
-            onClick={() => setRunInBackground(!runBg)}
-          >
-            <Power size={14} aria-hidden />
-            {runBg ? "On" : "Off"}
-          </Button>
-        </div>
-
-        <div className="flex items-center justify-between gap-4">
-          <div className="flex flex-col gap-0.5 text-sm">
-            <span className="text-fg font-medium">Start at login</span>
-            <span className="text-xs text-fg-faint">
-              Launch MKYADA automatically when you sign in, so the keypad's
-              computer-side actions are always ready.
-            </span>
-          </div>
-          <Button
-            variant={autostart ? "primary" : "default"}
-            role="switch"
-            aria-checked={autostart}
-            onClick={() => setAutostart(!autostart)}
-          >
-            <Rocket size={14} aria-hidden />
-            {autostart ? "On" : "Off"}
-          </Button>
-        </div>
+      <div className="flex flex-col divide-y divide-line">
+        <SettingRow
+          title="Always on top"
+          description="Keep MKYADA above other windows, like a game, while you fine-tune coordinates."
+          control={
+            <Switch checked={pinned} onChange={setAlwaysOnTop} aria-label="Always on top" />
+          }
+        />
+        <SettingRow
+          title="Keep running in the background"
+          description="Closing the window hides MKYADA to the tray, so app-side actions and per-app profiles keep working. Quit from the tray icon."
+          control={
+            <Switch
+              checked={runBg}
+              onChange={setRunInBackground}
+              aria-label="Keep running in the background"
+            />
+          }
+        />
+        <SettingRow
+          title="Start at login"
+          description="Launch MKYADA when you sign in, so app-side actions are always ready."
+          control={<Switch checked={autostart} onChange={setAutostart} aria-label="Start at login" />}
+        />
       </div>
     </Card>
   );
@@ -204,6 +140,9 @@ function WindowCard() {
  * the live scene + REC/LIVE status. */
 function ObsCard() {
   const cfg = useObsConfig();
+  const { hello } = useDevice();
+  // the screen band is a Vision 6 thing; say nothing about it on a core6
+  const vision = !hello || deviceModel(hello) === "vision6";
   const [form, setForm] = useState<ObsConfig>(cfg);
   const [status, setStatus] = useState<ObsSnapshot | null>(null);
 
@@ -233,21 +172,16 @@ function ObsCard() {
   );
 
   return (
-    <Card title="OBS Studio">
-      <div className="flex flex-col gap-4">
-        <div className="flex items-center justify-between gap-4">
-          <div className="flex flex-col gap-0.5 text-sm">
-            <span className="text-fg font-medium flex items-center gap-2">
-              <Video size={15} aria-hidden /> obs-websocket
-            </span>
-            <span className="text-xs text-fg-faint">
-              Control OBS from the keypad — scene switch, record/stream, mic mute — and
-              show the live scene on the Vision 6 screen. Enable it in OBS under
-              Tools → WebSocket Server Settings.
-            </span>
-          </div>
-          {statusBadge}
-        </div>
+    <Card
+      title="OBS Studio"
+      description="Switch scenes, record, stream and mute the mic from the keypad"
+      actions={statusBadge}
+    >
+      <div className="flex max-w-xl flex-col gap-4">
+        <p className="flex items-center gap-2 text-[13px] text-fg-faint">
+          <Video size={15} aria-hidden className="shrink-0" />
+          Turn on the WebSocket server in OBS · Tools › WebSocket Server Settings
+        </p>
 
         <div className="grid grid-cols-[1fr_auto] gap-3">
           <Field label="Host">
@@ -270,7 +204,7 @@ function ObsCard() {
           <Input
             type="password"
             value={form.password}
-            placeholder="from OBS WebSocket settings"
+            placeholder="From the OBS WebSocket settings"
             onChange={(e) => set({ password: e.target.value })}
           />
         </Field>
@@ -286,10 +220,12 @@ function ObsCard() {
           )}
         </div>
 
-        <p className="text-xs text-fg-faint">
-          The live scene / REC / LIVE status shows on the keypad band — turn on
-          "Show profile band" (Keypad settings) for it to appear.
-        </p>
+        {vision && (
+          <p className="text-label text-fg-faint">
+            The live scene shows on the keypad screen when “Show the active profile on screen” is
+            on · Keypad tab
+          </p>
+        )}
       </div>
     </Card>
   );
@@ -369,7 +305,7 @@ function KeypadCard() {
       message: on
         ? "The keypad will also appear as a MIDI device called \"" +
           (deviceModel(hello) === "vision6" ? "MKYADA Vision 6" : "MKYADA Keypad") +
-          "\", so MIDI keys can drive a DAW directly — no app in between.\n\n" +
+          "\", so MIDI keys can drive a DAW directly with no app in between.\n\n" +
           "The keypad restarts now. Note: MIDI stays off while the USB drive is " +
           "visible, because the two together exceed what the chip can present at once."
         : "The keypad will stop presenting a MIDI port, and MIDI keys will do nothing." +
@@ -413,7 +349,7 @@ function KeypadCard() {
       title: hide ? "Hide the USB drive" : "Show the USB drive",
       message: hide
         ? "The keypad will stop showing up as a flash drive. Keys, macros and setup are " +
-          "managed entirely from this app — files travel over the serial connection, " +
+          "managed entirely from this app, with files travelling over the serial connection, " +
           "like a finished product.\n\nThe keypad restarts now. Recovery: hold key 1 " +
           "while plugging it in to force the drive back on."
         : "The keypad will show up as a USB drive (CIRCUITPY) again, raw JSON files and " +
@@ -446,7 +382,7 @@ function KeypadCard() {
       toast.success(
         "Keypad restarting",
         hide
-          ? "It will reconnect without a USB drive — this app keeps full access."
+          ? "It will reconnect without a USB drive. This app keeps full access."
           : "It will reconnect with its USB drive visible.",
       );
     } catch (e) {
@@ -474,203 +410,147 @@ function KeypadCard() {
     );
   }
 
+  /** Firmware too old for a setting: a quiet badge where the switch would be. */
+  const needs = (v: string) => <Badge tone="amber">Needs firmware {v}+</Badge>;
+
   return (
     <Card title="Keypad">
-      <div className="flex flex-col gap-4">
-        <div className="flex items-center justify-between gap-4">
-          <div className="flex flex-col gap-0.5 text-sm">
-            <span className="text-fg font-medium">Hide the keypad's USB drive</span>
-            <span className="text-xs text-fg-faint">
-              Finished-product mode: the keypad no longer appears as a flash drive full of
-              system files — this app manages everything over the serial connection instead.
-              Off by default. Hold key 1 while plugging in to force the drive back (recovery).
-            </span>
-          </div>
-          {!hello ? (
-            <Badge tone="amber">connect a keypad</Badge>
-          ) : !supported ? (
-            <Badge tone="amber">needs firmware ≥ 0.4.0</Badge>
-          ) : (
-            <Button
-              variant={hidden ? "primary" : "default"}
-              role="switch"
-              aria-checked={hidden}
-              loading={busy}
-              disabled={!drive}
-              onClick={() => void setHidden(!hidden)}
-            >
-              <HardDrive size={14} aria-hidden />
-              {hidden ? "Hidden" : "Visible"}
-            </Button>
-          )}
-        </div>
+      <div className="flex flex-col divide-y divide-line">
+        <SettingRow
+          title="Hide the keypad's USB drive"
+          description="The keypad stops showing up as a flash drive and this app manages it over the serial link. Hold key 1 while plugging in to bring the drive back."
+          control={
+            !supported ? (
+              needs("0.4.0")
+            ) : (
+              <Switch
+                checked={hidden}
+                loading={busy}
+                disabled={!drive}
+                onChange={(v) => void setHidden(v)}
+                aria-label="Hide the keypad's USB drive"
+              />
+            )
+          }
+        />
 
-        <div className="flex items-center justify-between gap-4">
-          <div className="flex flex-col gap-0.5 text-sm">
-            <span className="text-fg font-medium">Present a MIDI port</span>
-            <span className="text-xs text-fg-faint">
-              Makes the keypad a USB MIDI device as well as a keyboard, so MIDI keys can play
-              notes, control changes and program changes straight into a DAW with no app
-              running. Off by default, and unavailable while the USB drive is visible — the
-              chip cannot present both at once.
-            </span>
-          </div>
-          {!hello ? (
-            <Badge tone="amber">connect a keypad</Badge>
-          ) : !midiSupported ? (
-            <Badge tone="amber">needs firmware ≥ 0.29.0</Badge>
-          ) : !hidden ? (
-            <Badge tone="amber">hide the USB drive first</Badge>
-          ) : (
-            <Button
-              variant={midiOn ? "primary" : "default"}
-              role="switch"
-              aria-checked={midiOn}
-              loading={busy}
-              disabled={!drive}
-              onClick={() => void setMidi(!midiOn)}
-            >
-              <Music size={14} aria-hidden />
-              {midiOn ? "On" : "Off"}
-            </Button>
-          )}
-        </div>
+        <SettingRow
+          title="Present a MIDI port"
+          description="MIDI keys send notes and control changes straight into a DAW, no app needed. Needs the USB drive hidden: the chip can't present both at once."
+          control={
+            !midiSupported ? (
+              needs("0.29.0")
+            ) : !hidden ? (
+              <Badge>Hide the USB drive first</Badge>
+            ) : (
+              <Switch
+                checked={midiOn}
+                loading={busy}
+                disabled={!drive}
+                onChange={(v) => void setMidi(v)}
+                aria-label="Present a MIDI port"
+              />
+            )
+          }
+        />
 
         {vision && (
           <>
-            <div className="flex items-center justify-between gap-4">
-              <div className="flex flex-col gap-0.5 text-sm">
-                <span className="text-fg font-medium">Show the active layer on screen</span>
-                <span className="text-xs text-fg-faint">
-                  A band above the key grid names the layer you're on (Layer A, B, …),
-                  so a glance tells you which six macros are live. Macro names squeeze
-                  a little to make room.
-                </span>
-              </div>
-              {!bandSupported ? (
-                <Badge tone="amber">needs firmware ≥ 0.9.0</Badge>
-              ) : (
-                <Button
-                  variant={hello?.show_layer ? "primary" : "default"}
-                  role="switch"
-                  aria-checked={!!hello?.show_layer}
-                  loading={bandBusy === "show_layer"}
-                  disabled={!drive || bandBusy !== null}
-                  onClick={() => void setBand("show_layer", !hello?.show_layer)}
-                >
-                  <Layers size={14} aria-hidden />
-                  {hello?.show_layer ? "On" : "Off"}
-                </Button>
-              )}
-            </div>
-
-            <div className="flex items-center justify-between gap-4">
-              <div className="flex flex-col gap-0.5 text-sm">
-                <span className="text-fg font-medium">Show the active profile on screen</span>
-                <span className="text-xs text-fg-faint">
-                  The band also shows which per-app profile is driving the keys
-                  (Profiles tab), following the app in the foreground. Needs this app
-                  running; shares the band with the layer name.
-                </span>
-              </div>
-              {!bandSupported ? (
-                <Badge tone="amber">needs firmware ≥ 0.9.0</Badge>
-              ) : (
-                <Button
-                  variant={hello?.show_profile ? "primary" : "default"}
-                  role="switch"
-                  aria-checked={!!hello?.show_profile}
-                  loading={bandBusy === "show_profile"}
-                  disabled={!drive || bandBusy !== null}
-                  onClick={() => void setBand("show_profile", !hello?.show_profile)}
-                >
-                  <AppWindow size={14} aria-hidden />
-                  {hello?.show_profile ? "On" : "Off"}
-                </Button>
-              )}
-            </div>
-
-            <div className="flex items-center justify-between gap-4">
-              <div className="flex flex-col gap-0.5 text-sm">
-                <span className="text-fg font-medium">Wheel walks layers too</span>
-                <span className="text-xs text-fg-faint">
-                  Turning past the sixth tile wraps into the next layer's first key
-                  instead of stopping, and the grid grows a page counter. Off keeps the
-                  wheel inside one layer. Also on the device (Settings → Wheel layers).
-                </span>
-              </div>
-              {!wheelLayersSupported ? (
-                <Badge tone="amber">needs firmware ≥ 0.25.0</Badge>
-              ) : (
-                <Button
-                  variant={hello?.wheel_layers ? "primary" : "default"}
-                  role="switch"
-                  aria-checked={!!hello?.wheel_layers}
-                  loading={bandBusy === "wheel_layers"}
-                  disabled={!drive || bandBusy !== null}
-                  onClick={() => void setBand("wheel_layers", !hello?.wheel_layers)}
-                >
-                  <RotateCw size={14} aria-hidden />
-                  {hello?.wheel_layers ? "On" : "Off"}
-                </Button>
-              )}
-            </div>
-
-            <div className="flex items-center justify-between gap-4">
-              <div className="flex flex-col gap-0.5 text-sm">
-                <span className="text-fg font-medium">Auto-return to the key grid</span>
-                <span className="text-xs text-fg-faint">
-                  After this many idle seconds the screen leaves a menu and returns to the
-                  key grid. Also changeable on the device (Settings → Auto-return).
-                </span>
-              </div>
-              {!prefsSupported ? (
-                <Badge tone="amber">needs firmware ≥ 0.14.0</Badge>
-              ) : (
-                <Select
-                  value={hello?.timeout ?? 10}
-                  disabled={!drive || fieldBusy !== null}
-                  className="shrink-0"
-                  aria-label="Auto-return idle seconds"
-                  onChange={(e) => void setKeypadField("timeout", Number(e.target.value))}
-                >
-                  {[3, 4, 5, 10, 15, 20, 30, 45, 60].map((s) => (
-                    <option key={s} value={s}>
-                      {s} seconds
-                    </option>
-                  ))}
-                </Select>
-              )}
-            </div>
+            <SettingRow
+              title="Show the active layer on screen"
+              description="A band above the key grid names the layer you're on. Macro names squeeze a little to make room."
+              control={
+                !bandSupported ? (
+                  needs("0.9.0")
+                ) : (
+                  <Switch
+                    checked={!!hello?.show_layer}
+                    loading={bandBusy === "show_layer"}
+                    disabled={!drive || bandBusy !== null}
+                    onChange={(v) => void setBand("show_layer", v)}
+                    aria-label="Show the active layer on screen"
+                  />
+                )
+              }
+            />
+            <SettingRow
+              title="Show the active profile on screen"
+              description="The band also names the per-app profile in use and the live OBS scene. Needs this app running."
+              control={
+                !bandSupported ? (
+                  needs("0.9.0")
+                ) : (
+                  <Switch
+                    checked={!!hello?.show_profile}
+                    loading={bandBusy === "show_profile"}
+                    disabled={!drive || bandBusy !== null}
+                    onChange={(v) => void setBand("show_profile", v)}
+                    aria-label="Show the active profile on screen"
+                  />
+                )
+              }
+            />
+            <SettingRow
+              title="Wheel walks layers too"
+              description="Turning past the last key moves on to the next layer's first key. Also on the keypad: Settings · Wheel layers."
+              control={
+                !wheelLayersSupported ? (
+                  needs("0.25.0")
+                ) : (
+                  <Switch
+                    checked={!!hello?.wheel_layers}
+                    loading={bandBusy === "wheel_layers"}
+                    disabled={!drive || bandBusy !== null}
+                    onChange={(v) => void setBand("wheel_layers", v)}
+                    aria-label="Wheel walks layers too"
+                  />
+                )
+              }
+            />
+            <SettingRow
+              title="Auto-return to the key grid"
+              description="Idle time before the screen leaves a menu for the key grid. Also on the keypad: Settings · Auto-return."
+              control={
+                !prefsSupported ? (
+                  needs("0.14.0")
+                ) : (
+                  <Select
+                    value={hello?.timeout ?? 10}
+                    disabled={!drive || fieldBusy !== null}
+                    className="w-36"
+                    aria-label="Auto-return idle seconds"
+                    onChange={(e) => void setKeypadField("timeout", Number(e.target.value))}
+                  >
+                    {[3, 4, 5, 10, 15, 20, 30, 45, 60].map((s) => (
+                      <option key={s} value={s}>
+                        {s} seconds
+                      </option>
+                    ))}
+                  </Select>
+                )
+              }
+            />
           </>
         )}
 
-        <div className="flex items-center justify-between gap-4">
-          <div className="flex flex-col gap-0.5 text-sm">
-            <span className="text-fg font-medium">Wheel acceleration</span>
-            <span className="text-xs text-fg-faint">
-              Profile wheel actions (scroll, zoom): spinning the wheel fast multiplies
-              the step, like a real mouse wheel — a quick flick zooms right in. Off =
-              exactly one step per detent, however fast the spin.
-            </span>
-          </div>
-          <Button
-            variant={wheelAccel ? "primary" : "default"}
-            role="switch"
-            aria-checked={wheelAccel}
-            onClick={() => setWheelAccel(!wheelAccel)}
-          >
-            <Gauge size={14} aria-hidden />
-            {wheelAccel ? "On" : "Off"}
-          </Button>
-        </div>
+        {/* core6 has no wheel, so there's nothing to accelerate */}
+        {(!hello || vision) && (
+          <SettingRow
+            title="Wheel acceleration"
+            description="For app-side wheel actions like scroll and zoom: a fast spin takes bigger steps. Off is one step per detent."
+            control={
+              <Switch checked={wheelAccel} onChange={setWheelAccel} aria-label="Wheel acceleration" />
+            }
+          />
+        )}
       </div>
     </Card>
   );
 }
 
 /** Vision 6 reference: what pressing the wheel does for each action kind.
- * Generated from the kind registry so it can never drift from the device. */
+ * Generated from the kind registry so it can never drift from the device.
+ * Three previews up front; the full per-action list folds away. */
 function WheelMenuCard() {
   const { hello } = useDevice();
   if (deviceModel(hello) !== "vision6") return null;
@@ -679,49 +559,53 @@ function WheelMenuCard() {
     { a: { kind: "keystroke", key: "z" }, cap: "Action card" },
     { a: { kind: "obs", action: "setScene", sceneName: "Live" }, cap: "Scene picker" },
   ];
+  const kinds = allKinds().filter((k) => k.id !== "none" && k.id !== "nothing");
   return (
-    <Card title="Wheel menu (Vision 6)">
-      <p className="text-sm text-fg-muted mb-3">
-        Turn the wheel to pick a key, then press it — the screen opens a menu that fits that
-        key's action instead of always the speed editor. Here's what each action shows.
-      </p>
-      <div className="flex flex-wrap gap-4 mb-4">
+    <Card
+      title="Wheel menu"
+      description="Press the wheel on a key and the screen opens a menu that fits its action"
+    >
+      <div className="flex flex-wrap gap-5">
         {examples.map((ex) => (
           <figure key={ex.cap} className="flex flex-col items-center gap-1.5">
-            <OledPreview preview={wheelPreview(ex.a)} scale={1.6} />
-            <figcaption className="text-xs text-fg-faint">{ex.cap}</figcaption>
+            <OledPreview preview={wheelPreview(ex.a)} scale={1.4} />
+            <figcaption className="text-label text-fg-faint">{ex.cap}</figcaption>
           </figure>
         ))}
       </div>
-      {/* Same order AND the same group headings as the action-type dropdown in
-        * the editor: this is that list, annotated. Two different orders for the
-        * same set of actions made the reader hunt for the row they had just
-        * picked. */}
-      <div className="flex flex-col divide-y divide-line">
-        {allKinds()
-          .filter((k) => k.id !== "none" && k.id !== "nothing")
-          .map((k, i, list) => (
-            <div key={k.id} className="flex flex-col">
-              {k.category !== list[i - 1]?.category && (
-                <div className="pt-3 pb-1 text-[11px] font-semibold uppercase tracking-wide text-fg-faint">
+      <details className="group/all mt-4 border-t border-line pt-3">
+        <summary className="flex w-fit cursor-pointer list-none items-center gap-1 rounded-control text-[13px] font-strong text-fg-muted hover:text-fg [&::-webkit-details-marker]:hidden">
+          <ChevronRight
+            size={14}
+            aria-hidden
+            className="transition-transform duration-[120ms] ease-standard group-open/all:rotate-90"
+          />
+          Show all {kinds.length} actions
+        </summary>
+        {/* Same order AND the same group headings as the action-type dropdown
+          * in the editor: this is that list, annotated. */}
+        <div className="mt-2 grid grid-cols-1 gap-x-6 lg:grid-cols-2">
+          {kinds.map((k, i) => (
+            <div key={k.id} className="contents">
+              {k.category !== kinds[i - 1]?.category && (
+                <div className="col-span-full pb-1 pt-3 text-label font-medium tracking-label text-fg-faint [font-stretch:90%]">
                   {categoryLabel(k.category)}
                 </div>
               )}
-              <div className="flex items-center gap-3 py-2">
-                <ActionIcon name={k.icon} size={30} />
+              <div className="flex items-start gap-2.5 py-1.5">
+                <ActionIcon name={k.icon} size={26} />
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium text-fg">{k.label}</span>
-                    <Badge tone={k.host ? "amber" : "green"}>
-                      {k.host ? "needs app" : "standalone"}
-                    </Badge>
+                    <span className="text-[13px] font-strong text-fg">{k.label}</span>
+                    {k.host && <Badge tone="amber">Needs app</Badge>}
                   </div>
-                  <p className="text-xs text-fg-faint">{k.wheel.summary}</p>
+                  <p className="text-label leading-snug text-fg-faint">{k.wheel.summary}</p>
                 </div>
               </div>
             </div>
           ))}
-      </div>
+        </div>
+      </details>
     </Card>
   );
 }
@@ -733,15 +617,22 @@ function AboutCard() {
   }, []);
   return (
     <Card title="About">
-      <div className="flex flex-col gap-2 text-sm text-fg">
-        <p>
-          <span className="font-semibold">MKYADA</span> — Macro Keypad You Always Dream About
-        </p>
-        <p className="text-fg-faint">App version {version || "…"}</p>
-        <Button variant="ghost" className="self-start px-0 text-accent"
-          onClick={() => void openUrl("https://github.com/asilbalaban/MKYADA")}>
-          github.com/asilbalaban/MKYADA
-        </Button>
+      <div className="flex items-center gap-4">
+        <img src="/mkyada-logo.png" alt="" className="size-14 shrink-0 rounded-card" />
+        <div className="flex min-w-0 flex-col gap-1 text-sm">
+          <p className="text-title font-semibold text-fg">MKYADA</p>
+          <p className="text-fg-muted">Macro Keypad You Always Dream About</p>
+          <p className="text-label text-fg-faint tabular-nums">
+            App version {version || "…"} ·{" "}
+            <button
+              type="button"
+              className="text-accent underline underline-offset-2 hover:text-fg"
+              onClick={() => void openUrl("https://github.com/asilbalaban/MKYADA")}
+            >
+              github.com/asilbalaban/MKYADA
+            </button>
+          </p>
+        </div>
       </div>
     </Card>
   );
@@ -775,20 +666,24 @@ function UpdatesCard() {
             (update.available ? (
               <Badge tone="amber">v{update.latest} available</Badge>
             ) : (
-              <Badge tone="green">up to date (v{update.current})</Badge>
+              <Badge tone="green">Up to date · v{update.current}</Badge>
             ))}
         </div>
         {update?.available && (
           <div className="flex items-center gap-2">
             <span className="text-fg-muted">
-              v{update.latest} is out — you're on v{update.current}.
+              v{update.latest} is out · you're on v{update.current}.
             </span>
             <Button variant="primary" onClick={() => void openUrl(update.url)}>
               Open release page
             </Button>
           </div>
         )}
-        {error && <p className="text-danger text-xs">{error}</p>}
+        {error && (
+          <Alert tone="danger" title="Could not check for updates">
+            {error}
+          </Alert>
+        )}
       </div>
     </Card>
   );
@@ -829,8 +724,8 @@ const TABS: { id: string; label: string; icon: LucideIcon; body: () => ReactNode
     body: () => (
       <>
         <PermissionsCard />
-        <AppearanceCard />
         <WindowCard />
+        <RemoteControlCard />
       </>
     ),
   },
@@ -857,7 +752,7 @@ export function SettingsPage({ openTab }: { openTab?: { id: string } | null }) {
   const active = TABS.find((t) => t.id === tab) ?? TABS[0];
 
   return (
-    <div className="flex flex-col gap-4 max-w-3xl mx-auto w-full">
+    <div className="flex flex-col gap-4 w-full">
       <Tabs
         idPrefix="settings"
         label="Settings sections"

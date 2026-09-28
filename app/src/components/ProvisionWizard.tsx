@@ -132,7 +132,7 @@ export function ProvisionWizard({
         );
         // The RPI-RP2 drive disappears while the board reboots — expected.
         await ipc.provisionFlashUf2(src.mount);
-        setPhase("Waiting for the CIRCUITPY drive — the board is rebooting (takes ~15 seconds)…");
+        setPhase("Waiting for the CIRCUITPY drive · the board is rebooting (takes ~15 seconds)…");
         drive = await waitForNewDrive(before);
       } else {
         drive = src.drive;
@@ -189,7 +189,7 @@ export function ProvisionWizard({
         <div className="flex flex-col gap-3 text-sm">
           <p className="text-fg">
             Hold the <span className="font-semibold">BOOT</span> button on the board while
-            plugging it in — it shows up as an <span className="font-mono text-xs">RPI-RP2</span>{" "}
+            plugging it in. It shows up as an <span className="font-mono text-xs">RPI-RP2</span>{" "}
             drive and this wizard continues automatically.
           </p>
           <p className="text-fg-muted text-xs flex items-center gap-1.5">
@@ -198,7 +198,7 @@ export function ProvisionWizard({
           {cpDrives.length > 0 && (
             <div className="flex flex-col gap-2 border-t border-line pt-3">
               <p className="text-fg-muted text-xs">
-                Already flashed CircuitPython? These drives aren't running MKYADA firmware yet —
+                Already flashed CircuitPython? These drives aren't running MKYADA firmware yet.
                 you can skip straight to installing it:
               </p>
               {cpDrives.map((d) => (
@@ -251,12 +251,12 @@ export function ProvisionWizard({
                 {rebooted ? (
                   <>
                     <CircleCheck size={16} className="text-success" aria-hidden />
-                    Done — the keypad restarted with MKYADA firmware and is connected.
+                    Done. The keypad restarted with MKYADA firmware and is connected.
                   </>
                 ) : (
                   <>
                     <Usb size={16} className="text-fg-muted shrink-0" aria-hidden />
-                    Firmware installed. The keypad didn't come back on its own — unplug it and
+                    Firmware installed. The keypad didn't come back on its own. Unplug it and
                     plug it in again, and it connects within a few seconds.
                   </>
                 )}

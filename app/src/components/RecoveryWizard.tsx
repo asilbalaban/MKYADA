@@ -147,28 +147,28 @@ export function RecoveryWizard({ onClose }: { onClose: () => void }) {
                 <p className="text-fg flex items-start gap-2">
                   <CircleCheck size={16} className="text-success shrink-0 mt-0.5" aria-hidden />
                   Every firmware file matches this app&apos;s v{diag.bundle_version}. The problem is
-                  something else — repairing anyway is safe and rewrites all of them.
+                  something else. Repairing anyway is safe and rewrites all of them.
                 </p>
               ) : (
                 <div className="flex items-start gap-2">
                   <TriangleAlert size={16} className="text-warning shrink-0 mt-0.5" aria-hidden />
                   <div className="flex flex-col gap-1">
                     <p className="text-fg">
-                      The firmware on this keypad is a mix of versions — that&apos;s why it
+                      The firmware on this keypad is a mix of versions. That&apos;s why it
                       won&apos;t start.
                     </p>
                     <ul className="text-fg-muted text-xs list-disc pl-4">
                       {diag.stale.length > 0 && (
                         <li>
-                          {diag.stale.length} files are from an older version — they get replaced
+                          {diag.stale.length} files are from an older version · they get replaced
                         </li>
                       )}
                       {diag.missing.length > 0 && (
-                        <li>{diag.missing.length} files are missing — they get installed</li>
+                        <li>{diag.missing.length} files are missing · they get installed</li>
                       )}
                       {diag.extra.length > 0 && (
                         <li>
-                          {diag.extra.length} leftover files aren&apos;t part of this firmware —
+                          {diag.extra.length} leftover files aren&apos;t part of this firmware ·
                           they get deleted
                         </li>
                       )}
@@ -205,8 +205,8 @@ export function RecoveryWizard({ onClose }: { onClose: () => void }) {
           <p className="text-fg">Which keypad is this?</p>
           <p className="text-fg-muted text-xs">
             In rescue mode the keypad can&apos;t tell the app what it is, so the app has to be
-            told. Picking the wrong one leaves the screen blank or the keys on the wrong pins —
-            you can come back and change it.
+            told. Picking the wrong one leaves the screen blank or the keys on the wrong pins.
+            You can come back and change it.
           </p>
           <div className="grid grid-cols-2 gap-3 max-w-md">
             {(Object.keys(MODEL_META) as DeviceModel[]).map((m) => (
@@ -239,7 +239,7 @@ export function RecoveryWizard({ onClose }: { onClose: () => void }) {
               <p className="text-fg flex items-start gap-2">
                 <CircleAlert size={16} className="text-danger shrink-0 mt-0.5" aria-hidden />
                 The repair stopped before it finished. The keypad still has its rescue console, so
-                nothing is lost — try again.
+                nothing is lost. Try again.
               </p>
               <p className="text-danger text-xs whitespace-pre-wrap font-mono">{error}</p>
               <div className="flex gap-2">
@@ -267,7 +267,7 @@ export function RecoveryWizard({ onClose }: { onClose: () => void }) {
             <>
               <p className="text-fg flex items-start gap-2">
                 <CircleCheck size={16} className="text-success shrink-0 mt-0.5" aria-hidden />
-                Repaired — the keypad started its firmware and reconnected on its own.
+                Repaired. The keypad started its firmware and reconnected on its own.
               </p>
               <div>
                 <Button variant="primary" onClick={onClose}>
@@ -279,7 +279,7 @@ export function RecoveryWizard({ onClose }: { onClose: () => void }) {
             <>
               <p className="text-fg flex items-start gap-2">
                 <CircleAlert size={16} className="text-danger shrink-0 mt-0.5" aria-hidden />
-                The files landed, but the firmware still won&apos;t start — so the fault isn&apos;t
+                The files landed, but the firmware still won&apos;t start, so the fault isn&apos;t
                 the mixed-up files this repair fixed.
               </p>
               {hello?.err && (
@@ -319,9 +319,9 @@ function FileList({ diag }: { diag: FirmwareDiagnosis }) {
   // it: read as a diagnosis ("doesn't belong"), the leftover list looks like
   // a list of things about to be installed — the opposite of the truth.
   const rows: [string, string[]][] = [
-    ["Will be replaced — older version", diag.stale],
-    ["Will be installed — missing", diag.missing],
-    ["Will be deleted — not part of this firmware", diag.extra],
+    ["Will be replaced · older version", diag.stale],
+    ["Will be installed · missing", diag.missing],
+    ["Will be deleted · not part of this firmware", diag.extra],
   ];
   return (
     <div className="flex flex-col gap-2 bg-panel2 border border-line rounded-lg p-3 max-h-56 overflow-auto">

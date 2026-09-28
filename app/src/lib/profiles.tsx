@@ -65,6 +65,7 @@ import {
   compileVariantParts,
   macroFileName,
   obsActionToRequest,
+  parseAssignment,
   parseDeviceMacro,
   profileKeySlot,
   profileMacroFileName,
@@ -77,13 +78,16 @@ import { keysCache } from "./keys-cache";
 import { serializeForDevice } from "./recorder-model";
 import { crc32Text, utf8Length } from "./crc32";
 import { META_PROTO, metaStem, readMetaEntries } from "./device-meta";
+import { resolveActiveProfile } from "./profile-match";
+import { staleProfileFiles } from "./profile-files";
+import { parseRemoteStart, remotePlan, sequenceRuns } from "./remote-actions";
 
 /** Perform a computer-side key action (Stream Deck style): open an
  *  app/file/URL, run a shell command, play a sound or call a webhook. HID
  *  can't do these, so they only work while the desktop app is running.
  *  Accepts either an Assignment ({file}, top-level webhook fields) or a
  *  MacroFile ({sound}, nested {webhook}) shape. */
-function runHostAction(a: {
+export function runHostAction(a: {
   kind?: string;
   target?: string;
   command?: string;
@@ -153,13 +157,6 @@ interface ProfilesState {
 
 const Ctx = createContext<ProfilesState | null>(null);
 
-function matches(p: Profile, fg: ForegroundInfo): boolean {
-  if (!p.match.exe) return false;
-  if (p.match.exe.toLowerCase() !== fg.exe.toLowerCase()) return false;
-  if (p.match.title_contains && !fg.title.toLowerCase().includes(p.match.title_contains.toLowerCase()))
-    return false;
-  return true;
-}
 
 export function ProfilesProvider({ children }: { children: ReactNode }) {
   const { port, drive, hello, send, onBtn, onMsg, updating, keysLoading } = useDevice();
@@ -168,6 +165,11 @@ export function ProfilesProvider({ children }: { children: ReactNode }) {
   const helloRef = useRef<Hello | null>(null);
   helloRef.current = hello;
   const [profiles, setProfiles] = useState<Profile[]>([]);
+  // true once the stored set is read: until then `profiles` is an empty
+  // placeholder, and the connect-time sweep must not treat it as "no profiles"
+  const [profilesLoaded, setProfilesLoaded] = useState(false);
+  const profilesRef = useRef<Profile[]>([]);
+  profilesRef.current = profiles;
   const [foreground, setForeground] = useState<ForegroundInfo>({ exe: "", title: "" });
   const [enabled, setEnabledState] = useState(true);
   // tray "Pause key actions": suspends profiles AND global host actions
@@ -194,6 +196,7 @@ export function ProfilesProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     void (async () => {
       setProfiles(((await store.get<Profile[]>("profiles")) ?? []) as Profile[]);
+      setProfilesLoaded(true);
       setEnabledState((await store.get<boolean>("enabled")) ?? true);
       await invoke("foreground_start");
     })();
@@ -207,8 +210,14 @@ export function ProfilesProvider({ children }: { children: ReactNode }) {
 
   // resolve the active profile whenever anything relevant changes
   useEffect(() => {
-    const active =
-      enabled && !paused && port ? profiles.find((p) => matches(p, foreground)) ?? null : null;
+    // MKYADA itself in front keeps the last profile (profile-match.ts)
+    const active = resolveActiveProfile(activeRef.current, {
+      enabled,
+      paused,
+      connected: !!port,
+      profiles,
+      fg: foreground,
+    });
     activeRef.current = active;
     setActiveProfile(active);
   }, [enabled, paused, port, profiles, foreground]);
@@ -269,7 +278,6 @@ export function ProfilesProvider({ children }: { children: ReactNode }) {
   // Pure-HID sequences are one macro file the keypad plays by itself. Mixed
   // ones run here: HID steps as pre-compiled part files played over serial
   // (still hardware HID, awaiting play_done), host steps performed directly.
-  const seqActive = useRef(new Map<string, { cancelled: boolean }>());
   const playDoneWaiters = useRef<(() => void)[]>([]);
 
   useEffect(
@@ -297,15 +305,16 @@ export function ProfilesProvider({ children }: { children: ReactNode }) {
 
   const runSequence = useCallback(
     async (keyId: string, steps: SequenceStep[], mainFile: string, speed = 1) => {
-      const running = seqActive.current.get(keyId);
+      // Shared with remote presses and every Stop (remote-actions.ts).
+      const running = sequenceRuns.get(keyId);
       if (running) {
         // pressing the key again mid-sequence stops it (on_repress semantics)
         running.cancelled = true;
+        sequenceRuns.end(keyId, running);
         void send({ t: "stop" });
         return;
       }
-      const state = { cancelled: false };
-      seqActive.current.set(keyId, state);
+      const state = sequenceRuns.start(keyId);
       try {
         for (let i = 0; i < steps.length && !state.cancelled; i++) {
           const step = steps[i];
@@ -328,7 +337,7 @@ export function ProfilesProvider({ children }: { children: ReactNode }) {
           }
         }
       } finally {
-        seqActive.current.delete(keyId);
+        sequenceRuns.end(keyId, state);
       }
     },
     [send, waitPlayDone],
@@ -477,6 +486,42 @@ export function ProfilesProvider({ children }: { children: ReactNode }) {
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [onMsg, readMacro],
+  );
+
+  // Remote presses (proto v17 `press` — the Control page, Keys "Run on
+  // keypad", the playback bar's "Run again") stream no btn edge, so the
+  // computer-side half runs off the keypad's play_start instead, once, for
+  // every entry point (remote-actions.ts). Keys with variants are skipped
+  // there — key_action above already covers them. Not gated on test mode: a
+  // remote press is an explicit request, even from the Keys page.
+  useEffect(
+    () =>
+      onMsg((m) => {
+        const r = parseRemoteStart(m);
+        if (!r || pausedRef.current) return;
+        void (async () => {
+          let a: Assignment | null | undefined;
+          if (r.profileId) {
+            // the keypad played a profile file: that profile's assignment
+            a = profilesRef.current.find((p) => p.id === r.profileId)?.keys[String(r.key)];
+          } else {
+            const layerIndex = Math.max(0, LAYER_NAMES.indexOf(r.layer));
+            const snap = driveRef.current ? keysCache.get(driveRef.current.path) : undefined;
+            a = snap?.assignments.get(`${r.key}:${layerIndex}`);
+            // a partial snapshot may simply not hold this key yet
+            if (!a && !snap?.complete) {
+              const mf = await readMacro(r.file);
+              a = mf ? parseAssignment(mf) : null;
+            }
+          }
+          const plan = remotePlan(a);
+          if (plan.type === "host") runHostAction(plan.a);
+          else if (plan.type === "sequence") {
+            void runSequence(`${r.key}:${r.layer}`, plan.steps, r.file, plan.speed);
+          }
+        })();
+      }),
+    [onMsg, readMacro, runSequence],
   );
 
   // Sound keys play on RELEASE: a quick tap plays, holding the key past
@@ -734,16 +779,16 @@ export function ProfilesProvider({ children }: { children: ReactNode }) {
     void store.set("enabled", on).then(() => store.save());
   }, []);
 
-  /** Persist profiles and sync their compiled macros to the device drive.
+  /** Sync the profiles' compiled macros to the device drive.
    * On proto v14 boards this DIFFS against the device's meta.json manifest
    * (per-file crc+size) first: a file whose bytes are already on the keypad
    * is skipped, so the connect-time re-sync of an unchanged profile set
-   * writes nothing at all instead of re-uploading every macro. */
-  const saveProfiles = useCallback(
+   * writes nothing at all instead of re-uploading every macro. It also
+   * deletes the `p_<id>_*` files of profiles that no longer exist (deleted
+   * here, or while the keypad was unplugged); drive_delete keeps meta.json
+   * in step on the device. */
+  const syncProfileFiles = useCallback(
     async (next: Profile[]) => {
-      setProfiles(next);
-      await store.set("profiles", next);
-      await store.save();
       if (!drive) return;
       // ONE listing for the whole sync — this used to run per key, and at
       // connect time those repeated full-directory listings saturated the
@@ -751,7 +796,7 @@ export function ProfilesProvider({ children }: { children: ReactNode }) {
       const existing = await ipc.driveList(drive.path, "macros").catch(() => [] as string[]);
       const onDevice = new Set(existing);
       const metaEntries =
-        (hello?.proto ?? 0) >= META_PROTO ? await readMetaEntries(drive.path) : {};
+        next.length && (hello?.proto ?? 0) >= META_PROTO ? await readMetaEntries(drive.path) : {};
       const alreadyThere = (file: string, content: string) => {
         const e = metaEntries[metaStem(file) ?? ""];
         return (
@@ -793,11 +838,31 @@ export function ProfilesProvider({ children }: { children: ReactNode }) {
           }
         }
       }
-      if (skipped) {
-        void invoke("debug_log", { msg: `profiles: sync skipped ${skipped} unchanged files` }).catch(() => {});
+      const stale = staleProfileFiles(
+        existing,
+        next.map((p) => p.id),
+      );
+      for (const f of stale) {
+        await ipc.driveDelete(drive.path, `macros/${f}`).catch(() => {});
+      }
+      if (skipped || stale.length) {
+        void invoke("debug_log", {
+          msg: `profiles: sync skipped ${skipped} unchanged files, removed ${stale.length} stale`,
+        }).catch(() => {});
       }
     },
     [drive, hello],
+  );
+
+  /** Persist profiles, then sync their files to the keypad if it's here. */
+  const saveProfiles = useCallback(
+    async (next: Profile[]) => {
+      setProfiles(next);
+      await store.set("profiles", next);
+      await store.save();
+      await syncProfileFiles(next);
+    },
+    [syncProfileFiles],
   );
 
   // Re-sync every profile's macro files to the device when its drive appears.
@@ -805,22 +870,24 @@ export function ProfilesProvider({ children }: { children: ReactNode }) {
   // the keypad was disconnected — or set up on another machine, or predating a
   // firmware reflash — leaves the device without the override files, and it
   // silently plays the standalone macro for that key instead (issue #23).
-  // saveProfiles rewrites the whole set idempotently.
+  // syncProfileFiles rewrites the whole set idempotently.
   const syncedDrive = useRef<string | null>(null);
   useEffect(() => {
     if (!drive) {
       syncedDrive.current = null; // reconnect should re-sync
       return;
     }
-    if (!hello || updating || profiles.length === 0) return; // wait for proto
+    // wait for proto and for the stored set: with no profiles left this still
+    // runs once, to sweep files of profiles deleted while unplugged
+    if (!hello || updating || !profilesLoaded) return;
     // Never compete with the connect-time keys load: this sync writes + lists
     // heavily, and running it concurrently used to saturate the serial link
     // (device OOM, timed-out reads, keys showing blank). Wait our turn.
     if (keysLoading) return;
     if (syncedDrive.current === drive.path) return;
     syncedDrive.current = drive.path;
-    void saveProfiles(profiles);
-  }, [drive, hello, profiles, updating, keysLoading, saveProfiles]);
+    void syncProfileFiles(profiles);
+  }, [drive, hello, profiles, profilesLoaded, updating, keysLoading, syncProfileFiles]);
 
   return (
     <Ctx.Provider value={{ profiles, foreground, activeProfile, enabled, setEnabled, saveProfiles }}>

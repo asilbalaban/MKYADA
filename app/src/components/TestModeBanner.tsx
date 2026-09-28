@@ -1,4 +1,5 @@
 import { Info } from "lucide-react";
+import { Alert, Tooltip } from "./ui";
 
 /**
  * App-side "you're in test mode" notice — the on-screen counterpart to the
@@ -8,16 +9,35 @@ import { Info } from "lucide-react";
  */
 export function TestModeBanner({ what = "key" }: { what?: "key" | "wiring" }) {
   return (
-    <div
-      role="status"
-      className="flex items-start gap-2 rounded-lg border border-info-line bg-info-bg px-3 py-2 text-sm text-info"
-    >
-      <Info size={16} className="mt-0.5 shrink-0" aria-hidden />
-      <span>
-        This is a {what === "wiring" ? "wiring" : "key"} <b>test</b> screen —
-        pressing a key here won't run its macro. Switch to another tab, or click
-        another window, and the keypad runs macros normally again.
-      </span>
-    </div>
+    <Alert tone="info">
+      This is a {what === "wiring" ? "wiring" : "key"} <b className="font-strong text-fg">test</b>{" "}
+      screen · pressing a key here won't run its macro. Switch to another tab, or click another
+      window, and the keypad runs macros normally again.
+    </Alert>
+  );
+}
+
+/**
+ * Compact form of the same notice for a card header (Keys page): one quiet
+ * line with the details in a tooltip, instead of a full-width Alert on every
+ * visit.
+ */
+export function TestModeNotice() {
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <span>Test mode · macros don't run here</span>
+      <Tooltip
+        side="bottom"
+        content="While this page is focused, pressing a key on the keypad only lights it up here. Switch to another page or window and the keypad runs its macros again."
+      >
+        <span
+          tabIndex={0}
+          aria-label="About test mode"
+          className="inline-flex cursor-help rounded-full text-fg-faint hover:text-fg"
+        >
+          <Info size={13} aria-hidden />
+        </span>
+      </Tooltip>
+    </span>
   );
 }

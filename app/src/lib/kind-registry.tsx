@@ -97,7 +97,7 @@ const KINDS: KindMeta[] = [
     wheel: {
       mtype: "speed",
       title: "SPEED",
-      summary: "Turn to set the playback speed (0.1×–10×) — the step delays scale with it; press to save.",
+      summary: "Turn to set the playback speed (0.1×–10×). The step delays scale with it; press to save.",
       standaloneFallback: "Steps that need the app are skipped when it's closed; the rest still run.",
     },
   },
@@ -139,7 +139,7 @@ const KINDS: KindMeta[] = [
       title: "SOUND",
       summary:
         "Press to play the sound. With several sounds on the key, the wheel lists them: tap to play one, hold to make it the default.",
-      standaloneFallback: "Needs the MKYADA app — the wheel shows a short reminder.",
+      standaloneFallback: "Needs the MKYADA app · the wheel shows a short reminder.",
     },
   },
   {
@@ -151,7 +151,7 @@ const KINDS: KindMeta[] = [
     wheel: {
       mtype: "slider",
       title: "VOLUME",
-      summary: "Pressing the key opens a volume slider — turn to set the system volume by percent.",
+      summary: "Pressing the key opens a volume slider. Turn to set the system volume by percent.",
       standaloneFallback: "App closed: a relative volume knob (turn up/down, no percent).",
     },
   },
@@ -164,8 +164,8 @@ const KINDS: KindMeta[] = [
     wheel: {
       mtype: "slider",
       title: "MIC LEVEL",
-      summary: "Pressing the key opens a mic input-level slider — turn to set the recording gain.",
-      standaloneFallback: "Needs the MKYADA app — mic gain has no standalone control.",
+      summary: "Pressing the key opens a mic input-level slider. Turn to set the recording gain.",
+      standaloneFallback: "Needs the MKYADA app · mic gain has no standalone control.",
     },
   },
   {
@@ -178,7 +178,7 @@ const KINDS: KindMeta[] = [
       mtype: "picker",
       title: "MIC",
       summary: "Turn to browse mute / unmute / toggle; tap to do it now, hold to reassign the key.",
-      standaloneFallback: "Needs the MKYADA app — the wheel shows a short reminder.",
+      standaloneFallback: "Needs the MKYADA app · the wheel shows a short reminder.",
     },
   },
   {
@@ -232,7 +232,7 @@ const KINDS: KindMeta[] = [
       title: "OPEN",
       summary:
         "Press to open the target on the computer. With several targets on the key, the wheel lists them: tap to open one, hold to make it the default.",
-      standaloneFallback: "Needs the MKYADA app — the wheel shows a short reminder.",
+      standaloneFallback: "Needs the MKYADA app · the wheel shows a short reminder.",
     },
   },
   {
@@ -246,7 +246,7 @@ const KINDS: KindMeta[] = [
       title: "COMMAND",
       summary:
         "Press to run the command. With several commands on the key, the wheel lists them: tap to run one, hold to make it the default.",
-      standaloneFallback: "Needs the MKYADA app — the wheel shows a short reminder.",
+      standaloneFallback: "Needs the MKYADA app · the wheel shows a short reminder.",
     },
   },
   {
@@ -260,7 +260,7 @@ const KINDS: KindMeta[] = [
       title: "WEBHOOK",
       summary:
         "Press to send the request. With alternative requests on the key, the wheel lists them: tap to send one, hold to make it the default.",
-      standaloneFallback: "Needs the MKYADA app — the wheel shows a short reminder.",
+      standaloneFallback: "Needs the MKYADA app · the wheel shows a short reminder.",
     },
   },
   // ── Streaming ────────────────────────────────────────────────────────────
@@ -275,7 +275,7 @@ const KINDS: KindMeta[] = [
       title: "OBS",
       summary:
         "Depends on the OBS action: pick a scene to reassign the key, or see live REC/LIVE status and toggle it.",
-      standaloneFallback: "Needs the MKYADA app connected to OBS — the wheel shows a short reminder.",
+      standaloneFallback: "Needs the MKYADA app connected to OBS · the wheel shows a short reminder.",
     },
   },
   {
@@ -288,7 +288,7 @@ const KINDS: KindMeta[] = [
       mtype: "card",
       title: "OBS",
       summary:
-        "Pressing the key opens a live OBS dashboard on the keypad screen: REC/LIVE status, timer, scene, mic meter and health — the six keys become your OBS shortcuts while it's open.",
+        "Pressing the key opens a live OBS dashboard on the keypad screen: REC/LIVE status, timer, scene, mic meter and health. The six keys become your OBS shortcuts while it's open.",
       standaloneFallback: "Needs the MKYADA app connected to OBS, and a screen model.",
     },
   },
@@ -303,7 +303,7 @@ const KINDS: KindMeta[] = [
       mtype: "card",
       title: "DIAL",
       summary:
-        "Pressing the key opens the Dial on the keypad screen: up to six encoder tools (jog, timeline zoom, scroll, color-wheel drag, …). The six keys pick a tool, the wheel drives it, and pressing the wheel runs the tool's own button action. Pure HID — works with the app closed.",
+        "Pressing the key opens the Dial on the keypad screen: up to six encoder tools (jog, timeline zoom, scroll, color-wheel drag, …). The six keys pick a tool, the wheel drives it, and pressing the wheel runs the tool's own button action. Pure HID, works with the app closed.",
     },
   },
   {
@@ -326,7 +326,7 @@ const KINDS: KindMeta[] = [
     icon: KIND_ICON.none,
     category: "off",
     host: false,
-    wheel: { mtype: "none", title: "", summary: "No action assigned — the wheel shows a short reminder." },
+    wheel: { mtype: "none", title: "", summary: "No action assigned · the wheel shows a short reminder." },
   },
   {
     id: "nothing",
@@ -334,7 +334,7 @@ const KINDS: KindMeta[] = [
     icon: KIND_ICON.nothing,
     category: "off",
     host: false,
-    wheel: { mtype: "none", title: "", summary: "Turned off — the wheel does nothing here." },
+    wheel: { mtype: "none", title: "", summary: "Turned off · the wheel does nothing here." },
   },
 ];
 

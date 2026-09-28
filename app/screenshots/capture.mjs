@@ -22,23 +22,28 @@ const APP_DIR = resolve(HERE, "..");
 const REPO = resolve(APP_DIR, "..");
 const SCREENS_DIR = resolve(REPO, "docs/images/screens");
 const OLED_DIR = resolve(REPO, "docs/images/oled");
-const PORT = 1420;
+// 1420 is the app's own dev server (tauri.conf.json devUrl). Set
+// SCREENSHOT_PORT to run the harness next to a dev server that's already up.
+const PORT = Number(process.env.SCREENSHOT_PORT) || 1420;
 const BASE = `http://localhost:${PORT}`;
 
 const MODELS = ["core6", "vision6"];
 // nav label -> extra settle for pages that stream data in
 const PAGES = [
-  { id: "devices", label: "Devices", settle: 500 },
-  // Setup left the sidebar (issue #42); it opens from a button on Devices, and
-  // like Settings it's tabbed — every tab gets its own shot.
-  { id: "setup", label: "Setup", settle: 600, viaDevices: true, tabs: true },
+  // Control is the home page the app opens on: every key, runnable remotely.
+  { id: "control", label: "Control", settle: 900 },
+  // Devices holds the keypad's setup too (Setup · Test keys · Fix wiring ·
+  // Troubleshoot · Other keypads); like Settings it's tabbed, so every tab
+  // gets its own shot.
+  { id: "devices", label: "Devices", settle: 600, tabs: true },
   { id: "keys", label: "Keys", settle: 1400, selectKey: true },
   // The Recorder opens on an empty "record or import a macro to begin" state,
   // which is a poor advertisement for the page people are most curious about.
   // Hand it the fixture's recorded macro the way a user would — from the Keys
   // page's "Edit in Recorder" — so the shot shows the editor with events in it.
   { id: "recorder", label: "Recorder", settle: 700, viaHandoff: true },
-  { id: "profiles", label: "Profiles", settle: 500 },
+  // Open a profile so the shot shows its key grid, not the empty picker.
+  { id: "profiles", label: "Profiles", settle: 500, selectProfile: /OBS Studio/ },
   // Settings is tabbed; every tab gets its own shot so the docs can walk the
   // whole page. The first one keeps the plain `-settings` name that README,
   // docs/ and the landing page already link to.
@@ -128,12 +133,6 @@ async function main() {
             await page.getByRole("button", { name: RECORDED_KEY }).first().click();
             await page.waitForTimeout(300);
             await page.getByRole("button", { name: /Edit in Recorder/i }).click();
-          } else if (p.viaDevices) {
-            await page
-              .locator('nav[aria-label="Main"] button', { hasText: "Devices" })
-              .click();
-            await page.waitForTimeout(400);
-            await page.getByRole("button", { name: /^Setup$/ }).first().click();
           } else {
             await page
               .locator('nav[aria-label="Main"] button', { hasText: p.label })
@@ -143,11 +142,15 @@ async function main() {
           if (p.selectKey) {
             // open the assignment editor on key 1 for the richest single shot
             await page
-              .getByRole("button", { name: /^Key 1 —/ })
+              .getByRole("button", { name: /^Key 1 ·/ })
               .first()
               .click()
               .catch(() => {});
             await page.waitForTimeout(400);
+          }
+          if (p.selectProfile) {
+            await page.getByRole("button", { name: p.selectProfile }).first().click();
+            await page.waitForTimeout(700);
           }
           if (p.tabs) {
             const tabs = page.locator('[role="tab"]');
@@ -172,10 +175,30 @@ async function main() {
         }
       }
 
-      // best-effort: the "set up a new board" provisioning wizard
+      // Control mid-loop: `?playing=6` boots the mock with key 6 (the recorded macro) looping, so
+      // the tile shows Stop and the global PlaybackBar is up.
+      try {
+        const playing = await context.newPage();
+        await playing.goto(`${BASE}/screenshots/entry.html?model=${model}&playing=6`, {
+          waitUntil: "networkidle",
+        });
+        await playing.getByText("connected", { exact: false }).first().waitFor({ timeout: 20000 });
+        await playing.locator('nav[aria-label="Main"] button', { hasText: "Control" }).click();
+        await playing.waitForTimeout(1200);
+        await playing.screenshot({ path: resolve(SCREENS_DIR, `${model}-control-playing.png`) });
+        console.log(`  ✓ ${model}-control-playing.png`);
+        await playing.close();
+      } catch (e) {
+        console.warn(`  ✗ ${model}-control-playing: ${e.message}`);
+      }
+
+      // best-effort: the "set up a new board" provisioning wizard, which
+      // lives on the Devices page's Other keypads tab
       try {
         await page.locator('nav[aria-label="Main"] button', { hasText: "Devices" }).click();
         await page.waitForTimeout(300);
+        await page.getByRole("tab", { name: /Other keypads/ }).click();
+        await page.waitForTimeout(200);
         await page.getByRole("button", { name: /set up a new board/i }).first().click();
         await page.waitForTimeout(600);
         await page.screenshot({ path: resolve(SCREENS_DIR, `${model}-wizard.png`) });

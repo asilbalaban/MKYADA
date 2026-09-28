@@ -2,8 +2,11 @@
 
 Every key — and on the Vision 6, every encoder/button slot — can carry one of
 these actions. Assign them in the app under **Keys** (or per-app under
-**Profiles**). Each key also has **tap / double-press / long-press** variants
-and timing options (see [Key logic](#key-logic) below).
+**Profiles**). Each key also has **tap / double-press / long-press** variants,
+on the key editor's **Press**, **Double press** and **Long press** tabs, and
+timing options (see [Key logic](#key-logic) below). **Run on keypad** in the
+editor, or **Run** on the **Control** page, presses the key on the keypad from
+the app to try it.
 
 Two families:
 
@@ -93,7 +96,7 @@ volume on its own.
 
 Host actions (OBS, mic, webhook…) show an **"app required"** reminder when the
 MKYADA app isn't connected. The app also shows a live mini-OLED preview of this
-menu in the key editor and a full reference under **Settings → Keypad → Wheel menu**, and
+menu on the key editor's **Wheel menu** tab and a full reference under **Settings → Keypad → Wheel menu**, and
 pushes the live system volume so a volume key shows its **%** right on the grid.
 
 ## Key logic

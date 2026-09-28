@@ -2,6 +2,7 @@
 // in Knight Online, and the device's own config everywhere else.
 
 import { useState } from "react";
+import { AppWindow, Crosshair, MousePointerClick, Plus, Trash2 } from "lucide-react";
 import { useDevice } from "../lib/device";
 import { useProfiles } from "../lib/profiles";
 import { ipc } from "../lib/ipc";
@@ -9,29 +10,33 @@ import type { Assignment, ModuleSlot, Profile } from "../lib/types";
 import { MODULE_SLOTS, MODULE_SLOT_LABELS, deviceModel } from "../lib/types";
 import {
   defaultConfig,
-  describeAssignment,
+  describeSlotAssignment,
   isSlotBuiltin,
   macroFileName,
   parseAssignment,
   parseDeviceMacro,
   slotEditValue,
   SLOT_BUILTIN_ACTION,
+  SLOT_BUILTINS,
 } from "../lib/macro-model";
 import { AssignmentPanel } from "../components/AssignmentPanel";
-import { Crosshair } from "lucide-react";
-import { Badge, Button, Card, Field, Input } from "../components/ui";
+import { Keypad } from "../components/Keypad";
+import { useConfirm } from "../components/dialog";
+import {
+  Alert,
+  Badge,
+  Button,
+  Card,
+  EmptyState,
+  Field,
+  IconButton,
+  Input,
+  SettingRow,
+  Switch,
+  Tooltip,
+} from "../components/ui";
 
-/** What each module control does by default (grid context) — shown when a
- * profile doesn't override it, mirroring the Keys page. Module controls keep
- * their built-in behavior under a profile (the device falls back for slots),
- * so a left-alone wheel/button navigates and speed-edits exactly as standalone. */
-const SLOT_BUILTINS: Record<ModuleSlot, string> = {
-  "enc-cw": "moves the selection right",
-  "enc-ccw": "moves the selection left",
-  "btn-back": "opens the layer screen",
-  "btn-confirm": "opens the selected key's speed editor",
-  "btn-psh": "speed editor / select mode",
-};
+const FIELD_LABEL = "text-label font-medium tracking-label text-fg [font-stretch:90%]";
 
 /** Snapshot the device's standalone numbered-key assignments so a new profile
  * starts as a full copy of the keypad's own setup (issue #23). The profile is
@@ -63,6 +68,7 @@ async function copyGlobalKeys(drivePath: string): Promise<Record<string, Assignm
 export function ProfilesPage() {
   const { hello, drive } = useDevice();
   const { profiles, foreground, activeProfile, enabled, setEnabled, saveProfiles } = useProfiles();
+  const confirm = useConfirm();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [editKey, setEditKey] = useState<number | ModuleSlot | null>(null);
   const [draft, setDraft] = useState<Assignment | null>(null);
@@ -71,10 +77,17 @@ export function ProfilesPage() {
   const selected = profiles.find((p) => p.id === selectedId) ?? null;
   const keyCount = hello?.key_count ?? 6;
   const isVision = deviceModel(hello) === "vision6";
+  // core6 has no wheel or nav buttons: never offer module controls there,
+  // even for a profile that carries slot overrides from a Vision 6
+  const isCore = !!hello && deviceModel(hello) === "core6";
   // module controls (wheel + BACK/CONFIRM) are a Vision thing; keep them
-  // visible for profiles that already carry slot overrides even when no
-  // (or another) device is connected
-  const showModules = isVision || MODULE_SLOTS.some((s) => selected?.keys[s]);
+  // visible for profiles that already carry slot overrides when no device is
+  // connected
+  const showModules =
+    isVision || (!isCore && MODULE_SLOTS.some((s) => selected?.keys[s]));
+  // The Keypad grid only needs the shape: key count and the layer key (which
+  // still switches layers under a profile, so it isn't assignable here).
+  const padConfig = { ...defaultConfig(), key_count: keyCount, layer_key: hello?.layer_key ?? null };
 
   async function addProfile() {
     const id = `p${Date.now().toString(36)}`;
@@ -90,6 +103,8 @@ export function ProfilesPage() {
     };
     await saveProfiles([...profiles, p]);
     setSelectedId(id);
+    setEditKey(null);
+    setDraft(null);
     setAdding(false);
   }
 
@@ -98,10 +113,26 @@ export function ProfilesPage() {
     void saveProfiles(profiles.map((p) => (p.id === selected.id ? { ...p, ...patch } : p)));
   }
 
-  function removeSelected() {
+  async function removeSelected() {
     if (!selected) return;
+    const ok = await confirm({
+      title: `Delete “${selected.name}”?`,
+      message: drive
+        ? "The keypad stops switching to it for this app and its key files are removed from the keypad. Your global keys stay as they are."
+        : "The keypad stops switching to it for this app. Its key files are removed from the keypad the next time it connects. Your global keys stay as they are.",
+      confirmLabel: "Delete profile",
+      danger: true,
+    });
+    if (!ok) return;
     void saveProfiles(profiles.filter((p) => p.id !== selected.id));
     setSelectedId(null);
+    setEditKey(null);
+    setDraft(null);
+  }
+
+  function pickKey(k: number | ModuleSlot) {
+    setEditKey(k);
+    setDraft(null);
   }
 
   function saveKeyAssignment() {
@@ -122,90 +153,192 @@ export function ProfilesPage() {
     setDraft(null);
   }
 
+  // What the keypad grid shows: this profile's own keys (a cleared key is empty).
+  const padAssignments = new Map<number, Assignment>();
+  if (selected) {
+    for (let k = 1; k <= keyCount; k++) {
+      const a = selected.keys[String(k)];
+      if (a && a.kind !== "none") padAssignments.set(k, a);
+    }
+  }
+
   return (
     <div className="flex flex-col gap-4">
-      <Card title="Profile engine">
-        <div className="flex items-center gap-3 flex-wrap text-sm">
-          <Button variant={enabled ? "primary" : "default"} onClick={() => setEnabled(!enabled)}>
-            {enabled ? "Enabled" : "Disabled"}
-          </Button>
-          <span className="text-fg-muted">
-            Foreground: <span className="text-fg font-mono">{foreground.exe || "—"}</span>
-          </span>
-          {activeProfile ? (
-            <Badge tone="green">active: {activeProfile.name}</Badge>
-          ) : (
-            <Badge>no match — device runs standalone config</Badge>
-          )}
-        </div>
-        <p className="text-xs text-fg-faint mt-2">
-          When the foreground app matches a profile, the keypad runs that profile's config —
-          natively, on the device, so the wheel, nav buttons and speed editor all keep working.
-          A new profile is a full copy of the keypad's own key setup; a key you clear does nothing
-          for this app (it doesn't fall back to the global assignment).
-        </p>
+      <Card>
+        <SettingRow
+          icon={AppWindow}
+          title="Switch keys per app"
+          description={
+            <>
+              In front ·{" "}
+              <span className="font-mono text-fg-muted">{foreground.exe || "none"}</span>
+            </>
+          }
+          control={
+            <>
+              {enabled &&
+                (activeProfile ? (
+                  <Badge tone="green" dot>
+                    Active · {activeProfile.name}
+                  </Badge>
+                ) : (
+                  <Badge>No match · global keys</Badge>
+                ))}
+              <Switch checked={enabled} onChange={setEnabled} aria-label="Switch keys per app" />
+            </>
+          }
+        />
       </Card>
 
-      <div className="grid grid-cols-[240px_1fr] gap-4 items-start">
-        <Card
-          title="Profiles"
-          actions={
-            <Button onClick={() => void addProfile()} loading={adding}>
-              + Add
-            </Button>
-          }
-        >
-          {profiles.length === 0 ? (
-            <p className="text-fg-faint text-xs">
-              No profiles. Focus the target app, then click “+ Add”. A new profile copies the
-              keypad's own key setup — clear the keys this app shouldn't have, change the rest.
-            </p>
-          ) : (
-            <ul className="flex flex-col gap-1">
-              {profiles.map((p) => (
-                <li key={p.id}>
-                  <button
-                    onClick={() => {
-                      setSelectedId(p.id);
-                      setEditKey(null);
-                      setDraft(null);
-                    }}
-                    className={`w-full text-left px-2 py-1.5 rounded text-sm flex items-center justify-between
-                      ${p.id === selectedId ? "bg-panel2 text-accent" : "text-fg hover:bg-panel2"}`}
-                  >
-                    <span>{p.name}</span>
-                    {activeProfile?.id === p.id && <span className="text-success text-xs">●</span>}
-                  </button>
-                </li>
-              ))}
-            </ul>
+      <div className="grid grid-cols-[360px_minmax(0,1fr)] 2xl:grid-cols-[420px_minmax(0,1fr)] gap-4 items-start">
+        <div className="flex flex-col gap-4">
+          <Card
+            title="Profiles"
+            actions={
+              <Tooltip side="bottom" content="New profile for the app in front · starts as a copy of your keys">
+                <Button size="sm" onClick={() => void addProfile()} loading={adding}>
+                  <Plus size={14} aria-hidden /> Add
+                </Button>
+              </Tooltip>
+            }
+            bodyClassName={profiles.length ? "p-2" : undefined}
+          >
+            {profiles.length === 0 ? (
+              <p className="text-sm text-fg-faint">
+                No profiles yet. Bring the app to the front, then Add.
+              </p>
+            ) : (
+              <ul className="flex flex-col gap-0.5">
+                {profiles.map((p) => {
+                  const on = p.id === selectedId;
+                  return (
+                    <li key={p.id}>
+                      <button
+                        type="button"
+                        aria-pressed={on}
+                        onClick={() => {
+                          setSelectedId(p.id);
+                          setEditKey(null);
+                          setDraft(null);
+                        }}
+                        className={`flex w-full items-center gap-3 rounded-control px-3 py-2 text-left transition-colors duration-[120ms] ease-standard
+                          ${on ? "bg-selected" : "hover:bg-hover"}`}
+                      >
+                        <span className="flex min-w-0 flex-1 flex-col">
+                          <span className={`truncate text-sm ${on ? "font-strong text-accent-ink" : "text-fg"}`}>
+                            {p.name}
+                          </span>
+                          <span className="truncate font-mono text-label text-fg-faint">
+                            {p.match.exe || "no app set"}
+                            {p.match.title_contains ? ` · “${p.match.title_contains}”` : ""}
+                          </span>
+                        </span>
+                        {activeProfile?.id === p.id && (
+                          <Badge tone="green" dot className="shrink-0">
+                            Active
+                          </Badge>
+                        )}
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </Card>
+
+          {selected && (
+            <Card title="Keys" description={`In ${selected.name}`}>
+              <Keypad
+                config={padConfig}
+                selected={typeof editKey === "number" ? editKey : null}
+                onSelect={(n) => {
+                  if (padConfig.layer_key === n) return;
+                  pickKey(n);
+                }}
+                assignments={padAssignments}
+              />
+              {showModules && (
+                <div className="mt-5 flex flex-col gap-2.5 border-t border-line pt-4">
+                  <span className={FIELD_LABEL}>Module controls</span>
+                  <div className="grid grid-cols-2 gap-2">
+                    {MODULE_SLOTS.map((s, i) => {
+                      const a = selected.keys[s];
+                      const custom = a && a.kind !== "none";
+                      const isSel = editKey === s;
+                      const odd = MODULE_SLOTS.length % 2 === 1 && i === MODULE_SLOTS.length - 1;
+                      return (
+                        <button
+                          key={s}
+                          type="button"
+                          aria-pressed={isSel}
+                          onClick={() => pickKey(s)}
+                          className={`hz-control relative min-w-0 rounded-card border px-3 py-2.5 flex flex-col items-start gap-0.5 text-left transition-[background-color,border-color,box-shadow] duration-[120ms] ease-standard
+                            ${odd ? "col-span-2" : ""}
+                            ${isSel ? "border-accent bg-selected shadow-ring" : "border-line-strong bg-raised hover:border-stone-350"}`}
+                        >
+                          <span className="text-[13px] font-strong text-fg">{MODULE_SLOT_LABELS[s]}</span>
+                          <span className="text-label text-fg-muted leading-tight line-clamp-2">
+                            {custom ? (
+                              describeSlotAssignment(a)
+                            ) : (
+                              <span className="text-fg-faint">Built-in · {SLOT_BUILTINS.grid[s]}</span>
+                            )}
+                          </span>
+                          {custom && (
+                            <span
+                              aria-hidden
+                              title="Customized"
+                              className="absolute top-2 right-2 size-1.5 rounded-full bg-accent"
+                            />
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+              <Alert tone="info" className="mt-4">
+                A profile is a full copy of your keys. A cleared key does nothing in this app · it
+                doesn't fall back to the global key.
+                {showModules && " Module controls left on Built-in keep their normal behavior."}
+              </Alert>
+            </Card>
           )}
-        </Card>
+        </div>
 
         {selected ? (
-          <Card
-            title={`Profile: ${selected.name}`}
-            actions={<Button variant="danger" onClick={removeSelected}>Delete</Button>}
-          >
-            <div className="flex flex-col gap-4">
-              <div className="grid grid-cols-3 gap-3">
+          <div className="flex flex-col gap-4">
+            <Card
+              title={selected.name || "Untitled profile"}
+              description="Used while this app is in front"
+              actions={
+                <Button size="sm" variant="danger" onClick={() => void removeSelected()}>
+                  <Trash2 size={14} aria-hidden /> Delete
+                </Button>
+              }
+            >
+              <div className="grid grid-cols-1 gap-3 xl:grid-cols-3">
                 <Field label="Name">
                   <Input value={selected.name} onChange={(e) => updateSelected({ name: e.target.value })} />
                 </Field>
-                <Field label="Executable match">
-                  <div className="flex gap-1">
+                <Field label="App">
+                  <div className="flex gap-1.5">
                     <Input
+                      className="flex-1"
                       value={selected.match.exe}
                       placeholder="KnightOnLine.exe"
                       onChange={(e) => updateSelected({ match: { ...selected.match, exe: e.target.value } })}
                     />
-                    <Button title="Use current foreground app" aria-label="Use current foreground app"
-                      onClick={() => updateSelected({ match: { ...selected.match, exe: foreground.exe } })}>
-                      <Crosshair size={14} aria-hidden />
-                    </Button>
+                    <IconButton
+                      variant="secondary"
+                      label="Use the app in front"
+                      onClick={() => updateSelected({ match: { ...selected.match, exe: foreground.exe } })}
+                    >
+                      <Crosshair size={16} aria-hidden />
+                    </IconButton>
                   </div>
                 </Field>
-                <Field label="Title contains (optional)">
+                <Field label="Window title contains" hint="Optional">
                   <Input
                     value={selected.match.title_contains ?? ""}
                     onChange={(e) =>
@@ -216,105 +349,70 @@ export function ProfilesPage() {
                   />
                 </Field>
               </div>
+            </Card>
 
-              <div className="grid grid-cols-[1fr_1fr] gap-4 items-start">
-                <div className="flex flex-col gap-1">
-                  <p className="text-xs text-fg-faint mb-1">Keys in this profile</p>
-                  {Array.from({ length: keyCount }, (_, i) => i + 1).map((n) => {
-                    const a = selected.keys[String(n)];
-                    return (
-                      <button
-                        key={n}
-                        onClick={() => {
-                          setEditKey(n);
-                          setDraft(null);
-                        }}
-                        className={`flex items-center justify-between px-3 py-2 rounded-md border text-sm
-                          ${editKey === n ? "border-accent bg-panel2" : "border-line bg-panel2 hover:border-fg-faint"}`}
-                      >
-                        <span className="font-semibold text-fg">Key {n}</span>
-                        <span className="text-xs text-fg-muted">
-                          {a && a.kind !== "none" ? describeAssignment(a) : "not assigned"}
-                        </span>
-                      </button>
-                    );
-                  })}
-                  {showModules && (
-                    <>
-                      <p className="text-xs text-fg-faint mt-3 mb-1">
-                        Module controls (screen models)
-                      </p>
-                      {MODULE_SLOTS.map((s) => {
-                        const a = selected.keys[s];
-                        return (
-                          <button
-                            key={s}
-                            onClick={() => {
-                              setEditKey(s);
-                              setDraft(null);
-                            }}
-                            className={`flex items-center justify-between px-3 py-2 rounded-md border text-sm
-                              ${editKey === s ? "border-accent bg-panel2" : "border-line bg-panel2 hover:border-fg-faint"}`}
-                          >
-                            <span className="font-semibold text-fg">{MODULE_SLOT_LABELS[s]}</span>
-                            <span className="text-xs text-fg-muted">
-                              {a && a.kind !== "none"
-                                ? describeAssignment(a)
-                                : `Built-in: ${SLOT_BUILTINS[s]}`}
-                            </span>
-                          </button>
-                        );
-                      })}
-                    </>
-                  )}
-                </div>
-
-                <div>
-                  {editKey === null ? (
-                    <p className="text-fg-faint text-sm">Select a key to override it in this profile.</p>
-                  ) : (
-                    <div className="flex flex-col gap-3">
-                      <p className="text-xs text-fg-faint">
-                        {typeof editKey === "number"
-                          ? `Key ${editKey} — set to “Not assigned”, it does nothing for this app (it does NOT fall back to the global key).`
-                          : `${MODULE_SLOT_LABELS[editKey]} — left on “Built-in” it keeps ${SLOT_BUILTINS[editKey]} while this profile is active; override it e.g. to zoom the wheel in Photoshop.`}
-                      </p>
-                      <AssignmentPanel
-                        value={
-                          draft ??
-                          (typeof editKey !== "number"
-                            ? slotEditValue(selected.keys[String(editKey)], SLOT_BUILTIN_ACTION[editKey])
-                            : selected.keys[String(editKey)] ?? { kind: "none" })
-                        }
-                        onChange={setDraft}
-                        onSave={saveKeyAssignment}
-                        onRevert={() => setDraft(null)}
-                        dirty={draft !== null}
-                        // device-menu nav / on-screen name only exist on a screen model
-                        allowMenu={isVision}
-                        labelOnScreen={isVision}
-                        // module controls keep their built-in action when unset
-                        // (the device runs it natively), like the Keys page
-                        slotMode={typeof editKey !== "number"}
-                        builtinDesc={typeof editKey !== "number" ? SLOT_BUILTINS[editKey] : undefined}
-                        // rotation has no press to double/hold on
-                        allowVariants={typeof editKey === "number" || editKey.startsWith("btn-")}
-                        fwVersion={hello?.fw}
-                        // offer "Go to layer X" only for the layers this device has
-                        layerCount={hello?.layer_count ?? 0}
-                      />
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          </Card>
+            <Card
+              title={
+                editKey === null
+                  ? "Select a key"
+                  : typeof editKey === "number"
+                    ? `Key ${editKey}`
+                    : MODULE_SLOT_LABELS[editKey]
+              }
+              description={
+                editKey !== null && typeof editKey !== "number"
+                  ? `Key grid · Built-in here: ${SLOT_BUILTINS.grid[editKey]}`
+                  : undefined
+              }
+            >
+              {editKey === null ? (
+                <EmptyState
+                  icon={<MousePointerClick size={28} aria-hidden />}
+                  title="Pick a key"
+                  description="Click a key on the left to choose what it does in this app."
+                />
+              ) : (
+                <AssignmentPanel
+                  value={
+                    draft ??
+                    (typeof editKey !== "number"
+                      ? slotEditValue(selected.keys[String(editKey)], SLOT_BUILTIN_ACTION[editKey])
+                      : selected.keys[String(editKey)] ?? { kind: "none" })
+                  }
+                  onChange={setDraft}
+                  onSave={saveKeyAssignment}
+                  onRevert={() => setDraft(null)}
+                  dirty={draft !== null}
+                  // device-menu nav / on-screen name only exist on a screen model
+                  allowMenu={isVision}
+                  labelOnScreen={isVision}
+                  // module controls keep their built-in action when unset
+                  // (the device runs it natively), like the Keys page
+                  slotMode={typeof editKey !== "number"}
+                  builtinDesc={typeof editKey !== "number" ? SLOT_BUILTINS.grid[editKey] : undefined}
+                  // rotation has no press to double/hold on
+                  allowVariants={typeof editKey === "number" || editKey.startsWith("btn-")}
+                  fwVersion={hello?.fw}
+                  // offer "Go to layer X" only for the layers this device has
+                  layerCount={hello?.layer_count ?? 0}
+                />
+              )}
+            </Card>
+          </div>
         ) : (
-          <Card title="Per-app profiles">
-            <p className="text-fg-faint text-sm">
-              Select or add a profile. Example: key 1 types Ctrl+Shift+S in Photoshop but runs
-              your inventory macro in Knight Online.
-            </p>
+          <Card>
+            <EmptyState
+              icon={<AppWindow size={28} aria-hidden />}
+              title={profiles.length ? "Pick a profile" : "Give an app its own keys"}
+              description="Example: key 1 saves in Photoshop but runs your inventory macro in Knight Online."
+              action={
+                profiles.length ? undefined : (
+                  <Button variant="primary" onClick={() => void addProfile()} loading={adding}>
+                    <Plus size={14} aria-hidden /> Add profile
+                  </Button>
+                )
+              }
+            />
           </Card>
         )}
       </div>

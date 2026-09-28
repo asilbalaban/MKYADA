@@ -256,7 +256,7 @@ export function OverlayView() {
         fontSize={14}
         style={{ paintOrder: "stroke", stroke: "rgba(0,0,0,0.85)", strokeWidth: 4 }}
       >
-        MKYADA path overlay — close it from the editor (“Hide overlay”)
+        MKYADA path overlay · close it from the editor (“Hide overlay”)
       </text>
     </svg>
   );

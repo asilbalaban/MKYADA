@@ -1,7 +1,12 @@
 // Designer-drawn icons for every assignable action and its sub-options.
 // Black-on-white monoline PNGs (GPT Image 2, "action-first" family) live in
-// assets/action-icons and are shown inside a small white chip so they read on
-// both light and dark themes without recoloring.
+// assets/action-icons and are shown inside a small raised (white) chip so the
+// PNG's own white ground blends in without recoloring.
+//
+// Every icon is an outline glyph. recorded-macro.png was originally a solid
+// filled disc (the generator took "record" literally), which read as a blank
+// black dot next to its outline siblings; it is now a hand-built record ring
+// plus event lines, drawn at the family's 1024px size and stroke weight.
 
 import type { Assignment, MenuAction, MicMode } from "../lib/types";
 
@@ -18,7 +23,7 @@ for (const [path, url] of Object.entries(RAW)) {
   ICON_URL[name] = url;
 }
 
-/** One action icon inside a white rounded chip. `name` is the SVG basename. */
+/** One action icon inside a raised rounded chip. `name` is the SVG basename. */
 export function ActionIcon({
   name,
   size = 48,
@@ -35,7 +40,7 @@ export function ActionIcon({
   }
   return (
     <span
-      className={`inline-flex shrink-0 items-center justify-center overflow-hidden rounded bg-white ring-1 ring-black/10 ${className}`}
+      className={`inline-flex shrink-0 items-center justify-center overflow-hidden rounded-badge bg-raised ring-1 ring-line-strong ${className}`}
       style={{ width: size, height: size }}
       aria-hidden
     >

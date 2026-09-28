@@ -3,6 +3,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   Circle,
+  CirclePlay,
   Keyboard,
   LayoutGrid,
   LucideIcon,
@@ -15,25 +16,27 @@ import { ProfilesProvider } from "./lib/profiles";
 import { WheelMenuProvider } from "./lib/wheel-menu";
 import { deviceName, displayName, onDevnamesChanged } from "./lib/devnames";
 import { useLayoutVersion } from "./lib/layout";
-import { NavContext, Page } from "./lib/nav";
+import { NavContext, type Navigate, Page } from "./lib/nav";
 import { ipc } from "./lib/ipc";
 import type { UpdateInfo } from "./lib/types";
-import { Badge, Button, Spinner } from "./components/ui";
+import { Alert, Badge, Button, Spinner } from "./components/ui";
 import { ToastProvider } from "./components/toast";
 import { ConfirmProvider } from "./components/dialog";
 import { WriteGateProvider } from "./components/WriteProgress";
 import { PermissionsBanner } from "./components/Permissions";
+import { PlaybackBar } from "./components/PlaybackBar";
 import { DevicesPage } from "./pages/DevicesPage";
-import { SetupPage } from "./pages/SetupPage";
 import { KeysPage } from "./pages/KeysPage";
+import { ControlPage } from "./pages/ControlPage";
 import { RecorderPage } from "./pages/RecorderPage";
 import { ProfilesPage } from "./pages/ProfilesPage";
 import { SettingsPage } from "./pages/SettingsPage";
 
-// Setup is deliberately absent (issue #42): it's a once-per-keypad chore, so it
-// sits behind a button on Devices instead of pushing Keys — the page people
-// actually live in — down the sidebar.
+// Setup has no entry of its own (issue #42): it's a once-per-keypad chore, so it
+// lives in the Devices page's tabs instead of pushing Keys down the sidebar.
 const NAV: { id: Page; label: string; icon: LucideIcon; needsDevice?: boolean }[] = [
+  // Home: run and stop keys without touching the keypad (remote desktop).
+  { id: "control", label: "Control", icon: CirclePlay },
   { id: "devices", label: "Devices", icon: Keyboard },
   { id: "keys", label: "Keys", icon: LayoutGrid, needsDevice: true },
   { id: "recorder", label: "Recorder", icon: Circle },
@@ -42,10 +45,16 @@ const NAV: { id: Page; label: string; icon: LucideIcon; needsDevice?: boolean }[
 ];
 
 function Shell() {
-  const [page, setPage] = useState<Page>("devices");
+  const [page, setPage] = useState<Page>("control");
   // Set by the permissions banner so Settings opens on the Application tab
   // (where the permissions card lives) instead of the default Keypad tab.
   const [settingsTab, setSettingsTab] = useState<{ id: string } | null>(null);
+  // Page switch for the rest of the app; `tab` deep-links into Settings (a
+  // fresh object per request so a repeat jump to the same tab still lands).
+  const navigate: Navigate = (p, opts) => {
+    if (p === "settings" && opts?.tab) setSettingsTab({ id: opts.tab });
+    setPage(p);
+  };
   const [update, setUpdate] = useState<UpdateInfo | null>(null);
   const [nickname, setNickname] = useState("");
   const { hello, port, layer, status, linkWedged, keysLoading, keysProgress } = useDevice();
@@ -74,45 +83,43 @@ function Shell() {
   }, []);
 
   return (
-    <NavContext.Provider value={setPage}>
+    <NavContext.Provider value={navigate}>
       <div className="flex h-screen">
-        <aside className="w-48 shrink-0 border-r border-line bg-panel flex flex-col">
-          <div className="px-4 py-4 border-b border-line flex items-center gap-3">
-            <img src="/mkyada-logo.png" alt="MKYADA" className="w-14 h-14 rounded-xl shrink-0" />
-            <p className="text-xs text-fg-muted leading-snug font-medium">
-              Macro Keypad
-              <br />
-              You Always
-              <br />
-              Dream About
-            </p>
+        {/* Hezk Sidebar: charcoal rail, cream text, lavender for the active icon. */}
+        <aside className="flex w-[232px] shrink-0 flex-col bg-inverse text-inverse-fg">
+          <div className="flex items-center gap-3 border-b border-inverse-line px-4 py-4">
+            <img src="/mkyada-logo.png" alt="" className="size-10 shrink-0 rounded-control" />
+            <div className="flex min-w-0 flex-col">
+              <span className="text-[15px] font-semibold leading-tight tracking-[-0.01em]">MKYADA</span>
+              <span className="text-[11px] leading-snug text-stone-400 [font-stretch:90%]">
+                Macro Keypad You Always Dream About
+              </span>
+            </div>
           </div>
-          <nav className="flex-1 py-2" aria-label="Main">
+          <nav className="flex flex-1 flex-col gap-0.5 overflow-y-auto px-3 py-4" aria-label="Main">
             {NAV.map((n) => {
               const missing = n.needsDevice && !hello;
-              // Setup has no nav item of its own — it belongs to Devices, so
-              // Devices stays lit while it's open instead of nothing being.
-              const on = n.id === (page === "setup" ? "devices" : page);
+              const on = n.id === page;
               return (
                 <button
                   key={n.id}
                   onClick={() => setPage(n.id)}
                   aria-current={on ? "page" : undefined}
                   title={missing ? "Connect a keypad first" : undefined}
-                  className={`w-full text-left px-4 py-2 text-sm flex items-center gap-2.5 transition-colors
+                  className={`flex h-10 w-full items-center gap-3 rounded-control px-3 text-left text-sm transition-colors duration-[120ms] ease-standard focus-visible:outline-lavender
                     ${
                       on
-                        ? "bg-panel2 text-accent border-r-2 border-accent"
+                        ? "bg-inverse-line font-strong text-inverse-fg"
                         : missing
-                          ? "text-fg-faint hover:text-fg-muted"
-                          : "text-fg-muted hover:text-fg"
+                          ? "text-stone-500 hover:bg-[rgba(246,243,238,0.05)] hover:text-inverse-muted"
+                          : "text-inverse-muted hover:bg-[rgba(246,243,238,0.05)] hover:text-inverse-fg"
                     }`}
                 >
-                  <n.icon size={15} className="shrink-0" aria-hidden />
+                  <n.icon size={18} className={`shrink-0 ${on ? "text-lavender" : ""}`} aria-hidden />
                   <span className="flex-1">{n.label}</span>
                   {missing && (
                     <span
-                      className="w-1.5 h-1.5 rounded-full bg-warning shrink-0"
+                      className="size-1.5 shrink-0 rounded-full bg-warning-solid"
                       aria-label="Needs a connected keypad"
                     />
                   )}
@@ -120,96 +127,116 @@ function Shell() {
               );
             })}
           </nav>
-          <div className="px-4 py-3 border-t border-line flex flex-col gap-2">
+          <div className="border-t border-inverse-line px-4 py-4">
             {port && hello ? (
-              <div
-                className="flex flex-col gap-1 items-start"
-                title={`Keypad link: ${status}`}
-              >
+              <div className="flex flex-col gap-1.5" title={`Keypad link: ${status}`}>
                 {/* live link state (issue #16): what the keypad is doing
                     right now, not just that it exists */}
-                {status === "unresponsive" ? (
-                  <Badge tone="red">● Not responding</Badge>
-                ) : status === "transfer" ? (
-                  <Badge tone="blue">● Data transfer…</Badge>
-                ) : status === "reloading" ? (
-                  <Badge tone="amber">● Reloading…</Badge>
-                ) : status === "busy" ? (
-                  <Badge tone="amber">● Busy — macro playing</Badge>
-                ) : (
-                  <Badge tone="green">● connected</Badge>
-                )}
-                <span className="text-xs font-medium text-fg truncate max-w-full pl-0.5">
-                  {displayName(nickname, hello.uid)}
+                <span className="flex items-center gap-2 text-label font-medium tracking-label text-inverse-muted [font-stretch:90%]">
+                  <span
+                    aria-hidden
+                    className={`size-2 shrink-0 rounded-full ${
+                      status === "unresponsive"
+                        ? "bg-danger-on-dark"
+                        : status === "transfer"
+                          ? "bg-lavender"
+                          : status === "reloading" || status === "busy"
+                            ? "bg-warning-on-dark"
+                            : "bg-success-on-dark"
+                    }`}
+                  />
+                  {status === "unresponsive"
+                    ? "Not responding"
+                    : status === "transfer"
+                      ? "Transferring data…"
+                      : status === "reloading"
+                        ? "Reloading…"
+                        : status === "busy"
+                          ? "Busy · macro playing"
+                          : "Connected"}
                 </span>
-                {hello.layer_key && (
-                  <Badge tone="blue">Layer {layer.toUpperCase()}</Badge>
-                )}
+                <span className="flex min-w-0 items-center gap-2">
+                  <span className="truncate text-sm font-strong text-inverse-fg">
+                    {displayName(nickname, hello.uid)}
+                  </span>
+                  {hello.layer_key && (
+                    <Badge tone="accent" className="shrink-0">
+                      Layer {layer.toUpperCase()}
+                    </Badge>
+                  )}
+                </span>
               </div>
             ) : (
-              <Badge>○ no device</Badge>
+              <span className="flex items-center gap-2 text-label font-medium tracking-label text-stone-400 [font-stretch:90%]">
+                <span aria-hidden className="size-2 shrink-0 rounded-full border border-stone-500" />
+                No keypad
+              </span>
             )}
           </div>
         </aside>
 
-        <div className="flex-1 flex flex-col min-w-0">
+        <div className="flex min-w-0 flex-1 flex-col">
           <PermissionsBanner
-            onOpenSettings={() => {
-              setSettingsTab({ id: "app" });
-              setPage("settings");
-            }}
+            onOpenSettings={() => navigate("settings", { tab: "app" })}
+            className="mx-6 mt-4"
           />
-          {update && (
-            <div className="flex items-center justify-between bg-warning-bg border-b border-warning-line px-4 py-2 text-sm">
-              <span className="text-fg">
-                MKYADA v{update.latest} is available (you're on v{update.current}).
-              </span>
-              <div className="flex gap-2">
-                <Button variant="primary" onClick={() => void openUrl(update.url)}>
-                  Open release page
-                </Button>
-                <Button variant="ghost" onClick={() => setUpdate(null)}>
-                  Later
-                </Button>
-              </div>
-            </div>
-          )}
-          {linkWedged && (
-            <div className="flex items-center gap-2 bg-danger-bg border-b border-danger-line px-4 py-2 text-sm">
-              <span className="text-fg">
-                The keypad link is stuck and couldn't reconnect on its own —
-                unplug and replug the cable.
-              </span>
-            </div>
-          )}
-          {keysLoading && !linkWedged && (
-            <div className="flex items-center gap-2 bg-info-bg border-b border-info-line px-4 py-2 text-sm">
-              <Spinner />
-              <span className="text-fg">
-                Loading keys from the keypad…
+          {/* Global strips above every page (the Recorder too). empty:hidden
+              drops the wrapper's padding when nothing is showing —
+              PlaybackBar renders nothing while the keypad is idle. */}
+          <div className="flex flex-col gap-2 px-6 pt-4 empty:hidden">
+            <PlaybackBar />
+            {update && (
+              <Alert
+                tone="info"
+                title={`MKYADA v${update.latest} is available`}
+                actions={
+                  <>
+                    <Button variant="primary" size="sm" onClick={() => void openUrl(update.url)}>
+                      Open release page
+                    </Button>
+                    <Button variant="ghost" size="sm" onClick={() => setUpdate(null)}>
+                      Later
+                    </Button>
+                  </>
+                }
+              >
+                You're on v{update.current}.
+              </Alert>
+            )}
+            {linkWedged && (
+              <Alert tone="danger" title="The keypad link is stuck">
+                It couldn't reconnect on its own. Unplug the cable and plug it back in.
+              </Alert>
+            )}
+            {keysLoading && !linkWedged && (
+              <Alert tone="info" icon={<Spinner size={16} />}>
+                Loading keys from the keypad
                 {keysProgress && keysProgress.total > 0
-                  ? ` (${keysProgress.done}/${keysProgress.total})`
-                  : ""}
-                {" "}— everything else is usable meanwhile.
-              </span>
-            </div>
-          )}
-          {/* The Recorder is a full-bleed Photoshop-style workspace (its own
-              toolbar + scroll), so it drops the shared padding/scroll. */}
+                  ? ` · ${keysProgress.done} of ${keysProgress.total}`
+                  : "…"}
+                {" "}· everything else works in the meantime.
+              </Alert>
+            )}
+          </div>
+          {/* Every page gets the same p-6 frame. The Recorder is a workspace
+              with its own inner scroll areas, so only it drops the page scroll. */}
           <main
-            className={`flex-1 min-h-0 ${
-              page === "recorder" ? "overflow-hidden" : "overflow-auto p-5"
+            className={`min-h-0 flex-1 p-6 ${
+              page === "recorder" ? "overflow-hidden" : "overflow-auto"
             }`}
           >
-            {page === "devices" && <DevicesPage onConnected={() => setPage("keys")} />}
-            {/* Reached from the Setup button on Devices, not the sidebar. */}
-            {page === "setup" && <SetupPage onDone={() => setPage("keys")} />}
+            {page === "devices" && <DevicesPage onConnected={() => setPage("control")} />}
+            {page === "control" && <ControlPage />}
             {page === "keys" && <KeysPage />}
             {/* The Recorder stays mounted across page switches (hidden via CSS):
                 a recording in progress captures via global hooks and must keep
                 collecting events — and the recorded macro + its undo history
-                must survive a trip to Keys/Setup and back. */}
-            <div className={page === "recorder" ? "h-full" : "hidden"}>
+                must survive a trip to Keys/Devices and back. */}
+            <div
+              className={page === "recorder" ? "h-full" : "hidden"}
+              // Dense editor: Hezk compact density (28px controls, 13px text).
+              data-hz-density="compact"
+            >
               <RecorderPage active={page === "recorder"} />
             </div>
             {page === "profiles" && <ProfilesPage />}

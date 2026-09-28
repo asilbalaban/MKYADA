@@ -110,7 +110,7 @@ export function WriteGateProvider({ children }: { children: ReactNode }) {
           role="alertdialog"
           aria-modal="true"
           aria-label="Writing to the keypad"
-          className="fixed inset-0 z-[70] bg-black/50 flex items-center justify-center"
+          className="fixed inset-0 z-[70] bg-scrim flex items-center justify-center"
         >
           <div className="w-[26rem] max-w-[calc(100vw-2rem)] rounded-xl border border-line bg-panel shadow-2xl p-5 flex flex-col gap-4">
             <div className="flex items-start gap-3">

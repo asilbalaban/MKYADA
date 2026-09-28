@@ -38,6 +38,9 @@ export interface Hello {
   /** Vision 6 per-layer nicknames for the grid band (index 0 = layer A);
    * null/"" entries keep "Layer A"; absent on firmware < 0.17.6 */
   layer_names?: (string | null)[] | null;
+  /** proto v17: the macro playing when this hello was sent, else null.
+   * Absent on older firmware */
+  playing?: { file: string; key: number | null; layer: string; loop: boolean } | null;
   layer: string;
   /** "rescue": the main firmware failed to start and code.py's rescue
    * console answered instead — only file repair + reset are available */
@@ -608,6 +611,8 @@ export interface Profile {
 export interface ForegroundInfo {
   exe: string;
   title: string;
+  /** the window belongs to MKYADA itself (same process); absent on older backends */
+  self?: boolean;
 }
 
 export interface BtnEvent {

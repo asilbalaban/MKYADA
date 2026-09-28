@@ -63,10 +63,16 @@ import {
 import { IS_MAC, holdRepeatDefault } from "../lib/macro-model";
 import { displayKey } from "../lib/layout";
 import { undoRedoFromEvent, type History } from "../lib/history";
-import { Button, Field, Input, Select } from "./ui";
+import { Button, EmptyState, Field, Input, Select } from "./ui";
 import { ToolButton, ToolField, ToolGroup, ToolMini, ToolUnitInput } from "./toolbar";
 import { KeyCapture } from "./AssignmentEditor";
 import { useToast } from "./toast";
+
+/** The Recorder's toolbar card — shared with the empty state on the Recorder
+ * page so the bar sits in the same place before and after a macro loads. */
+export const TOOLBAR_CLASS =
+  "tb flex flex-wrap items-start gap-x-2 gap-y-2.5 rounded-card bg-panel px-3 py-2.5 shrink-0 " +
+  "[&_input]:h-7 [&_input]:py-0 [&_input]:text-xs [&_select]:h-7 [&_select]:py-0 [&_select]:text-xs";
 
 interface Props {
   macro: MacroFile;
@@ -302,10 +308,10 @@ export function MacroEditor({
     onChange({ ...macro, events });
     const after = macroStats({ ...macro, events });
     if (after.events === before.events) {
-      toast.info("Already optimized", "Mouse paths are as small as they can get.");
+      toast.info("Nothing to thin", "Mouse paths are as small as they can get.");
     } else {
       toast.success(
-        "Optimized for the keypad",
+        "Mouse paths thinned",
         `${before.events} → ${after.events} events (${(before.bytes / 1024).toFixed(1)} → ${(after.bytes / 1024).toFixed(1)} KB). The path shape is preserved.`,
       );
     }
@@ -322,10 +328,12 @@ export function MacroEditor({
         : "Properties";
 
   return (
-    <div className="h-full flex flex-col">
-      {/* TOOLBAR — Illustrator-style: captioned controls in stroked groups.
-          The [&_…] rules keep every input/select the same compact height. */}
-      <div className="tb flex items-start gap-2 px-3 py-1.5 border-b border-line bg-panel shrink-0 overflow-x-auto [&_input]:h-7 [&_input]:py-0 [&_input]:text-xs [&_select]:h-7 [&_select]:py-0 [&_select]:text-xs">
+    <div className="h-full flex flex-col gap-4">
+      {/* TOOLBAR — Illustrator-style: captioned controls in stroked groups, on
+          a cream card like every other page's header. Groups wrap onto a
+          second row instead of clipping on narrow windows. The [&_…] rules
+          keep every input/select the same compact height. */}
+      <div className={TOOLBAR_CLASS}>
         {toolbarStart}
         {toolbarPlayback}
 
@@ -462,11 +470,11 @@ export function MacroEditor({
       </div>
 
       {/* BODY — events fill the center; properties live in the right sidebar */}
-      <div className="flex-1 flex min-h-0">
+      <div className="flex-1 flex min-h-0 gap-4">
         {/* CENTER: the events list, taking almost the whole screen */}
-        <div className="flex-1 flex flex-col min-w-0">
-          <div className="flex items-center justify-between gap-3 px-3 py-2 border-b border-line shrink-0">
-            <h2 className="text-sm font-semibold text-fg-muted">
+        <section className="flex-1 flex flex-col min-w-0 rounded-card bg-panel overflow-hidden">
+          <div className="flex min-h-12 items-center justify-between gap-3 px-4 py-2 border-b border-line shrink-0">
+            <h2 className="text-title font-semibold text-fg">
               Events{" "}
               <span className="text-fg-faint font-normal">
                 · {items.length} rows / {stats.events} events
@@ -503,7 +511,7 @@ export function MacroEditor({
             </div>
           </div>
 
-          <div className="flex-1 min-h-0 overflow-y-auto flex flex-col gap-1 p-3 select-none">
+          <div className="flex-1 min-h-0 overflow-y-auto flex flex-col gap-px px-2 py-2 select-none">
             {items.map((item, i) => (
               <button
                 key={i}
@@ -513,13 +521,13 @@ export function MacroEditor({
                   // follow the playhead: keep the executing row in view
                   if (el && activeRow === i) el.scrollIntoView({ block: "nearest" });
                 }}
-                className={`flex items-center gap-2 rounded-md px-2 py-1.5 text-xs text-left border
+                className={`flex items-center gap-2 rounded-control px-2 py-1.5 text-xs text-left transition-colors duration-[120ms] ease-standard
                   ${
                     activeRow === i
-                      ? "border-success-line bg-success-bg"
+                      ? "bg-success-bg"
                       : selected.includes(i)
-                        ? "border-accent bg-accent/10"
-                        : "border-line bg-panel2 hover:border-fg-faint"
+                        ? "bg-selected text-accent-ink"
+                        : "hover:bg-hover"
                   }`}
               >
                 <span className="w-6 flex justify-center text-fg-muted">{itemIcon(item)}</span>
@@ -534,43 +542,43 @@ export function MacroEditor({
                     describeItem(item)
                   )}
                 </span>
-                <span className="text-fg-faint">{itemDelay(item)} ms</span>
+                <span className="text-fg-faint tabular-nums">{itemDelay(item)} ms</span>
               </button>
             ))}
             {items.length === 0 && (
               <p className="text-fg-faint text-sm p-2">
-                No events yet. Record or import a macro to fill this in.
+                No events yet · record or import a macro
               </p>
             )}
           </div>
 
-          <div className="flex items-center justify-between gap-3 px-3 py-2 border-t border-line shrink-0">
+          <div className="flex items-center justify-between gap-3 px-4 py-2 border-t border-line shrink-0">
             <div className={`text-xs ${stats.tooBig && !streaming ? "text-warning" : "text-fg-faint"}`}>
               {stats.events} events · {(stats.bytes / 1024).toFixed(1)} KB
               {stats.tooBig && !streaming
-                ? " — too large for the keypad's memory. Optimize to shrink it."
-                : " — fits on the keypad."}
+                ? " · too large for the keypad's memory · use Shrink for keypad"
+                : " · fits on the keypad"}
             </div>
             <div className="flex items-center gap-2">
-              <span className="text-[11px] text-fg-faint hidden xl:inline">
+              <span className="text-[11px] text-fg-faint hidden 2xl:inline">
                 Shift+click range · {IS_MAC ? "⌘" : "Ctrl"}+click toggle · {IS_MAC ? "⌘" : "Ctrl"}+A all · Del removes
               </span>
               <Button
                 title={
                   streaming
-                    ? "Simplifies dense mouse paths (max 30 points/second) while keeping their shape. Your keypad plays full recordings as-is — this is only an editing convenience."
-                    : "Thins dense mouse paths (max 30 points/second) while keeping their shape, so the macro fits the keypad's memory"
+                    ? "Thins dense mouse paths here (max 30 points a second), keeping their shape. Your keypad plays full recordings as they are, so this only makes editing easier."
+                    : "Thins dense mouse paths in this macro (max 30 points a second), keeping their shape, so it fits the keypad's memory"
                 }
                 onClick={optimizeForDevice}
               >
-                <Scissors size={14} aria-hidden /> {streaming ? "Simplify paths" : "Optimize for device"}
+                <Scissors size={14} aria-hidden /> {streaming ? "Simplify paths" : "Shrink for keypad"}
               </Button>
             </div>
           </div>
-        </div>
+        </section>
 
         {/* RIGHT: properties sidebar */}
-        <aside className="w-[340px] shrink-0 border-l border-line bg-panel overflow-y-auto flex flex-col">
+        <aside className="w-[320px] shrink-0 rounded-card bg-panel overflow-y-auto flex flex-col">
           <Section title={rowEditorTitle}>
             {selected.length > 1 ? (
               <div className="flex flex-col gap-3">
@@ -585,9 +593,11 @@ export function MacroEditor({
                 </div>
               </div>
             ) : !current ? (
-              <p className="text-fg-faint text-sm">
-                Click a row to edit every value. Press Delete to remove the selected row.
-              </p>
+              <EmptyState
+                icon={<MousePointerClick size={24} aria-hidden />}
+                title="No row selected"
+                description="Click a row to edit its values · Delete removes it"
+              />
             ) : (
               <div className="flex flex-col gap-3">
                 <RowFields item={current} onChange={(it) => updateItem(single!, it)} />
@@ -619,8 +629,8 @@ export function MacroEditor({
 /** A titled block in the properties sidebar. */
 function Section({ title, children }: { title: ReactNode; children: ReactNode }) {
   return (
-    <div className="border-b border-line p-3 flex flex-col gap-3">
-      <h3 className="text-xs font-semibold tracking-wide text-fg-muted">{title}</h3>
+    <div className="border-b border-line last:border-b-0 px-4 py-3 flex flex-col gap-3">
+      <h3 className="min-h-6 flex items-center text-title font-semibold text-fg">{title}</h3>
       {children}
     </div>
   );
@@ -638,8 +648,8 @@ function PropGroup({
   children: ReactNode;
 }) {
   return (
-    <div className="flex flex-col gap-2 rounded-lg border border-line p-2.5">
-      <span className="text-[10px] uppercase tracking-wider text-fg-faint leading-none">{label}</span>
+    <div className="flex flex-col gap-2 rounded-card border border-line p-2.5">
+      <span className="text-[10px] font-medium uppercase tracking-[0.04em] text-fg-faint leading-none [font-stretch:90%]">{label}</span>
       <div className={cols === 2 ? "grid grid-cols-2 gap-2" : "flex flex-col gap-2"}>{children}</div>
     </div>
   );

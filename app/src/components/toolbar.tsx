@@ -9,15 +9,15 @@ import { Input } from "./ui";
 /** A bordered cluster of related toolbar controls, with a caption on top. */
 export function ToolGroup({ label, children }: { label?: string; children: ReactNode }) {
   return (
-    <div className="flex flex-col gap-1 shrink-0">
+    <div className="flex flex-col gap-1 shrink-0" data-hz-density="compact">
       {label ? (
-        <span className="text-[9px] uppercase tracking-wider text-fg-faint px-1 leading-none">
+        <span className="text-[10px] font-medium uppercase tracking-[0.04em] text-fg-faint px-1 leading-none [font-stretch:90%]">
           {label}
         </span>
       ) : (
-        <span className="h-[9px]" aria-hidden />
+        <span className="h-[10px]" aria-hidden />
       )}
-      <div className="flex items-stretch gap-0.5 border border-line rounded-lg p-1 bg-panel2/30">
+      <div className="flex items-stretch gap-0.5 rounded-control border border-line bg-raised p-1">
         {children}
       </div>
     </div>
@@ -37,17 +37,17 @@ export function ToolButton({
   tone?: "default" | "primary" | "danger" | "active";
 }) {
   const tones = {
-    default: "text-fg border-transparent hover:bg-panel2",
-    primary: "text-accent border-transparent hover:bg-accent/10",
+    default: "text-fg border-transparent hover:bg-hover active:bg-press",
+    primary: "text-accent border-transparent hover:bg-selected",
     danger: "text-danger border-transparent hover:bg-danger-bg",
-    active: "text-accent bg-accent/10 border-accent/40",
+    active: "text-accent-ink bg-selected border-accent",
   }[tone];
   return (
     <button
       {...props}
-      className={`h-11 min-w-12 px-1 flex flex-col items-center rounded-md border transition-colors disabled:opacity-40 disabled:pointer-events-none ${tones} ${className}`}
+      className={`hz-control h-11 min-w-12 px-1 flex flex-col items-center rounded-control border transition-colors duration-[120ms] ease-standard disabled:text-fg-disabled disabled:pointer-events-none ${tones} ${className}`}
     >
-      <span className="h-4 mb-0.5 flex items-center text-[10px] leading-none text-fg-faint">{label}</span>
+      <span className="h-4 mb-0.5 flex items-center text-[10px] leading-none text-fg-faint [font-stretch:90%]">{label}</span>
       <span className="flex-1 flex items-center justify-center">{icon}</span>
     </button>
   );
@@ -67,7 +67,7 @@ export function ToolField({
 }) {
   return (
     <div className={`h-11 flex flex-col px-1 ${align === "start" ? "items-start" : "items-center"}`}>
-      <span className="h-4 mb-0.5 flex items-center text-[10px] leading-none text-fg-faint">{label}</span>
+      <span className="h-4 mb-0.5 flex items-center text-[10px] leading-none text-fg-faint [font-stretch:90%]">{label}</span>
       <div className="flex-1 flex items-center gap-1">{children}</div>
     </div>
   );
@@ -87,7 +87,7 @@ export function ToolUnitInput({
       {/* Reserve right padding (inline style beats the base px-2.5) so the
           typed value always stops before the unit label. */}
       <Input {...props} className={className} style={{ paddingRight: "1.5rem", ...style }} />
-      <span className="absolute right-2 inset-y-0 flex items-center text-sm text-fg-muted pointer-events-none">
+      <span className="absolute right-2 inset-y-0 flex items-center text-xs text-fg-faint pointer-events-none">
         {suffix}
       </span>
     </div>
@@ -103,7 +103,7 @@ export function ToolMini({
   return (
     <button
       {...props}
-      className={`h-7 w-7 flex items-center justify-center rounded-md border border-line bg-panel2 text-fg hover:border-accent/60 transition-colors ${className}`}
+      className={`hz-control h-7 w-7 flex items-center justify-center rounded-control border border-line-strong bg-raised text-fg hover:bg-stone-50 active:bg-sunken transition-colors duration-[120ms] ease-standard disabled:text-fg-disabled ${className}`}
     >
       {children}
     </button>

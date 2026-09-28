@@ -29,8 +29,10 @@
 | **Build the keypad** (solder switches, print the case) | [hardware/wiring.md](hardware/wiring.md) · [hardware/case/](hardware/case/) |
 | **Flash the firmware** on a fresh board | [docs/firmware-install.md](docs/firmware-install.md) |
 | **Update the firmware** later | one click in the app (*Devices → Update firmware*) — it ships inside the app |
+| **Test the keys, fix the wiring, troubleshoot** | app → *Devices*: the *Setup*, *Test keys*, *Fix wiring* and *Troubleshoot* tabs |
+| **Run a key from the app, or stop a runaway loop** (also over remote desktop) | app → *Control*: click **Run** on a key, **Stop** in the bar on top, or the global stop hotkey — [remote control](#remote-control) |
 | **Put an action on a key** (key, combo, text, media, launch app/file/URL, run a command, play a sound, call a webhook, or a multi-step sequence) | app → *Keys*: click the key, press the shortcut or pick an action, save |
-| **Give one key three jobs** (tap / double-press / hold) | app → *Keys*: open the key's variants and assign each gesture |
+| **Give one key three jobs** (tap / double-press / hold) | app → *Keys*: click the key, then the *Press*, *Double press* and *Long press* tabs |
 | **Record a full mouse + keyboard macro** | app → *Recorder*: F8 to record, assign to a key |
 | **Fine-tune a recording** | app → *Recorder*: edit every event, multi-select rows, draw the path 1:1 on your screen, pin the app above your game |
 | **Different actions per application** | app → *Profiles* (e.g. Save As in Photoshop, inventory macro in your game) |
@@ -64,23 +66,51 @@ Unlike most DIY macro pads that just remap keys, MKYADA plays back **full record
 - **On-screen bands** — optional strips name the active **layer** and the desktop app's active **per-app profile**; the auto-return timeout is adjustable on the device or in the app. See [docs/vision6.md](docs/vision6.md).
 
 **In the desktop app (Windows / macOS, Linux planned):**
-- **Point-and-click key setup** — click a key, press the shortcut you want (single keys, combos, text snippets, media keys), save. Live key test shows every physical press.
+- **Point-and-click key setup** — click a key, press the shortcut you want (single keys, combos, text snippets, media keys), save. *Run on keypad* tries it right away; the live key test (*Devices → Test keys*) shows every physical press.
 - **Beyond keystrokes** — put a key to launching an app, file or URL, running a terminal command, playing a sound (tap to play; hold to stop, fade out, or restart it), scrolling/zooming (wheel + modifiers), controlling your microphone (mute/unmute/toggle/**push-to-talk**), driving **OBS Studio** over obs-websocket (scene, record, stream, mic, virtual cam), or calling a webhook — a fully custom HTTP request (method, headers, body) for smart lights, Discord/Telegram messages, Home Assistant and anything else with an HTTP API. Chain several of these into one multi-step sequence with delays in between. Full list: [docs/actions.md](docs/actions.md).
 - **Macro recorder & editor** — record globally with F8, then edit every event: coordinates, delays, durations; straighten or simplify mouse paths; draw the path 1:1 on your real screen to verify click positions; multi-select rows with shift/cmd-click; full undo/redo.
 - **Per-app profiles** — with the app running, key 1 can be *Save As* in Photoshop and an inventory macro in your game. No matching profile? The keypad falls back to its own on-board config within 5 seconds.
+- **Remote control** — the *Control* page runs any key on the keypad from the app, exactly like pressing it, and a playback bar on every page stops whatever is playing. A global stop hotkey and the tray's *Stop playback* work with the window hidden. Built for driving the keypad's computer over Chrome Remote Desktop, where you can't reach the physical key. See [Remote control](#remote-control).
 - **Runs in the background** — closing the window sends MKYADA to the system tray instead of quitting, so key actions and profiles keep working; an optional "start at login" setting launches it automatically.
 - **Live system status** — a settings strip shows CPU, RAM and mic-mute state at a glance, with an optional rule to turn the keypad's LED red while the mic is muted.
-- **In-app firmware updates**, wrong-solder-order key remapping, device nicknames, multi-device support, light/dark theme, and a GitHub release check on launch.
+- **In-app firmware updates**, wrong-solder-order key remapping, device nicknames, multi-device support, and a GitHub release check on launch.
 
 ## The app
 
-| Assign keys (Vision 6) | Manage devices |
+| Run keys from the app (Control) | Assign keys (Vision 6) |
 |---|---|
-| ![Keys page — click a key, pick what it does](docs/images/screens/vision6-keys.png) | ![Devices page — connected keypad with nickname and firmware info](docs/images/screens/core6-devices.png) |
-| **Record & edit macros** | **Per-app profiles** |
-| ![Recorder — every event is an editable row, playback rules per key](docs/images/screens/core6-recorder.png) | ![Profiles — the active window picks the assignments](docs/images/screens/core6-profiles.png) |
-| **Setup at a glance** | **Settings — grouped into tabs** |
-| ![Setup — keypad summary and live key test](docs/images/screens/vision6-setup.png) | ![Settings — Keypad, Integrations, Application and About in tabs](docs/images/screens/vision6-settings.png) |
+| ![Control page — every key as a tile with Run, the page the app opens on](docs/images/screens/vision6-control.png) | ![Keys page — click a key, then Press, Double press, Long press and Appearance tabs](docs/images/screens/vision6-keys.png) |
+| **Stop a loop from anywhere** | **Per-app profiles** |
+| ![Control page while key 6 loops — the playback bar on top with Stop and the stop hotkey](docs/images/screens/vision6-control-playing.png) | ![Profiles — the app in front picks the keys; each profile has its own key grid](docs/images/screens/core6-profiles.png) |
+| **Record & edit macros** | **Devices — setup, key test, wiring, troubleshooting** |
+| ![Recorder — every event is an editable row, playback rules per key](docs/images/screens/core6-recorder.png) | ![Devices page — keypad hero card with Setup, Test keys, Fix wiring, Troubleshoot and Other keypads tabs](docs/images/screens/vision6-devices.png) |
+| **Test every key** | **Settings — grouped into tabs** |
+| ![Devices → Test keys — each press lights up its tile](docs/images/screens/vision6-devices-test.png) | ![Settings — Keypad, Integrations, Application and About in tabs](docs/images/screens/vision6-settings.png) |
+
+## Remote control
+
+A lot of MKYADA keypads sit on a computer their owner reaches over **Chrome
+Remote Desktop** (or any remote desktop): a game or render box running a macro
+on loop. From there you can't press the physical key, so a loop you started
+would run forever. The app covers that:
+
+- **Control page** — the first page, and the one the app opens on. Every key is
+  a large tile; **Run** presses that key on the keypad remotely, exactly like a
+  physical press (same macro, same loop and hold rules, still real hardware
+  HID). The playing tile turns into **Stop**. Keys with a double or long press
+  get their own rows, and a layer switcher shows the other layers.
+- **Playback bar** — while anything plays, a bar on every page shows the key,
+  its layer and whether it loops, with a **Stop** button. After a stop it offers
+  **Run again**.
+- **Global stop hotkey** — **Ctrl+Alt+Shift+S** by default, working with the
+  window hidden or in the tray. Change it in *Settings → Application → Remote
+  control*.
+- **Tray** — the tray menu has **Stop playback**.
+
+Remote run and stop need a keypad on the current firmware (serial protocol
+v17); on older firmware the Control page asks for an update. The
+[serial protocol](docs/serial-protocol.md) documents `press`, `stop` and the
+`play_start` / `play_done` events.
 
 The Vision 6's own OLED screens. These are not mockups: `scripts/render-oled.py`
 runs the firmware's drawing code over the font the device flashes, so every lit
@@ -134,9 +164,9 @@ Details: [docs/macro-format.md](docs/macro-format.md) · [docs/serial-protocol.m
 ## Quick start
 
 1. **Install the app** from the [latest release](https://github.com/asilbalaban/MKYADA/releases/latest) (Windows `setup.exe`, macOS universal `.dmg`).
-2. **Set up the board — one click.** Plug a blank RP2040-Zero in with **BOOT** held and open **Devices → Set up a new board**: the app flashes CircuitPython, installs the MKYADA firmware and writes a starter config for your model (Core 6 or Vision 6) — no manual UF2 copying, no tools. *(Already flashed, or prefer to do it by hand? The [manual steps](docs/firmware-install.md) still work — copy the `mkyada-firmware-*.zip` contents onto the `CIRCUITPY` drive.)*
-3. **Assign keys** in the setup wizard — **or** skip the app entirely and copy macro JSON files onto the drive by hand.
-4. **Press a key.**
+2. **Set up the board — one click.** Plug a blank RP2040-Zero in with **BOOT** held and open **Devices → Other keypads → Set up a new board**: the app flashes CircuitPython, installs the MKYADA firmware and writes a starter config for your model (Core 6 or Vision 6) — no manual UF2 copying, no tools. *(Already flashed, or prefer to do it by hand? The [manual steps](docs/firmware-install.md) still work — copy the `mkyada-firmware-*.zip` contents onto the `CIRCUITPY` drive.)*
+3. **Assign keys** on the **Keys** page — **or** skip the app entirely and copy macro JSON files onto the drive by hand.
+4. **Press a key**, or click **Run** on the **Control** page.
 
 > **macOS:** the app is not notarized, so the first launch is blocked with
 > *"Apple could not verify MKYADA…"*. Clear the quarantine flag once and open
@@ -178,7 +208,7 @@ npx tsx tests/model_test.ts
 
 ## Status
 
-**v0.21.x** — two hardware models (**Core 6** screenless, **Vision 6** OLED + encoder) on one firmware and one app, verified on real hardware. Light/dark themed app with onboarding, press-to-capture key assignment, a full macro recorder/editor with on-screen path overlay and undo/redo, per-app profiles that run **natively on the device** (a full config copy), and a broad key-action set: keystroke/combo/text/media, mouse scroll & zoom, launch/command/sound, microphone (incl. push-to-talk), **OBS Studio** control, webhooks, multi-step sequences, and "go to layer X". Tap/double-press/hold key logic with playback policies (stop/restart, hold-to-repeat, loop). Vision 6 adds an on-device menu (layer picker, per-macro speed editor, settings), on-screen layer/profile bands, and encoder/nav-button macro slots. A provisioning wizard flashes blank RP2040-Zero boards; firmware updates are one-click and unbrickable (rescue console, locked update mode). System tray + autostart, full keyboard-layout awareness (Turkish and any other layout), in-app firmware updates and release checks. CI publishes a Windows installer + macOS universal DMG per release; Linux packages are next.
+**v0.21.x** — two hardware models (**Core 6** screenless, **Vision 6** OLED + encoder) on one firmware and one app, verified on real hardware. A themed app with onboarding, press-to-capture key assignment, a full macro recorder/editor with on-screen path overlay and undo/redo, per-app profiles that run **natively on the device** (a full config copy), and a broad key-action set: keystroke/combo/text/media, mouse scroll & zoom, launch/command/sound, microphone (incl. push-to-talk), **OBS Studio** control, webhooks, multi-step sequences, and "go to layer X". Tap/double-press/hold key logic with playback policies (stop/restart, hold-to-repeat, loop). Vision 6 adds an on-device menu (layer picker, per-macro speed editor, settings), on-screen layer/profile bands, and encoder/nav-button macro slots. A provisioning wizard flashes blank RP2040-Zero boards; firmware updates are one-click and unbrickable (rescue console, locked update mode). System tray + autostart, full keyboard-layout awareness (Turkish and any other layout), in-app firmware updates and release checks. CI publishes a Windows installer + macOS universal DMG per release; Linux packages are next.
 
 > **Note:** automating input in online games may violate their Terms of Service. You are responsible for how you use this device.
 
@@ -215,6 +245,7 @@ STLs and print notes live in [hardware/case/](hardware/case/).
 - **Tuş vuruşunun ötesinde** — bir tuşu uygulama/dosya/URL açmaya, terminal komutu çalıştırmaya, ses çalmaya (basılı tutunca durdur/kıs/baştan başlat), kaydırma & yakınlaştırmaya, mikrofon kontrolüne (sustur/aç/değiştir/**bas-konuş**), **OBS Studio** kontrolüne (sahne, kayıt, yayın, mikrofon) ya da webhook'a atayın; birkaçını aralarında bekleme ile zincirleyerek tek bir çok adımlı aksiyon yapın. Tüm liste: [docs/actions.md](docs/actions.md).
 - **Vision 6 ekranı** — 128×64 OLED'de canlı makro adları, katman seçici, makro başına hız ayarı ve ayarlar menüsü; hepsi döner tekerlekle. Encoder ve BACK/CONFIRM tuşları da kendi makrolarını taşır. Ayrıntı: [docs/vision6.md](docs/vision6.md).
 - **Kaydet & düzenle** — klavye + mouse kaydı, event bazında düzenleme, çoklu satır seçimi, geri al/ileri al, mouse yolunu gerçek ekranda 1:1 çizme, hız / tekrar ayarı.
+- **Uzaktan kontrol** — *Control* sayfası herhangi bir tuşu uygulamadan, fiziksel basışla birebir aynı şekilde çalıştırır; her sayfadaki oynatma çubuğu, genel durdurma kısayolu (varsayılan **Ctrl+Alt+Shift+S**) ve tepsideki *Stop playback* çalan makroyu durdurur. Chrome Remote Desktop ile bağlanıp fiziksel tuşa uzanamayanlar için.
 - **Arka planda çalışır** — pencereyi kapatmak uygulamayı kapatmaz, sistem tepsisine gönderir; tuş aksiyonları ve profiller çalışmaya devam eder. İsteğe bağlı "açılışta başlat" seçeneği de var.
 - **Kendin yap** — 6 switch'i RP2040-Zero'ya lehimle, kutuyu 3D yazıcıda bas, firmware'i yükle.
 

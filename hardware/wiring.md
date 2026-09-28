@@ -71,7 +71,7 @@ just a contact:
   key simply shorts its GPIO to GND.
 - Any key count from 1 to 20 works: solder GP0…GP(n-1) — keys 7+ continue past
   GP5 onto GP6, GP7, GP8 and around the board — then set the count in the
-  setup wizard. (GP16 is skipped: it drives the onboard LED.)
+  app (**Devices → Setup → Change setup**). (GP16 is skipped: it drives the onboard LED.)
 
 ## Soldering, step by step
 
@@ -94,12 +94,12 @@ just a contact:
 ## Verify — no multimeter needed
 
 Flash the firmware ([docs/firmware-install.md](../docs/firmware-install.md)),
-open the MKYADA app and go to **Setup**: the **live key test** lights up every
+open the MKYADA app and go to **Devices → Test keys**: the **live key test** lights up every
 key as you press it. If a key doesn't react, reflow its GPIO joint and the
 ground chain.
 
 **Soldered the keys in the wrong order?** Don't reach for the iron — the app
-fixes it in software: **Setup → Key order (remap)**, press the keys in the
+fixes it in software: **Devices → Fix wiring → Fix order**, press the keys in the
 order they *should* be numbered, done. The remap is stored on the keypad, so
 standalone mode uses it too.
 
@@ -153,7 +153,7 @@ Everything with a `→ GND` leg (the six keys, the encoder push, BACK, CONFIRM
 and the encoder's common pin) joins the **same daisy-chained ground** as on the
 Core 6. Solder order: ground chain first, then the OLED (VCC→3V3, SDA→GP0,
 SCL→GP1), then the encoder/buttons, then the six keys. A key soldered to a
-different GPIO is fine — remap it in **Setup → Key wiring**.
+different GPIO is fine — remap it in **Devices → Fix wiring → Choose pins**.
 
 Full pinout, the on-device screens, and the bring-up reference:
 [docs/vision6.md](../docs/vision6.md) ·
@@ -169,8 +169,8 @@ firmware kartın kenarındaki 20 GPIO'ya kadar her sayıyı destekler (GP16 hari
 o LED'in). GND pad'i USB üstteyken sol
 kenarda üstten ikinci; GP0–GP5 sağ kenarda üstten ilk altı pad. Direnç/diyot
 gerekmez (firmware dahili pull-up kullanır). Lehim sonrası uygulamadaki
-**Setup → canlı tuş testi** ile her tuşu doğrula; tuşları yanlış sırayla
-lehimlediysen **Setup → Key order (remap)** ile yazılımdan düzelt — yeniden
+**Devices → Test keys** (canlı tuş testi) ile her tuşu doğrula; tuşları yanlış sırayla
+lehimlediysen **Devices → Fix wiring → Fix order** ile yazılımdan düzelt — yeniden
 lehim gerekmez.
 
 **Ekranlı model (Vision 6):** OLED (SH1106) + EC11 encoder + BACK/CONFIRM

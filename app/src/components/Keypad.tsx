@@ -65,7 +65,8 @@ export function Keypad({ config, selected, onSelect, assignments, loading }: Pro
       ref={gridRef}
       role="group"
       aria-label="Keypad keys"
-      className="grid gap-3"
+      // Capped so the keypad keeps a keypad-like size on full-width pages.
+      className="grid w-full max-w-[36rem] gap-3"
       style={{ gridTemplateColumns: `repeat(${cols}, minmax(0,1fr))` }}
     >
       {keys.map((n) => {
@@ -80,7 +81,7 @@ export function Keypad({ config, selected, onSelect, assignments, loading }: Pro
           : isLoading
             ? "loading…"
             : a
-              ? describeAssignment(a) + (needsHost ? " — needs the MKYADA app running" : "")
+              ? describeAssignment(a) + (needsHost ? " · needs the MKYADA app running" : "")
               : "not assigned";
         return (
           <button
@@ -89,14 +90,14 @@ export function Keypad({ config, selected, onSelect, assignments, loading }: Pro
             tabIndex={n === focusKey ? 0 : -1}
             onClick={() => onSelect(n)}
             onKeyDown={(e) => onKeyDown(e, n)}
-            aria-label={`Key ${n} — ${summary}`}
+            aria-label={`Key ${n} · ${summary}`}
             aria-pressed={isSelected}
             aria-busy={isLoading}
-            className={`relative aspect-square rounded-xl border-2 flex flex-col items-center justify-center gap-1 transition-all
-              ${isPressed ? "border-accent bg-accent/20 scale-95" : isSelected ? "border-accent bg-panel2" : "border-line bg-panel2 hover:border-fg-faint"}`}
+            className={`hz-control relative aspect-square rounded-card border flex flex-col items-center justify-center gap-1 transition-[transform,background-color,border-color,box-shadow] duration-[120ms] ease-standard
+              ${isPressed ? "border-accent bg-lavender scale-95" : isSelected ? "border-accent bg-selected shadow-ring" : "border-line-strong bg-raised hover:border-stone-350"}`}
           >
-            <span className="text-2xl font-bold text-fg">{n}</span>
-            <span className="text-[10px] text-fg-muted px-1 text-center leading-tight">
+            <span className="text-h3 font-semibold tabular-nums text-fg">{n}</span>
+            <span className="text-[11px] text-fg-muted px-1.5 text-center leading-tight line-clamp-2">
               {isLayer ? (
                 "LAYER"
               ) : isLoading ? (
@@ -108,11 +109,11 @@ export function Keypad({ config, selected, onSelect, assignments, loading }: Pro
               )}
             </span>
             {isLayer && (
-              <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-layer" />
+              <span className="absolute top-2 right-2 size-2 rounded-full bg-layer" />
             )}
             {needsHost && (
               <span
-                className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-warning"
+                className="absolute top-2 right-2 size-2 rounded-full bg-warning-solid"
                 title="Needs the MKYADA app running on this computer"
               />
             )}

@@ -42,7 +42,7 @@ import { ToolButton, ToolField, ToolGroup, ToolUnitInput } from "../components/t
 import { isWriteCancelled, useWriteGate, writeCancelledError } from "../components/WriteProgress";
 import { useToast } from "../components/toast";
 import { useConfirm } from "../components/dialog";
-import { MacroEditor } from "../components/MacroEditor";
+import { MacroEditor, TOOLBAR_CLASS } from "../components/MacroEditor";
 import { usePermissions, useRecordError } from "../components/Permissions";
 
 export function RecorderPage({ active = true }: { active?: boolean }) {
@@ -140,7 +140,7 @@ export function RecorderPage({ active = true }: { active?: boolean }) {
     setAssignKey(edit.key);
     setAssignLayer(edit.layer);
     setStatus(
-      `Editing the macro from key ${edit.key} — "Save to key ${edit.key}" below writes it back.`,
+      `Editing the macro from key ${edit.key} · "Save to key ${edit.key}" below writes it back.`,
     );
   }, [active]);
 
@@ -393,7 +393,7 @@ export function RecorderPage({ active = true }: { active?: boolean }) {
             setStatus(`Assigned to ${file}`);
             toast.success(
               `Macro saved to ${keyLabel}`,
-              "Only the changed settings were sent — the recording was already on the keypad.",
+              "Only the changed settings were sent. The recording was already on the keypad.",
             );
             return;
           } catch {
@@ -425,7 +425,7 @@ export function RecorderPage({ active = true }: { active?: boolean }) {
         // a half-written macro must not stay on the key (issue #15)
         await ipc.driveDelete(drive.path, file).catch(() => {});
         keysCache.setAssignment(drive.path, slotKey(assignKey, assignLayer), null);
-        setStatus(`Send cancelled — ${keyLabel} was left unassigned.`);
+        setStatus(`Send cancelled · ${keyLabel} was left unassigned.`);
         toast.info("Send cancelled", `The macro was not written to ${keyLabel}.`);
         return;
       }
@@ -481,8 +481,8 @@ export function RecorderPage({ active = true }: { active?: boolean }) {
   // an empty "record to begin" state.
   if (!macro) {
     return (
-      <div className="h-full flex flex-col">
-        <div className="tb flex items-start gap-2 px-3 py-1.5 border-b border-line bg-panel shrink-0 overflow-x-auto [&_input]:h-7 [&_input]:py-0 [&_input]:text-xs [&_select]:h-7 [&_select]:py-0 [&_select]:text-xs">
+      <div className="h-full flex flex-col gap-4">
+        <div className={TOOLBAR_CLASS}>
           <ToolGroup label="Capture">
             {importButton}
             {recordButton}
@@ -491,15 +491,15 @@ export function RecorderPage({ active = true }: { active?: boolean }) {
           </ToolGroup>
           {!canRecord && (
             <div className="ml-auto self-center">
-              <Badge tone="amber">grant Input Monitoring in Settings to record</Badge>
+              <Badge tone="amber">Grant Input Monitoring in Settings to record</Badge>
             </div>
           )}
         </div>
-        <div className="flex-1 flex flex-col items-center justify-center text-center gap-3 p-8">
+        <div className="flex-1 min-h-0 flex flex-col items-center justify-center text-center gap-3 p-8 rounded-card bg-panel">
           {recording ? (
             <>
               <div className="text-3xl font-semibold text-danger tabular-nums">● {count}</div>
-              <p className="text-fg-muted">Recording events — press F8 (or Stop) when you're done.</p>
+              <p className="text-fg-muted">Recording events · press F8 (or Stop) when you're done.</p>
             </>
           ) : countdown > 0 ? (
             <>
@@ -508,17 +508,19 @@ export function RecorderPage({ active = true }: { active?: boolean }) {
             </>
           ) : (
             <>
-              <Circle size={40} className="text-fg-faint" aria-hidden />
-              <p className="text-fg font-medium">Record or import a macro to begin</p>
-              <p className="text-sm text-fg-muted max-w-md">
+              <div className="mb-1 flex size-14 items-center justify-center rounded-[12px] bg-selected text-accent">
+                <Circle size={28} aria-hidden />
+              </div>
+              <p className="text-[17px] font-strong text-fg">Record or import a macro to begin</p>
+              <p className="text-sm text-fg-faint max-w-md [text-wrap:pretty]">
                 The Record button waits for the start delay so you can get in position; F8 starts
                 and stops instantly, even while another window is focused. Mouse moves, clicks,
                 scrolls and keys are captured globally.
               </p>
             </>
           )}
-          {status && <p className="text-xs text-fg-muted mt-2">{status}</p>}
-          {captureError && <p className="text-xs text-danger mt-1">⚠ {captureError}</p>}
+          {status && <p className="text-label text-fg-muted mt-2">{status}</p>}
+          {captureError && <p className="text-label text-danger mt-1">{captureError}</p>}
         </div>
       </div>
     );
@@ -544,7 +546,7 @@ export function RecorderPage({ active = true }: { active?: boolean }) {
             <Input
               type="number" min="1" className="w-14 text-center"
               value={playCount}
-              title="Replay count for ▶ Play / Preview — the macro plays this many times back to back. Testing only: the key's own Repeat setting is untouched."
+              title="Replay count for ▶ Play / Preview · the macro plays this many times back to back. Testing only: the key's own Repeat setting is untouched."
               onChange={(e) => setPlayCount(Math.max(1, parseInt(e.target.value) || 1))}
             />
           </ToolField>
@@ -559,7 +561,7 @@ export function RecorderPage({ active = true }: { active?: boolean }) {
               label="Play" tone="primary" icon={<Play size={18} aria-hidden />}
               onClick={() => void playOnDevice()}
               disabled={!drive || playing !== null}
-              title="Play through the keypad's real hardware input (works in games) — F10"
+              title="Play through the keypad's real hardware input (works in games) · F10"
             />
           )}
           {playing?.mode === "preview" ? (
@@ -624,8 +626,8 @@ export function RecorderPage({ active = true }: { active?: boolean }) {
               onClick={() => void exportJson(false)} title="Export macro as JSON…"
             />
             <ToolButton
-              label="Optimize" icon={<Package size={18} aria-hidden />}
-              onClick={() => void exportJson(true)} title="Export optimized (smaller) JSON…"
+              label="Export slim" icon={<Package size={18} aria-hidden />}
+              onClick={() => void exportJson(true)} title="Export a smaller JSON with thinned mouse paths · the macro here stays as it is"
             />
             <ToolButton
               label="Close" tone="danger" icon={<X size={18} aria-hidden />}

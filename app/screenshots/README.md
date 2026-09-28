@@ -14,11 +14,27 @@ npm run screenshots
 
 Output:
 
-- `docs/images/screens/<model>-<page>.png` — Devices, Setup, Keys, Recorder,
-  Profiles and every Settings tab, for `core6` and `vision6` (+ `-wizard` when
-  reachable). Settings' first tab keeps the plain `-settings` name the docs
-  already link to; the rest are `-settings-<tab>`.
-- `docs/images/oled/<screen>.png` — the nine device screens.
+- `docs/images/screens/<model>-<page>.png` for `core6` and `vision6`:
+  - `-control` (the page the app opens on) and `-control-playing` (booted with
+    `?playing=6`, so key 6 loops and the PlaybackBar is up);
+  - `-devices` plus one shot per Devices tab: `-devices-test`,
+    `-devices-wiring`, `-devices-troubleshoot`, `-devices-others`;
+  - `-keys` (key 1 open in the tabbed editor), `-recorder` (a recorded macro
+    in the editor), `-profiles` (a profile selected, so its key grid shows);
+  - `-settings` plus `-settings-integrations`, `-settings-app`,
+    `-settings-about`;
+  - `-wizard` (the provisioning wizard on Devices → Other keypads).
+
+  A tabbed page's first tab keeps the plain `<model>-<page>` name the docs link
+  to; the rest are `<model>-<page>-<tab id>`.
+- `docs/images/oled/<screen>.png` — the device screens.
+
+The harness starts its own Vite on port 1420, the app's dev port. If a dev
+server is already running there, pick another port:
+
+```bash
+SCREENSHOT_PORT=1430 npm run screenshots
+```
 
 ## How it works
 

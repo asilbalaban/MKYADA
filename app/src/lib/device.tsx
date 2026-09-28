@@ -11,6 +11,7 @@ import {
   useState,
 } from "react";
 import { META_PROTO } from "./device-meta";
+import { PlaybackProvider } from "./playback-context";
 import { ipc, onDeviceDisconnected, onDeviceMsg, onDeviceStatus } from "./ipc";
 import { keysCache } from "./keys-cache";
 import { loadKeysToCache } from "./keys-loader";
@@ -125,6 +126,8 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
       if (msg.t === "play_done") setPlayingBusy(false);
       if (msg.t === "hello") {
         setHello(msg as unknown as Hello);
+        // proto v17 reports a running playback — a reconnect mid-loop is busy
+        if ("playing" in msg) setPlayingBusy(!!msg.playing);
         setLayer(String((msg as { layer?: string }).layer ?? "a"));
         setReloading(false);
         // Advertise wheel-menu support on every hello (connect / reload /
@@ -555,7 +558,9 @@ export function DeviceProvider({ children }: { children: ReactNode }) {
         onMsg,
       }}
     >
-      {children}
+      <PlaybackProvider port={port} hello={hello} subscribe={onMsg}>
+        {children}
+      </PlaybackProvider>
     </Ctx.Provider>
   );
 }

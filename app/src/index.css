@@ -1,91 +1,269 @@
 @import "tailwindcss";
 
 /*
- * Semantic theme tokens. Light is the default; `:root[data-theme="dark"]`
- * overrides the same variables, so every Tailwind utility that references
- * them (bg-panel, text-fg-muted, border-line, …) follows the theme at
- * runtime. Values are GitHub-Primer-inspired.
+ * Visual foundation: the Hezk Design System (light only).
+ *
+ * Source of truth for the values below is the Hezk DS tokens
+ * (tokens/colors|typography|spacing|effects.css). They are exposed as Tailwind
+ * v4 theme variables so utilities (bg-panel, text-fg-muted, rounded-control,
+ * font-strong, ease-standard …) resolve to Hezk values. Never write raw palette
+ * classes (slate-*, red-*, white, black) — use these tokens.
+ *
+ * The historical token names (bg, panel, panel2, line, fg, fg-muted, fg-faint,
+ * accent*, success|warning|danger|info[-bg|-line], layer) are kept so every
+ * page keeps working; they now carry Hezk values. New code should prefer the
+ * Hezk-named surfaces (raised, sunken, selected, hover, inverse, lavender).
  */
-@theme {
-  /* surfaces */
-  --color-bg: #f4f6f8;
-  --color-panel: #ffffff;
-  --color-panel2: #eef1f5;
-  --color-line: #d5dce3;
 
-  /* text */
-  --color-fg: #1f2328;
-  --color-fg-muted: #57606a;
-  --color-fg-faint: #7d8590;
-
-  /* brand */
-  --color-accent: #0369a1;
-  --color-accent-dim: #0284c7;
-  --color-accent-fg: #ffffff;
-
-  /* status */
-  --color-success: #1a7f37;
-  --color-success-bg: #dafbe1;
-  --color-success-line: #aceebb;
-  --color-warning: #9a6700;
-  --color-warning-bg: #fff8c5;
-  --color-warning-line: #d4a72c66;
-  --color-danger: #cf222e;
-  --color-danger-bg: #ffebe9;
-  --color-danger-line: #ff818266;
-  --color-info: #0969da;
-  --color-info-bg: #ddf4ff;
-  --color-info-line: #54aeff66;
-
-  /* misc */
-  --color-layer: #8250df;
+/* Google Sans Flex — variable (wght 1–1000, wdth 25–151). Self-hosted: the app
+ * must work offline, so no CDN. latin-ext covers accented Latin. */
+@font-face {
+  font-family: "Google Sans Flex";
+  font-style: normal;
+  font-weight: 1 1000;
+  font-stretch: 25% 151%;
+  font-display: swap;
+  src: url("./assets/fonts/GoogleSansFlex-latin-ext.woff2") format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308,
+    U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113,
+    U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: "Google Sans Flex";
+  font-style: normal;
+  font-weight: 1 1000;
+  font-stretch: 25% 151%;
+  font-display: swap;
+  src: url("./assets/fonts/GoogleSansFlex-latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304,
+    U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 
-:root[data-theme="dark"] {
-  --color-bg: #0d1117;
-  --color-panel: #161b22;
-  --color-panel2: #1c2330;
-  --color-line: #2d3644;
+@theme {
+  /* ---- Hezk palette (raw; prefer the semantic names below) ---- */
+  --color-indigo: oklch(0.52 0.17 278);
+  --color-indigo-28: oklch(0.28 0.15 278);
+  --color-indigo-36: oklch(0.36 0.15 278);
+  --color-indigo-44: oklch(0.44 0.15 278);
+  --color-indigo-64: oklch(0.64 0.15 278);
+  --color-indigo-88: oklch(0.88 0.04 278);
+  --color-indigo-95: oklch(0.95 0.04 278);
+  --color-indigo-tint: oklch(0.95 0.025 278);
+  --color-lavender: oklch(0.88 0.06 278);
+  --color-night: oklch(0.36 0.13 278);
+  --color-charcoal: #1c1b18;
+  --color-cream: #f6f3ee;
+  --color-stone-50: #f6f3ee;
+  --color-stone-100: #e9e6df;
+  --color-stone-150: #e6e2da;
+  --color-stone-200: #e2ddd4;
+  --color-stone-250: #dad6ce;
+  --color-stone-300: #d8d4cc;
+  --color-stone-350: #bdb8b0;
+  --color-stone-400: #9a968e;
+  --color-stone-500: #77736b;
+  --color-stone-600: #55514a;
 
-  --color-fg: #e6edf3;
-  --color-fg-muted: #94a3b8;
-  --color-fg-faint: #64748b;
+  /* ---- surfaces ---- */
+  --color-bg: #e9e6df; /* page — stone-100 */
+  --color-panel: #f6f3ee; /* card — cream */
+  --color-panel2: #ffffff; /* nested tile / control inside a card — raised */
+  --color-raised: #ffffff;
+  --color-sunken: #e6e2da; /* wells, tracks, segmented-control rail — stone-150 */
+  --color-selected: oklch(0.95 0.025 278); /* indigo tint */
+  --color-hover: rgba(28, 27, 24, 0.05);
+  --color-press: rgba(28, 27, 24, 0.09);
+  --color-inverse: #1c1b18; /* sidebar, toasts — charcoal */
+  --color-inverse-fg: #f6f3ee;
+  --color-inverse-muted: #bdb8b0;
+  --color-inverse-line: rgba(246, 243, 238, 0.14);
+  --color-scrim: rgba(28, 27, 24, 0.44);
 
-  --color-accent: #38bdf8;
-  --color-accent-dim: #0ea5e9;
-  --color-accent-fg: #08131c;
+  /* ---- lines ---- */
+  --color-line: #e2ddd4; /* hairline — stone-200 */
+  --color-line-strong: #d8d4cc; /* control border — stone-300 */
 
-  --color-success: #3fb950;
-  --color-success-bg: #2ea04326;
-  --color-success-line: #2ea0434d;
-  --color-warning: #e3b341;
-  --color-warning-bg: #bb800926;
-  --color-warning-line: #bb80094d;
-  --color-danger: #f85149;
-  --color-danger-bg: #f851491a;
-  --color-danger-line: #f8514966;
-  --color-info: #7dd3fc;
-  --color-info-bg: #0ea5e91a;
-  --color-info-line: #0ea5e94d;
+  /* ---- text ---- */
+  --color-fg: #1c1b18;
+  --color-fg-muted: #55514a; /* stone-600 */
+  --color-fg-faint: #77736b; /* stone-500 */
+  --color-fg-disabled: #9a968e; /* stone-400 */
 
-  --color-layer: #c084fc;
+  /* ---- brand ---- */
+  --color-accent: oklch(0.52 0.17 278); /* indigo — primary action, links, focus */
+  --color-accent-dim: oklch(0.44 0.15 278); /* hover / selected-strong */
+  --color-accent-press: oklch(0.36 0.15 278);
+  --color-accent-fg: #f6f3ee; /* text on indigo */
+  --color-accent-ink: oklch(0.44 0.15 278); /* indigo text on a tint */
+
+  /* ---- status (text-* = ink that reads on cream; -bg = tint; -line = border) ---- */
+  --color-success: oklch(0.47 0.12 155);
+  --color-success-solid: oklch(0.55 0.12 155);
+  --color-success-bg: oklch(0.95 0.035 155);
+  --color-success-line: oklch(0.85 0.06 155);
+  --color-warning: oklch(0.5 0.12 65);
+  --color-warning-solid: oklch(0.68 0.14 70);
+  --color-warning-bg: oklch(0.95 0.04 80);
+  --color-warning-line: oklch(0.86 0.08 78);
+  --color-danger: oklch(0.5 0.19 25);
+  --color-danger-solid: oklch(0.58 0.2 25);
+  --color-danger-bg: oklch(0.95 0.03 25);
+  --color-danger-line: oklch(0.86 0.07 25);
+  --color-info: oklch(0.44 0.15 278);
+  --color-info-bg: oklch(0.95 0.025 278);
+  --color-info-line: oklch(0.86 0.05 278);
+
+  /* status glyphs on charcoal (toasts, sidebar) */
+  --color-success-on-dark: oklch(0.78 0.12 155);
+  --color-warning-on-dark: oklch(0.82 0.12 80);
+  --color-danger-on-dark: oklch(0.75 0.15 25);
+
+  /* layer marker (Keypad dot) */
+  --color-layer: oklch(0.64 0.15 278);
+
+  /* ---- type ---- */
+  --font-sans: "Google Sans Flex", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, "Cascadia Mono", Consolas, monospace;
+  /* Hezk weights: 400 body · 520 medium · 560 strong (buttons, headings) · 600 title. No 700. */
+  --font-weight-medium: 520;
+  --font-weight-strong: 560;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 600;
+  --text-label: 12px;
+  --text-label--line-height: 1.4;
+  --text-body: 14px;
+  --text-body--line-height: 1.5;
+  --text-title: 15px;
+  --text-title--line-height: 1.3;
+  --text-h3: 20px;
+  --text-h3--line-height: 1.2;
+  --text-h2: 28px;
+  --text-h2--line-height: 1.15;
+  --tracking-label: 0.02em;
+  --tracking-tight: -0.02em;
+
+  /* ---- shape ---- */
+  --radius-badge: 4px;
+  --radius-control: 6px;
+  --radius-card: 8px;
+  --radius-dialog: 12px;
+
+  /* ---- elevation: flat by default; only floating layers cast shadows ---- */
+  --shadow-sm: 0 1px 2px rgba(28, 27, 24, 0.1);
+  --shadow-md: 0 10px 24px rgba(28, 27, 24, 0.1);
+  --shadow-lg: 0 10px 24px rgba(28, 27, 24, 0.1);
+  --shadow-xl: 0 18px 48px rgba(28, 27, 24, 0.22);
+  --shadow-2xl: 0 18px 48px rgba(28, 27, 24, 0.22);
+  --shadow-float: 0 10px 24px rgba(28, 27, 24, 0.1);
+  --shadow-overlay: 0 18px 48px rgba(28, 27, 24, 0.22);
+  --shadow-ring: 0 0 0 3px oklch(0.88 0.06 278); /* focus ring (lavender) */
+
+  /* ---- motion ---- */
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --default-transition-duration: 120ms;
+  --default-transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
+
+  /* ---- controls ---- */
+  --spacing-control: 40px;
+  --spacing-control-sm: 32px;
+  --spacing-control-xs: 28px;
+}
+
+/* Light only — keep native controls (select popups, scrollbars, date pickers)
+ * light even when the OS is in dark mode. */
+:root {
+  color-scheme: light;
 }
 
 html,
 body {
   background: var(--color-bg);
   color: var(--color-fg);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI Variable", "Segoe UI",
-    system-ui, "Helvetica Neue", Arial, sans-serif;
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
   user-select: none;
   -webkit-user-select: none;
 }
 
-/* Keyboard-visible focus ring everywhere; invisible for mouse clicks. */
+h1,
+h2,
+h3,
+h4 {
+  font-weight: 560;
+  letter-spacing: -0.01em;
+}
+
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
+}
+
+input[type="checkbox"],
+input[type="radio"],
+input[type="range"] {
+  accent-color: var(--color-accent);
+}
+
+input[type="number"],
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+::selection {
+  background: var(--color-lavender);
+  color: var(--color-charcoal);
+}
+
+/* Keyboard-visible focus: indigo outline for generic elements. Form controls
+ * in ui.tsx use the Hezk control focus instead (indigo border + lavender ring). */
 :focus-visible {
   outline: 2px solid var(--color-accent);
   outline-offset: 2px;
-  border-radius: 4px;
+}
+.hz-control:focus-visible,
+input.hz-control:focus,
+select.hz-control:focus,
+textarea.hz-control:focus {
+  outline: none;
+  border-color: var(--color-accent);
+  box-shadow: var(--shadow-ring);
+}
+
+/* Compact density (Hezk data-hz-density="compact"): 28px controls, 13px text —
+ * for dense editors like the Recorder. Components read --hz-control-h. */
+:root {
+  --hz-control-h: 40px;
+  --hz-control-fs: 14px;
+  --hz-control-px: 16px;
+  --hz-input-px: 12px;
+}
+[data-hz-density="compact"] {
+  --hz-control-h: 28px;
+  --hz-control-fs: 12.5px;
+  --hz-control-px: 10px;
+  --hz-input-px: 8px;
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+@keyframes hz-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes hz-scrim-in {
+  from {
+    opacity: 0;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -111,7 +289,16 @@ body {
   width: 10px;
   height: 10px;
 }
+::-webkit-scrollbar-track {
+  background: transparent;
+}
 ::-webkit-scrollbar-thumb {
-  background: var(--color-line);
-  border-radius: 5px;
+  background: var(--color-stone-300);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-stone-350);
+  background-clip: padding-box;
 }

@@ -1,14 +1,29 @@
-// Device management: the connected keypad (with nickname + firmware update),
-// keypads plugged in right now (prominent), and remembered ones (dimmed).
-// A single plugged-in keypad connects automatically.
+// Devices: everything about the keypad itself, on one page. A hero for the
+// connected keypad (name, model, firmware, the one thing to do next), then
+// tabs for how it's built (Setup, Test keys, Fix wiring), repairs
+// (Troubleshoot) and every other keypad. Setup used to be its own page behind
+// a button here (issue #42); it lives in the tabs now.
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { CirclePlus, LifeBuoy, RotateCcw, RotateCw, Usb, Wand2 } from "lucide-react";
+import {
+  Check,
+  ChevronDown,
+  ClipboardList,
+  Hand,
+  LifeBuoy,
+  Pencil,
+  RefreshCw,
+  RotateCw,
+  Usb,
+  Wrench,
+  X,
+  Keyboard,
+} from "lucide-react";
 import { FirmwareProgress, ipc, onFirmwareProgress } from "../lib/ipc";
 import { isSerialDrive, useDevice } from "../lib/device";
 import { useNav } from "../lib/nav";
-import { MODEL_META, deviceModel } from "../lib/types";
+import { MODEL_META, deviceModel, type DeviceInfo } from "../lib/types";
 import {
   RememberedDevice,
   displayName,
@@ -16,42 +31,53 @@ import {
   rememberedDevices,
   writeNameToDevice,
 } from "../lib/devnames";
-import { Badge, Button, Card, EmptyState, Field, Input } from "../components/ui";
+import {
+  Alert,
+  Badge,
+  Button,
+  Card,
+  EmptyState,
+  IconButton,
+  Input,
+  ProgressBar,
+  Tabs,
+  type Tab,
+} from "../components/ui";
 import { ProductImage } from "../components/ProductImage";
-import { ProvisionWizard } from "../components/ProvisionWizard";
-import { RecoveryWizard } from "../components/RecoveryWizard";
 import { useToast } from "../components/toast";
 import { useConfirm } from "../components/dialog";
+import {
+  FixWiringTab,
+  SetupTab,
+  TestKeysTab,
+  useKeypadConfig,
+} from "../components/devices/KeypadSetup";
+import { TroubleshootTab } from "../components/devices/Troubleshoot";
+import { OtherKeypads } from "../components/devices/OtherKeypads";
+
+type TabId = "setup" | "test" | "wiring" | "troubleshoot" | "others";
 
 export function DevicesPage({ onConnected }: { onConnected: () => void }) {
-  const {
-    scanning,
-    devices,
-    scan,
-    connect,
-    port,
-    hello,
-    drive,
-    disconnect,
-    send,
-    updating,
-    setUpdating,
-  } = useDevice();
+  const { scanning, devices, scan, connect, port, hello, drive, disconnect, send, updating, setUpdating } =
+    useDevice();
   const nav = useNav();
   const toast = useToast();
   const confirm = useConfirm();
   const [remembered, setRemembered] = useState<Record<string, RememberedDevice>>({});
-  const [nickname, setNickname] = useState("");
   const [bundledFw, setBundledFw] = useState("");
   const [fwProgress, setFwProgress] = useState<FirmwareProgress | null>(null);
-  const [provisioning, setProvisioning] = useState(false);
   const [recovery, setRecovery] = useState(false);
+  const [tab, setTab] = useState<TabId>("setup");
+  const setup = useKeypadConfig();
   const rescue = hello?.mode === "rescue";
 
   // A keypad that answered from its rescue console is already broken — open
-  // the wizard on sight rather than making the owner find the button.
+  // the recovery wizard on sight rather than making the owner find it.
   useEffect(() => {
-    if (rescue) setRecovery(true);
+    if (rescue) {
+      setRecovery(true);
+      setTab("troubleshoot");
+    }
   }, [rescue]);
 
   useEffect(() => {
@@ -70,44 +96,36 @@ export function DevicesPage({ onConnected }: { onConnected: () => void }) {
     invoke<string>("firmware_bundled_version").then(setBundledFw).catch(() => setBundledFw(""));
   }, []);
 
-  useEffect(() => {
-    if (hello) {
-      setNickname(remembered[hello.uid]?.name ?? "");
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hello?.uid, remembered]);
-
-  async function saveNickname() {
+  async function saveNickname(name: string) {
     if (!hello) return;
-    await rememberDevice(hello.uid, { name: nickname.trim() });
+    await rememberDevice(hello.uid, { name });
     await refreshRemembered();
     // Also store it on the keypad itself, so it keeps the name on any computer.
     if (drive) {
       try {
-        await writeNameToDevice(drive.path, nickname.trim());
-        toast.success("Nickname saved", "Stored on the keypad too — it travels with the device.");
-        return;
+        await writeNameToDevice(drive.path, name);
+        toast.success("Name saved", "Stored on the keypad too · it travels with the device.");
       } catch {
-        toast.success("Nickname saved", "Couldn't write it to the keypad's drive, saved on this computer only.");
-        return;
+        toast.success("Name saved", "Saved on this computer only · the keypad's drive wasn't writable.");
       }
+      return;
     }
-    toast.success("Nickname saved");
+    toast.success("Name saved");
   }
 
   async function updateFirmware(reinstall = false) {
     if (!hello || !drive) return;
     const ok = await confirm({
-        title: reinstall ? "Reinstall firmware" : "Update firmware",
-        message: reinstall
-          ? `Rewrite every firmware file on the keypad with the bundled v${bundledFw}, ` +
-            "even though it already reports this version? Use this to repair a broken " +
-            "or half-finished install.\n\n" +
-            "Your key assignments, macros and config stay untouched. " +
-            "The keypad restarts and reconnects automatically."
-          : `Update the device firmware from v${hello.fw} to v${bundledFw}?\n\n` +
-            "Your key assignments, macros and config stay untouched. " +
-            "The keypad restarts and reconnects automatically.",
+      title: reinstall ? "Reinstall firmware" : "Update firmware",
+      message: reinstall
+        ? `Rewrite every firmware file on the keypad with the bundled v${bundledFw}, ` +
+          "even though it already reports this version? Use this to repair a broken " +
+          "or half-finished install.\n\n" +
+          "Your key assignments, macros and setup stay untouched. " +
+          "The keypad restarts and reconnects automatically."
+        : `Update the keypad firmware from v${hello.fw} to v${bundledFw}?\n\n` +
+          "Your key assignments, macros and setup stay untouched. " +
+          "The keypad restarts and reconnects automatically.",
       confirmLabel: reinstall ? "Reinstall" : "Update",
     });
     if (!ok) return;
@@ -128,8 +146,8 @@ export function DevicesPage({ onConnected }: { onConnected: () => void }) {
       // Drop the now-dead connection so auto-connect reattaches cleanly.
       await disconnect().catch(() => {});
       toast.success(
-        `Firmware ${reinstall ? "reinstalled" : "updated"} (${files.length} files written)`,
-        "The keypad is restarting — it will reconnect in a few seconds.",
+        `Firmware ${reinstall ? "reinstalled" : "updated"} · ${files.length} files written`,
+        "The keypad is restarting · it reconnects in a few seconds.",
       );
     } catch (e) {
       toast.error("Firmware update failed", String(e));
@@ -147,11 +165,15 @@ export function DevicesPage({ onConnected }: { onConnected: () => void }) {
     // The port is about to vanish — drop the connection now so the
     // auto-connect loop picks the keypad up as soon as it re-enumerates.
     await disconnect().catch(() => {});
-    toast.success("Keypad restarting", "It will reconnect by itself in a few seconds.");
+    toast.success("Keypad restarting", "It reconnects by itself in a few seconds.");
   }
 
-  const fwOutdated =
-    hello && bundledFw && hello.fw !== bundledFw ? bundledFw : null;
+  async function connectTo(d: DeviceInfo) {
+    await connect(d);
+    onConnected();
+  }
+
+  const fwOutdated = !!(hello && bundledFw && hello.fw !== bundledFw);
   const connectedUid = hello?.uid.toLowerCase();
   const pluggedIn = devices.filter((d) => d.hello.uid.toLowerCase() !== connectedUid);
   const pluggedUids = new Set(devices.map((d) => d.hello.uid.toLowerCase()));
@@ -159,302 +181,398 @@ export function DevicesPage({ onConnected }: { onConnected: () => void }) {
     (r) => r.uid.toLowerCase() !== connectedUid && !pluggedUids.has(r.uid.toLowerCase()),
   );
 
-  const fwPct =
-    fwProgress && fwProgress.total > 0
-      ? Math.round((fwProgress.done / fwProgress.total) * 100)
-      : null;
+  const others = (
+    <OtherKeypads
+      connected={!!(port && hello)}
+      scanning={scanning}
+      pluggedIn={pluggedIn}
+      offline={offline}
+      remembered={remembered}
+      onScan={() => void scan()}
+      onConnect={(d) => void connectTo(d)}
+      onProvisioned={() => setTab("setup")}
+    />
+  );
+
+  const modal = updating && <FirmwareModal progress={fwProgress} />;
+
+  // ---- nothing connected: say so, then everything that can change that ----
+  if (!port || !hello) {
+    return (
+      <div className="flex w-full flex-col gap-4">
+        {modal}
+        <Card>
+          <EmptyState
+            icon={<Usb size={28} />}
+            title="No keypad connected"
+            description={
+              pluggedIn.length > 0
+                ? "More than one keypad is plugged in · pick one below to connect."
+                : "Plug in your MKYADA keypad · it connects by itself when it's the only one."
+            }
+            action={
+              <Button variant="primary" onClick={() => void scan()} loading={scanning}>
+                {!scanning && <RefreshCw size={14} aria-hidden />}
+                {scanning ? "Scanning…" : "Scan for keypads"}
+              </Button>
+            }
+          />
+        </Card>
+        {others}
+      </div>
+    );
+  }
+
+  const model = deviceModel(hello);
+  const name = displayName(remembered[hello.uid]?.name, hello.uid);
+  const unconfigured = setup.state === "unconfigured";
+
+  // The one thing to do next, most urgent first.
+  let primary: ReactNode = null;
+  if (rescue) {
+    primary = !recovery && (
+      <Button
+        variant="primary"
+        onClick={() => {
+          setRecovery(true);
+          setTab("troubleshoot");
+        }}
+      >
+        <LifeBuoy size={14} aria-hidden /> Start recovery
+      </Button>
+    );
+  } else if (fwOutdated) {
+    primary = (
+      <Button variant="primary" onClick={() => void updateFirmware()} disabled={!drive} loading={updating}>
+        {updating ? "Updating…" : "Update firmware"}
+      </Button>
+    );
+  } else if (unconfigured) {
+    primary = tab !== "setup" && (
+      <Button variant="primary" onClick={() => setTab("setup")}>
+        Set up keypad
+      </Button>
+    );
+  } else if (setup.state === "configured") {
+    primary = (
+      <Button variant="primary" onClick={() => nav("keys")}>
+        <Keyboard size={14} aria-hidden /> Assign keys
+      </Button>
+    );
+  }
+
+  const tabs: Tab[] = [
+    ...(rescue
+      ? []
+      : [
+          {
+            id: "setup",
+            label: "Setup",
+            icon: ClipboardList,
+            badge: unconfigured ? <Badge tone="amber">To do</Badge> : undefined,
+          },
+          { id: "test", label: "Test keys", icon: Hand },
+          { id: "wiring", label: "Fix wiring", icon: Wrench },
+        ]),
+    {
+      id: "troubleshoot",
+      label: "Troubleshoot",
+      icon: LifeBuoy,
+      badge: rescue ? <Badge tone="red">Needed</Badge> : undefined,
+    },
+    {
+      id: "others",
+      label: "Other keypads",
+      icon: Usb,
+      badge: pluggedIn.length > 0 ? <Badge tone="blue">{pluggedIn.length}</Badge> : undefined,
+    },
+  ];
+  const active: TabId = tabs.some((t) => t.id === tab) ? tab : (tabs[0].id as TabId);
+  // Test keys and Fix wiring read the config — wait until it's known.
+  const needsConfig = (active === "test" || active === "wiring") && setup.state !== "configured";
+
+  const bodies: Record<TabId, () => ReactNode> = {
+    setup: () => (
+      <SetupTab
+        cfg={setup.cfg}
+        setCfg={setup.setCfg}
+        state={setup.state}
+        setState={setup.setState}
+        onSaved={() => setTab("test")}
+        onTest={() => setTab("test")}
+        onFixWiring={() => setTab("wiring")}
+      />
+    ),
+    test: () => <TestKeysTab cfg={setup.cfg} onFixWiring={() => setTab("wiring")} />,
+    wiring: () => <FixWiringTab cfg={setup.cfg} setCfg={setup.setCfg} />,
+    troubleshoot: () => (
+      <TroubleshootTab
+        rescue={rescue}
+        drive={!!drive}
+        deviceFw={hello.fw}
+        bundledFw={bundledFw}
+        fwOutdated={fwOutdated}
+        updating={updating}
+        recovery={recovery}
+        onRestart={() => void restartKeypad()}
+        onFirmware={() => void updateFirmware(!fwOutdated)}
+        onRecovery={() => setRecovery(true)}
+        onCloseRecovery={() => setRecovery(false)}
+      />
+    ),
+    others: () => others,
+  };
 
   return (
-    <div className="flex flex-col gap-4 max-w-3xl mx-auto w-full">
-      {updating && (
-        <div
-          role="alertdialog"
-          aria-modal="true"
-          aria-label="Updating firmware"
-          className="fixed inset-0 z-[80] bg-black/60 flex items-center justify-center"
-        >
-          <div className="w-[26rem] max-w-[calc(100vw-2rem)] rounded-xl border border-line bg-panel shadow-2xl p-5 flex flex-col gap-4">
-            <div className="flex items-start gap-3">
-              {/* clockwise arrow so the glyph turns the same way animate-spin
-                  rotates it — RotateCcw's arrowhead points the other way and
-                  reads as "spinning backwards" (issue #21) */}
-              <RotateCw size={22} className="text-accent shrink-0 mt-0.5 animate-spin" aria-hidden />
-              <div className="flex-1 min-w-0">
-                <p className="text-fg font-medium text-sm">Updating firmware…</p>
-                <p className="text-xs text-fg-muted truncate">
-                  {fwProgress?.file
-                    ? `${fwProgress.file} (${Math.min(fwProgress.index + 1, fwProgress.files)}/${fwProgress.files})`
-                    : "Preparing…"}
-                </p>
+    <div className="flex w-full flex-col gap-5">
+      {modal}
+      <Card>
+        <div className="flex flex-col gap-4">
+          <div className="flex flex-wrap items-center gap-5">
+            <ProductImage model={model} className="size-20 shrink-0" />
+            <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+              <NicknameEditor
+                name={name}
+                value={remembered[hello.uid]?.name ?? ""}
+                placeholder={displayName(undefined, hello.uid)}
+                onSave={(n) => void saveNickname(n)}
+              />
+              <div className="flex flex-wrap items-center gap-2 text-sm text-fg-muted">
+                <span>{MODEL_META[model].label}</span>
+                <span aria-hidden className="text-fg-faint">·</span>
+                <span>{hello.key_count} keys</span>
+                <span aria-hidden className="text-fg-faint">·</span>
+                <FirmwareBadge rescue={rescue} fw={hello.fw} bundled={bundledFw} outdated={fwOutdated} />
+                {!rescue && unconfigured && <Badge tone="amber">Not set up</Badge>}
               </div>
-              <span className="text-sm text-fg-muted tabular-nums shrink-0">
-                {fwPct !== null ? `${fwPct}%` : ""}
-              </span>
             </div>
-            <div className="h-2 rounded-full bg-panel2 overflow-hidden">
-              {fwPct !== null ? (
-                <div
-                  className="h-full bg-accent transition-[width] duration-200"
-                  style={{ width: `${fwPct}%` }}
-                />
-              ) : (
-                <div className="h-full w-1/3 bg-accent/60 animate-pulse" />
-              )}
-            </div>
-            <p className="text-xs text-fg-faint">
-              Do not unplug the keypad. Its keys and menus are locked while files transfer; every
-              file is verified after it lands. The keypad restarts by itself when this finishes.
-            </p>
-          </div>
-        </div>
-      )}
-      <Card
-        title="Connected"
-        actions={
-          port && (
-            <div className="flex gap-2">
-              {/* Setup lives here rather than in the sidebar (issue #42) — it's
-                  a once-per-keypad chore, and it belongs with the device it
-                  describes. A keypad in rescue mode can't be configured. */}
-              {hello && !rescue && (
-                <Button
-                  onClick={() => nav("setup")}
-                  title="Keys, layers and wiring — how this keypad is built"
-                >
-                  <Wand2 size={14} aria-hidden /> Setup
-                </Button>
-              )}
-              <Button
-                onClick={() => void restartKeypad()}
-                title="Restart the keypad — fixes a read-only USB drive without replugging"
-              >
-                <RotateCcw size={14} aria-hidden /> Restart keypad
-              </Button>
+            <div className="flex shrink-0 items-center gap-2">
+              {primary}
               <Button variant="danger" onClick={() => void disconnect()}>
                 Disconnect
               </Button>
             </div>
-          )
-        }
-      >
-        {port && hello ? (
-          <div className="flex flex-col gap-3">
-            <div className="flex items-center gap-3">
-              <ProductImage model={deviceModel(hello)} className="w-16 h-16" />
-              <div className="flex items-center gap-3">
-                <span
-                  className={`w-3 h-3 rounded-full animate-pulse ${rescue ? "bg-danger" : "bg-success"}`}
-                />
-                <span className="text-lg font-semibold text-fg">
-                  {displayName(remembered[hello.uid]?.name, hello.uid)}
+          </div>
+
+          {rescue && (
+            <Alert tone="danger" title="The keypad's firmware didn't start">
+              Its rescue console answered instead. Your macros and setup are still on the board ·
+              recovery reinstalls only the firmware files and restarts it.
+              {hello.err && (
+                <span className="mt-1 block truncate font-mono text-xs text-fg-faint" title={hello.err}>
+                  {hello.err}
                 </span>
-                {rescue ? (
-                  <Badge tone="red">rescue mode</Badge>
-                ) : (
-                  <Badge tone="green">USB · connected</Badge>
-                )}
-              </div>
-            </div>
-            {rescue && (
-              <div className="flex items-start gap-3 bg-danger-bg border border-danger-line rounded-lg px-3 py-2.5">
-                <LifeBuoy size={18} className="text-danger shrink-0 mt-0.5" aria-hidden />
-                <div className="flex-1 flex flex-col gap-2">
-                  <p className="text-sm text-fg">
-                    The keypad&apos;s firmware failed to start, so its built-in rescue console
-                    answered instead. Your macros and settings are still on the board — repairing
-                    reinstalls only the firmware files and restarts it.
-                  </p>
-                  {hello.err && (
-                    <p className="text-xs text-fg-faint font-mono truncate" title={hello.err}>
-                      {hello.err}
-                    </p>
-                  )}
-                  {!recovery && (
-                    <div>
-                      <Button variant="primary" onClick={() => setRecovery(true)}>
-                        Start recovery
-                      </Button>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-            <div className="flex items-end gap-2">
-              <Field label="Nickname (e.g. Klavye 1)">
-                <Input
-                  value={nickname}
-                  placeholder={displayName(undefined, hello.uid)}
-                  onChange={(e) => setNickname(e.target.value)}
-                />
-              </Field>
-              <Button onClick={() => void saveNickname()}>Save name</Button>
-            </div>
-            <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-sm text-fg-muted">
-              <span>Model</span>
-              <span className="text-fg">{MODEL_META[deviceModel(hello)].label}</span>
-              <span>Firmware</span>
-              <span className="text-fg">
-                v{hello.fw}
-                {fwOutdated && <Badge tone="amber"> update available</Badge>}
-              </span>
-              <span>Keys</span>
-              <span className="text-fg">{hello.key_count}</span>
-              <span>Serial port</span>
-              <span className="text-fg font-mono text-xs">{port}</span>
-              <span>USB drive</span>
-              <span className="text-fg font-mono text-xs">
-                {isSerialDrive(drive)
-                  ? "hidden — managed by the app (Settings)"
+              )}
+            </Alert>
+          )}
+
+          <Details
+            rows={[
+              ["Firmware", `v${hello.fw}${bundledFw && fwOutdated ? ` · app ships v${bundledFw}` : ""}`],
+              ["Serial port", port],
+              [
+                "USB drive",
+                isSerialDrive(drive)
+                  ? "Hidden · managed by the app"
                   : drive
                     ? drive.path
-                    : "not found"}
-              </span>
-              <span>Board UID</span>
-              <span className="text-fg font-mono text-xs">{hello.uid}</span>
+                    : "Not found",
+              ],
+              ["Board ID", hello.uid],
+            ]}
+          />
+        </div>
+      </Card>
+
+      <Tabs
+        idPrefix="devices"
+        label="Keypad sections"
+        tabs={tabs}
+        value={active}
+        onChange={(id) => setTab(id as TabId)}
+      >
+        {needsConfig ? (
+          <Card>
+            <p className="text-sm text-fg-muted">
+              {setup.state === "loading"
+                ? "Reading the keypad's setup…"
+                : "Set up the keypad first · the key test needs to know how it's built."}
+            </p>
+            {setup.state === "unconfigured" && (
+              <Button className="mt-3" variant="primary" onClick={() => setTab("setup")}>
+                Set up keypad
+              </Button>
+            )}
+          </Card>
+        ) : (
+          bodies[active]()
+        )}
+      </Tabs>
+    </div>
+  );
+}
+
+function FirmwareBadge({
+  rescue,
+  fw,
+  bundled,
+  outdated,
+}: {
+  rescue: boolean;
+  fw: string;
+  bundled: string;
+  outdated: boolean;
+}) {
+  if (rescue) return <Badge tone="red" dot>Rescue mode</Badge>;
+  if (outdated)
+    return (
+      <Badge tone="amber" dot>
+        Firmware {fw} · update to {bundled}
+      </Badge>
+    );
+  if (bundled)
+    return (
+      <Badge tone="green" dot>
+        Firmware {fw} · up to date
+      </Badge>
+    );
+  return <Badge>Firmware {fw}</Badge>;
+}
+
+/** The keypad's name, editable in place: click the pencil, type, Enter. */
+function NicknameEditor({
+  name,
+  value,
+  placeholder,
+  onSave,
+}: {
+  name: string;
+  value: string;
+  placeholder: string;
+  onSave: (name: string) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value);
+
+  useEffect(() => {
+    if (!editing) setDraft(value);
+  }, [value, editing]);
+
+  if (!editing) {
+    return (
+      <div className="flex min-w-0 items-center gap-1.5">
+        <h1 className="m-0 truncate text-[22px] font-semibold leading-tight tracking-[-0.01em] text-fg">{name}</h1>
+        <IconButton label="Rename keypad" size="sm" onClick={() => setEditing(true)}>
+          <Pencil size={14} aria-hidden />
+        </IconButton>
+      </div>
+    );
+  }
+
+  const commit = () => {
+    onSave(draft.trim());
+    setEditing(false);
+  };
+  return (
+    <form
+      className="flex max-w-md items-center gap-1.5"
+      onSubmit={(e) => {
+        e.preventDefault();
+        commit();
+      }}
+    >
+      <Input
+        autoFocus
+        aria-label="Keypad name"
+        value={draft}
+        placeholder={placeholder}
+        onChange={(e) => setDraft(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Escape") setEditing(false);
+        }}
+        className="flex-1"
+      />
+      <IconButton label="Save name" variant="secondary" type="submit">
+        <Check size={16} aria-hidden />
+      </IconButton>
+      <IconButton label="Cancel" onClick={() => setEditing(false)}>
+        <X size={16} aria-hidden />
+      </IconButton>
+    </form>
+  );
+}
+
+/** Collapsible technical details under the hero. */
+function Details({ rows }: { rows: [string, string][] }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="flex flex-col gap-2 border-t border-line pt-3">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+        className="inline-flex w-max items-center gap-1.5 rounded-control text-[13px] font-strong text-fg-muted hover:text-fg focus-visible:shadow-ring focus-visible:outline-none"
+      >
+        <ChevronDown
+          size={14}
+          aria-hidden
+          className={`transition-transform duration-[120ms] ease-standard ${open ? "" : "-rotate-90"}`}
+        />
+        Details
+      </button>
+      {open && (
+        <dl className="grid grid-cols-1 gap-x-8 gap-y-2 pl-5 sm:grid-cols-2 xl:grid-cols-4">
+          {rows.map(([k, v]) => (
+            <div key={k} className="flex min-w-0 flex-col gap-0.5">
+              <dt className="text-label text-fg-faint">{k}</dt>
+              <dd className="truncate font-mono text-xs text-fg select-text" title={v}>
+                {v}
+              </dd>
             </div>
-            {!rescue &&
-              (fwOutdated ? (
-                <div className="flex items-center gap-3 bg-warning-bg border border-warning-line rounded-lg px-3 py-2">
-                  <span className="text-sm text-fg">
-                    This app ships firmware v{bundledFw}; the device runs v{hello.fw}.
-                  </span>
-                  <Button
-                    variant="primary"
-                    onClick={() => void updateFirmware()}
-                    disabled={!drive}
-                    loading={updating}
-                  >
-                    {updating ? "Updating…" : "Update firmware"}
-                  </Button>
-                </div>
-              ) : (
-                bundledFw && (
-                  <div className="flex items-center gap-3 text-sm text-fg-faint">
-                    <span>Firmware is up to date.</span>
-                    <Button
-                      onClick={() => void updateFirmware(true)}
-                      disabled={!drive}
-                      loading={updating}
-                      title="Rewrite all firmware files — repairs a broken or half-finished install"
-                    >
-                      {updating ? "Reinstalling…" : "Reinstall firmware"}
-                    </Button>
-                    {!recovery && (
-                      <Button
-                        onClick={() => setRecovery(true)}
-                        title="Check the firmware files on the keypad and repair what doesn't match"
-                      >
-                        <LifeBuoy size={14} aria-hidden /> Recovery
-                      </Button>
-                    )}
-                  </div>
-                )
-              ))}
+          ))}
+        </dl>
+      )}
+    </div>
+  );
+}
+
+function FirmwareModal({ progress }: { progress: FirmwareProgress | null }) {
+  const pct =
+    progress && progress.total > 0 ? Math.round((progress.done / progress.total) * 100) : null;
+  return (
+    <div
+      role="alertdialog"
+      aria-modal="true"
+      aria-label="Updating firmware"
+      className="fixed inset-0 z-[80] flex items-center justify-center bg-scrim"
+    >
+      <div className="flex w-[26rem] max-w-[calc(100vw-2rem)] flex-col gap-4 rounded-card bg-raised p-5 shadow-float">
+        <div className="flex items-start gap-3">
+          {/* clockwise arrow so the glyph turns the same way animate-spin
+              rotates it (issue #21) */}
+          <RotateCw size={22} className="mt-0.5 shrink-0 animate-spin text-accent" aria-hidden />
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-strong text-fg">Updating firmware…</p>
+            <p className="truncate text-xs text-fg-muted">
+              {progress?.file
+                ? `${progress.file} · ${Math.min(progress.index + 1, progress.files)} of ${progress.files}`
+                : "Preparing…"}
+            </p>
           </div>
+          <span className="shrink-0 text-sm tabular-nums text-fg-muted">{pct !== null ? `${pct}%` : ""}</span>
+        </div>
+        {pct !== null ? (
+          <ProgressBar value={pct} label="Firmware update progress" />
         ) : (
-          <EmptyState
-            icon={<Usb size={28} />}
-            title="No keypad connected"
-            description="Plug in your MKYADA keypad — it connects automatically when it's the only one."
-          />
+          <div className="h-1.5 overflow-hidden rounded-full bg-sunken">
+            <div className="h-full w-1/3 animate-pulse rounded-full bg-accent/60" />
+          </div>
         )}
-      </Card>
-
-      {recovery && (
-        <Card title="Recovery">
-          <RecoveryWizard onClose={() => setRecovery(false)} />
-        </Card>
-      )}
-
-      <Card
-        title="Plugged in — ready to connect"
-        actions={
-          <Button onClick={() => void scan()} loading={scanning}>
-            {scanning ? "Scanning…" : "Scan"}
-          </Button>
-        }
-      >
-        {pluggedIn.length === 0 ? (
-          <p className="text-fg-faint text-sm">
-            {port ? "No other keypads plugged in." : scanning ? "Looking for keypads…" : "No keypads found on USB."}
-          </p>
-        ) : (
-          <ul className="flex flex-col gap-2">
-            {pluggedIn.map((d) => (
-              <li
-                key={d.port}
-                className="flex items-center justify-between bg-panel2 border-2 border-accent/50 rounded-lg px-3 py-2"
-              >
-                <div className="flex items-center gap-3">
-                  <span className="w-2.5 h-2.5 rounded-full bg-accent" />
-                  <ProductImage model={deviceModel(d.hello)} className="w-9 h-9" />
-                  <div className="flex flex-col">
-                    <span className="text-sm font-semibold text-fg">
-                      {displayName(remembered[d.hello.uid]?.name, d.hello.uid)}
-                    </span>
-                    <span className="text-xs text-fg-faint">
-                      {MODEL_META[deviceModel(d.hello)].label} · fw v{d.hello.fw} ·{" "}
-                      {d.hello.key_count} keys · {d.port}
-                    </span>
-                  </div>
-                </div>
-                <Button
-                  variant="primary"
-                  onClick={async () => {
-                    await connect(d);
-                    onConnected();
-                  }}
-                >
-                  Connect
-                </Button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </Card>
-
-      <Card
-        title="Set up a new board"
-        actions={
-          !provisioning && (
-            <Button onClick={() => setProvisioning(true)}>
-              <CirclePlus size={14} aria-hidden /> Set up a new board
-            </Button>
-          )
-        }
-      >
-        {provisioning ? (
-          <ProvisionWizard
-            onDone={() => {
-              setProvisioning(false);
-              nav("setup");
-            }}
-            onCancel={() => setProvisioning(false)}
-          />
-        ) : (
-          <p className="text-fg-muted text-sm">
-            Got a blank RP2040-Zero? This flashes CircuitPython and the MKYADA firmware onto it —
-            no tools needed.
-          </p>
-        )}
-      </Card>
-
-      {offline.length > 0 && (
-        <Card title="Remembered — not plugged in">
-          <ul className="flex flex-col gap-1 opacity-60">
-            {offline.map((r) => (
-              <li key={r.uid} className="flex items-center gap-3 px-3 py-1.5 text-sm">
-                <span className="w-2.5 h-2.5 rounded-full bg-fg-faint" />
-                <span className="text-fg">{displayName(r.name, r.uid)}</span>
-                <span className="text-xs text-fg-faint">
-                  last seen {new Date(r.lastSeen).toLocaleString()}
-                  {r.fw && ` · fw v${r.fw}`}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </Card>
-      )}
+        <p className="text-xs text-fg-faint">
+          Don't unplug the keypad. Its keys and menus are locked while files transfer, and every file
+          is checked after it lands. The keypad restarts by itself when this finishes.
+        </p>
+      </div>
     </div>
   );
 }

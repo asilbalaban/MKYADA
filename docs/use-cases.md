@@ -45,6 +45,14 @@ genuine USB hardware input. Put a combo or a recorded rotation on a key and it
 plays exactly like your own hands. Use [layers](models.md) to fit a whole
 loadout onto six keys.
 
+Running a looped macro on a box you reach over Chrome Remote Desktop? The app's
+**Control** page starts any key remotely, and the playback bar, the global stop
+hotkey (**Ctrl+Alt+Shift+S** by default) or the tray's **Stop playback** ends
+the loop without touching the keypad. See
+[Remote control](../README.md#remote-control).
+
+![Control page while a key loops](images/screens/vision6-control-playing.png)
+
 > Actions: Shortcut · Recorded macro · Layers · Go-to-layer.
 
 ## 5. Meetings & working from home

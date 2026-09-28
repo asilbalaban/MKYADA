@@ -17,7 +17,7 @@
 // kind's default as if it had been picked, and the first explicit pick
 // replaces it.
 
-import { useMemo, useRef, useState, useEffect } from "react";
+import { useMemo, useRef, useState, useEffect, type ReactNode } from "react";
 import { ChevronDown, Pencil } from "lucide-react";
 import {
   CUSTOM_ICON_PREFIX,
@@ -258,7 +258,12 @@ export function IconPicker({
   assignment,
   name,
   fwVersion,
+  leading,
 }: {
+  /** Rendered above the icon choice in the left column, beside the cell
+   * preview — AssignmentPanel puts the display-name field here so name, icon
+   * and the tile they make form one block. */
+  leading?: ReactNode;
   /** The chosen icon name, or undefined for the kind's default. */
   value: string | undefined;
   onChange: (icon: string | undefined) => void;
@@ -312,22 +317,28 @@ export function IconPicker({
   const mode: "picked" | "drawn" | "none" =
     drawing || custom ? "drawn" : none || !effective ? "none" : "picked";
 
+  // Hezk SegmentedControl look (stone rail, white chip for the active way).
   const seg = (on: boolean) =>
-    `flex items-center gap-2 whitespace-nowrap rounded px-2.5 py-1.5 text-sm transition-colors ${
-      on ? "bg-panel border border-accent text-fg" : "border border-transparent text-fg-muted hover:text-fg"
+    `inline-flex h-[34px] items-center gap-2 whitespace-nowrap rounded-control px-3 text-[13px] transition-colors duration-[120ms] ease-standard ${
+      on ? "bg-raised font-strong text-fg shadow-sm" : "text-fg-muted hover:text-fg"
     }`;
+  const LABEL = "text-label font-medium tracking-label text-fg [font-stretch:90%]";
 
   return (
-    <div className="flex flex-col gap-2">
-      <span className="text-xs font-medium text-fg-muted">Screen icon</span>
-      {/* flex-wrap, and every piece is one line (whitespace-nowrap) — at any
-        * width the row reflows whole pieces instead of breaking labels in two
-        * or squeezing the preview. */}
-      <div className="flex flex-wrap items-center gap-3">
+    <div className="flex flex-col gap-3">
+      {/* Left: the name (leading) and the icon choice; right: the real cell
+        * preview. flex-wrap, and every piece is one line (whitespace-nowrap) —
+        * at any width the row reflows whole pieces instead of breaking labels
+        * in two or squeezing the preview. */}
+      <div className="flex flex-wrap items-start gap-x-6 gap-y-3">
+      <div className="flex min-w-0 flex-1 basis-72 flex-col gap-3">
+      {leading}
+      <div className="flex flex-col gap-1.5">
+        <span className={LABEL}>Screen icon</span>
         <div
           role="group"
           aria-label="Icon choice"
-          className="flex items-center gap-0.5 rounded-md border border-line bg-panel2 p-0.5"
+          className="flex w-max max-w-full flex-wrap items-center gap-0.5 rounded-card bg-sunken p-[3px]"
         >
           <button
             type="button"
@@ -366,11 +377,16 @@ export function IconPicker({
             No icon
           </button>
         </div>
-        <CellPreview name={name} icon={shown} />
+      </div>
+      </div>
+        <div className="flex flex-col gap-1.5">
+          <span className={LABEL}>On the keypad</span>
+          <CellPreview name={name} icon={shown} />
+        </div>
       </div>
 
       {drawing && (
-        <div className="flex flex-col gap-2 rounded-md border border-line p-2">
+        <div className="flex flex-col gap-2 rounded-card border border-line bg-raised p-3">
           <IconDrawer
             rows={rows}
             onRows={(r) => {
@@ -385,7 +401,7 @@ export function IconPicker({
       )}
 
       {open && (
-        <div className="flex flex-col gap-2 rounded-md border border-line p-2">
+        <div className="flex flex-col gap-2 rounded-card border border-line bg-raised p-3">
           <Input
             value={q}
             placeholder={`Search ${ICON_CATEGORIES.reduce((n, [, c]) => n + c.length, 0)} icons…`}
@@ -394,7 +410,7 @@ export function IconPicker({
           <div className="flex max-h-72 flex-col gap-3 overflow-y-auto">
             {groups.map(([label, names]) => (
               <div key={label} className="flex flex-col gap-1">
-                <span className="text-[11px] uppercase tracking-wide text-fg-faint">{label}</span>
+                <span className="text-label font-medium tracking-label text-fg-faint [font-stretch:90%]">{label}</span>
                 <div className="flex flex-wrap gap-1">
                   {names.map((n) => {
                     const picked = mode === "picked" && n === effective;
@@ -408,8 +424,8 @@ export function IconPicker({
                         // text-fg is not decoration: Swatch draws the icon in
                         // its own computed colour, so this is what makes the
                         // pixels legible on the panel.
-                        className={`rounded border p-1 text-fg ${
-                          picked ? "border-accent bg-panel2" : "border-transparent hover:border-line"
+                        className={`rounded-badge border p-1 text-fg ${
+                          picked ? "border-accent bg-selected" : "border-transparent hover:border-line hover:bg-hover"
                         }`}
                       >
                         <Swatch name={n} scale={2} />
@@ -423,9 +439,9 @@ export function IconPicker({
           </div>
         </div>
       )}
-      <span className="text-[11px] text-fg-faint">
+      <span className="text-label text-fg-faint">
         {mode === "none"
-          ? "No picture on this key — the cell is the name alone, on two lines if it needs them."
+          ? "No picture on this key. The cell is the name alone, on two lines if it needs them."
           : "Shown above the name in the key grid. A name that needs two lines drops the icon."}
       </span>
     </div>

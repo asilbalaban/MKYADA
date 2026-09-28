@@ -6,8 +6,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { RefreshCw } from "lucide-react";
-import { Badge, Button, Card } from "./ui";
+import { Keyboard, MousePointer2, RefreshCw, type LucideIcon } from "lucide-react";
+import { Alert, Badge, Button, Card, SettingRow, Tooltip } from "./ui";
 
 type PermState = "granted" | "denied" | "unknown";
 
@@ -53,37 +53,40 @@ export function usePermissions(pollWhileMissing = true) {
 }
 
 function StateBadge({ state }: { state: PermState }) {
-  if (state === "granted") return <Badge tone="green">✓ granted</Badge>;
-  if (state === "denied") return <Badge tone="red">✕ DENIED</Badge>;
-  return <Badge tone="amber">? not asked yet</Badge>;
+  if (state === "granted") return <Badge tone="green" dot>Granted</Badge>;
+  if (state === "denied") return <Badge tone="red" dot>Denied</Badge>;
+  return <Badge tone="amber" dot>Not asked yet</Badge>;
 }
 
 function PermRow({
-  title, purpose, state, kind,
+  title, purpose, state, kind, icon,
 }: {
   title: string;
   purpose: string;
   state: PermState;
   kind: string;
+  icon: LucideIcon;
 }) {
-  const border =
-    state === "granted" ? "border-success-line" : state === "denied" ? "border-danger-line" : "border-warning-line";
-  const dot =
-    state === "granted" ? "bg-success" : state === "denied" ? "bg-danger" : "bg-warning";
   return (
-    <div className={`flex items-center gap-3 bg-panel2 border ${border} rounded-lg px-3 py-2`}>
-      <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${dot}`} />
-      <div className="flex-1 min-w-0">
-        <p className="text-sm text-fg">{title}</p>
-        <p className="text-xs text-fg-faint">{purpose}</p>
-      </div>
-      <StateBadge state={state} />
-      {state !== "granted" && (
-        <Button variant="primary" onClick={() => void invoke("permissions_request", { kind })}>
-          {state === "unknown" ? "Allow…" : "Open Settings"}
-        </Button>
-      )}
-    </div>
+    <SettingRow
+      icon={icon}
+      title={title}
+      description={purpose}
+      control={
+        <>
+          <StateBadge state={state} />
+          {state !== "granted" && (
+            <Button
+              size="sm"
+              variant="primary"
+              onClick={() => void invoke("permissions_request", { kind })}
+            >
+              {state === "unknown" ? "Allow…" : "Open System Settings"}
+            </Button>
+          )}
+        </>
+      }
+    />
   );
 }
 
@@ -95,8 +98,8 @@ export function PermissionsCard() {
     return (
       <Card title="Permissions">
         <p className="text-sm text-fg-muted">
-          No special OS permissions are required on {status.platform === "windows" ? "Windows" : "Linux"}.
-          {status.platform === "linux" && " (Global recording requires an X11 session — Wayland is not supported yet.)"}
+          No special permissions needed on {status.platform === "windows" ? "Windows" : "Linux"}.
+          {status.platform === "linux" && " Recording needs an X11 session · Wayland isn't supported yet."}
         </p>
       </Card>
     );
@@ -105,81 +108,93 @@ export function PermissionsCard() {
   return (
     <Card
       title="macOS permissions"
+      description="Only needed for recording and preview playback · the keypad itself works without them"
       actions={
-        <div className="flex items-center gap-2">
-          {lastChecked && (
-            <span className="text-[10px] text-fg-faint">checked {lastChecked}</span>
-          )}
-          <Button onClick={() => void refresh()} disabled={checking}>
-            {checking ? "Checking…" : "Re-check"}
+        <Tooltip side="bottom" content={lastChecked ? `Last checked ${lastChecked}` : "Check again"}>
+          <Button size="sm" onClick={() => void refresh()} loading={checking}>
+            <RefreshCw size={14} aria-hidden /> Re-check
           </Button>
-        </div>
+        </Tooltip>
       }
     >
-      <div className="flex flex-col gap-2">
-        <PermRow
-          title="Input Monitoring"
-          purpose="Needed to record macros (global keyboard & mouse capture)"
-          state={status.input_monitoring}
-          kind="input_monitoring"
-        />
-        <PermRow
-          title="Accessibility"
-          purpose="Needed for local preview playback on this Mac"
-          state={status.accessibility}
-          kind="accessibility"
-        />
+      <div className="flex flex-col gap-4">
+        <div className="flex flex-col divide-y divide-line">
+          <PermRow
+            icon={Keyboard}
+            title="Input Monitoring"
+            purpose="Records macros from your keyboard and mouse · takes effect after a restart"
+            state={status.input_monitoring}
+            kind="input_monitoring"
+          />
+          <PermRow
+            icon={MousePointer2}
+            title="Accessibility"
+            purpose="Plays macro previews on this Mac"
+            state={status.accessibility}
+            kind="accessibility"
+          />
+        </div>
 
         {missing && (
-          <div className="bg-danger-bg border border-danger-line rounded-lg p-3 flex flex-col gap-2">
-            <p className="text-sm text-danger font-semibold">
-              Already granted it, but it still shows DENIED?
-            </p>
-            <p className="text-xs text-fg-muted leading-relaxed">
-              The app is unsigned, so <span className="text-fg">every update gets a new
-              signature</span> and macOS ties permissions to the old one. The toggle in System
-              Settings then belongs to the previous version and does nothing. Fix it like this:
-            </p>
-            <ol className="text-xs text-fg list-decimal list-inside space-y-1">
-              <li>Open the pane with the button above (Privacy &amp; Security → Input Monitoring / Accessibility).</li>
-              <li><span className="text-fg">Remove MKYADA from the list</span> (select it and press the “−” button) — just toggling it off/on is often not enough.</li>
-              <li>Restart MKYADA below, then click <em>Allow…</em> when it asks again.</li>
-            </ol>
-            <div>
-              <Button variant="primary" onClick={() => void invoke("app_restart")}>
+          <Alert
+            tone="warning"
+            title="Granted already, but still denied?"
+            actions={
+              <Button size="sm" onClick={() => void invoke("app_restart")}>
                 <RefreshCw size={14} aria-hidden /> Restart MKYADA
               </Button>
-            </div>
-          </div>
+            }
+          >
+            <p>
+              Each update gets a new signature, so macOS keeps the grant for the old version.
+            </p>
+            <ol className="mt-1.5 flex list-decimal flex-col gap-0.5 pl-5">
+              <li>In System Settings › Privacy &amp; Security, select MKYADA and remove it with “−”.</li>
+              <li>Restart MKYADA, then click Allow… when it asks again.</li>
+            </ol>
+          </Alert>
         )}
-
-        <p className="text-xs text-fg-faint mt-1">
-          Configuring your keypad and playing macros <span className="text-fg">through the device</span> work
-          without any permissions. A fresh Input Monitoring grant only takes effect after the app restarts.
-        </p>
       </div>
     </Card>
   );
 }
 
 /** Slim banner for the app shell — visible on macOS until everything is granted. */
-export function PermissionsBanner({ onOpenSettings }: { onOpenSettings: () => void }) {
+export function PermissionsBanner({
+  onOpenSettings,
+  className,
+}: {
+  onOpenSettings: () => void;
+  className?: string;
+}) {
   const { status, missing } = usePermissions();
   const [dismissed, setDismissed] = useState(false);
   if (!status || !missing || dismissed) return null;
   return (
-    <div className="flex items-center justify-between bg-danger-bg border-b border-danger-line px-4 py-2 text-sm">
-      <span className="flex items-center gap-2">
-        <span className="w-2 h-2 rounded-full bg-danger" />
-        Recording won't work yet — macOS permissions missing
-        {status.input_monitoring !== "granted" && " · Input Monitoring"}
-        {status.accessibility !== "granted" && " · Accessibility"}
-      </span>
-      <div className="flex gap-2">
-        <Button variant="primary" onClick={onOpenSettings}>Fix permissions</Button>
-        <Button variant="ghost" onClick={() => setDismissed(true)}>Later</Button>
-      </div>
-    </div>
+    <Alert
+      tone="danger"
+      className={className}
+      title="Recording won't work yet · macOS permissions missing"
+      actions={
+        <>
+          <Button variant="primary" size="sm" onClick={onOpenSettings}>
+            Fix permissions
+          </Button>
+          <Button variant="ghost" size="sm" onClick={() => setDismissed(true)}>
+            Later
+          </Button>
+        </>
+      }
+    >
+      Grant{" "}
+      {[
+        status.input_monitoring !== "granted" && "Input Monitoring",
+        status.accessibility !== "granted" && "Accessibility",
+      ]
+        .filter(Boolean)
+        .join(" and ")}{" "}
+      to MKYADA in System Settings.
+    </Alert>
   );
 }
 

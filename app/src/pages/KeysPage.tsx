@@ -2,10 +2,11 @@
 // save. Every assignment is compiled to a macro JSON on the device drive.
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowRightLeft, Play, RefreshCw, SquarePen, Usb } from "lucide-react";
+import { ArrowRightLeft, ChevronRight, CirclePlay, MousePointerClick, Play, RefreshCw, Square, SquarePen, Usb } from "lucide-react";
 import { useDevice } from "../lib/device";
+import { usePlayback } from "../lib/playback-context";
 import { useTestMode, useWindowFocused } from "../lib/focus";
-import { TestModeBanner } from "../components/TestModeBanner";
+import { TestModeNotice } from "../components/TestModeBanner";
 import { useNav } from "../lib/nav";
 import { ipc } from "../lib/ipc";
 import type { Assignment, DeviceConfig, MacroFile, ModuleSlot, SlotContext } from "../lib/types";
@@ -27,6 +28,7 @@ import {
   slotFileName,
   slotEditValue,
   SLOT_BUILTIN_ACTION,
+  SLOT_BUILTINS,
 } from "../lib/macro-model";
 import { serializeForDevice } from "../lib/recorder-model";
 import {
@@ -43,7 +45,18 @@ import { keysCache, slotKey } from "../lib/keys-cache";
 import { macroFileCache } from "../lib/macro-cache";
 import { stashRecorderEdit } from "../lib/recorder-handoff";
 import { undoRedoFromEvent, useHistory } from "../lib/history";
-import { Button, Card, EmptyState, Input, Spinner } from "../components/ui";
+import {
+  Alert,
+  Button,
+  Card,
+  EmptyState,
+  IconButton,
+  Input,
+  OverflowMenu,
+  SegmentedControl,
+  Spinner,
+  Tooltip,
+} from "../components/ui";
 import { isWriteCancelled, useWriteGate, writeCancelledError } from "../components/WriteProgress";
 import { useToast } from "../components/toast";
 import { Keypad } from "../components/Keypad";
@@ -55,6 +68,8 @@ type SlotId = number | ModuleSlot;
 function fileFor(slot: SlotId, layer: number, ctx: SlotContext = "grid"): string {
   return typeof slot === "number" ? macroFileName(slot, layer) : slotFileName(slot, layer, ctx);
 }
+
+const FIELD_LABEL = "text-label font-medium tracking-label text-fg [font-stretch:90%]";
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
@@ -120,39 +135,18 @@ async function writeSlotFiles(
  * action" choice, so every control always reads as explicitly set
  * (issue #19). */
 const CTX_META: { id: SlotContext; label: string; hint: string }[] = [
-  { id: "grid", label: "Key grid", hint: "the resting screen — per-layer" },
-  { id: "home", label: "Layer screen", hint: "the layer picker — one setting for all layers" },
-  { id: "menu", label: "Settings menu", hint: "settings and its sub-menus — one setting for all layers" },
+  { id: "grid", label: "Key grid", hint: "The resting screen · per layer" },
+  { id: "home", label: "Layer screen", hint: "The layer picker · one setting for all layers" },
+  { id: "menu", label: "Settings menu", hint: "Settings and its sub-menus · one setting for all layers" },
 ];
-
-const SLOT_BUILTINS: Record<SlotContext, Record<ModuleSlot, string>> = {
-  grid: {
-    "enc-cw": "moves the selection right",
-    "enc-ccw": "moves the selection left",
-    "btn-back": "opens the layer screen",
-    "btn-confirm": "opens the selected key's speed editor",
-    "btn-psh": "speed editor; once anything is customized: toggles select mode",
-  },
-  home: {
-    "enc-cw": "scrolls toward SETTINGS",
-    "enc-ccw": "scrolls toward layer A",
-    "btn-back": "returns to the key grid",
-    "btn-confirm": "activates the highlighted layer",
-    "btn-psh": "activates the highlighted layer",
-  },
-  menu: {
-    "enc-cw": "moves down / increases",
-    "enc-ccw": "moves up / decreases",
-    "btn-back": "goes back one level",
-    "btn-confirm": "confirms the entry",
-    "btn-psh": "confirms the entry",
-  },
-};
 
 export function KeysPage() {
   const { hello, drive, send, onMsg, setCfg: setDeviceCfg } = useDevice();
   const nav = useNav();
   const toast = useToast();
+  const playback = usePlayback();
+  const [pressing, setPressing] = useState(false);
+  const [stoppingRun, setStoppingRun] = useState(false);
   const { writeToKeypad } = useWriteGate();
   const [cfg, setCfg] = useState<DeviceConfig | null>(null);
   const [layer, setLayer] = useState(0);
@@ -389,7 +383,7 @@ export function KeysPage() {
     if (seq !== reloadSeq.current) return;
     if (failed.length) {
       setStatus(
-        `Couldn't read the saved macro for ${failed.join(", ")} — it's still on the keypad. Try Refresh.`,
+        `Couldn't read the saved macro for ${failed.join(", ")}. It's still on the keypad. Try Refresh.`,
       );
     }
     // Only cache a snapshot we actually trust: the listing succeeded and we
@@ -516,7 +510,7 @@ export function KeysPage() {
   // window is focused, a physical press must NOT fire its macro on any model —
   // otherwise trying keys here would trigger real macros. The device goes into
   // test mode (playback suppressed; Vision 6 shows a warning, core6 goes quiet
-  // and TestModeBanner explains it on screen). Gated on focus: a backgrounded
+  // and TestModeNotice explains it under the Keypad card title). Gated on focus: a backgrounded
   // app (e.g. Chrome in front) drops test mode so the keypad keeps working.
   const connected = hello != null;
   useTestMode(send, "keys", connected);
@@ -558,7 +552,7 @@ export function KeysPage() {
         <EmptyState
           icon={<Usb size={28} />}
           title="Waiting for the keypad's USB drive…"
-          description="Assignments are saved as files on the keypad's USB drive (CIRCUITPY). It usually mounts a few seconds after the keypad connects — the app keeps looking automatically. If nothing happens for a while, unplug and replug the keypad."
+          description="Assignments are saved as files on the keypad's USB drive (CIRCUITPY). It usually mounts a few seconds after the keypad connects, and the app keeps looking automatically. If nothing happens for a while, unplug and replug the keypad."
         />
         <div className="flex justify-center mt-3">
           <Spinner />
@@ -794,6 +788,64 @@ export function KeysPage() {
     await send({ t: "play", file: fileFor(slot, layer, ctx) });
   }
 
+  // "Run on keypad": press the saved key remotely, exactly like its physical
+  // press (gestures, repeat, loop and all) — unlike "Play file", which plays
+  // the macro file directly. Numbered keys only; the remote press protocol
+  // has no module-slot presses.
+  const layerLetter = "abcdefgh"[layer];
+  const runPlaying =
+    typeof selected === "number" &&
+    playback.playing?.key === selected &&
+    (playback.playing.layer === null || playback.playing.layer === layerLetter);
+  const runBlocked =
+    typeof selected !== "number"
+      ? "Remote press works on numbered keys only"
+      : draft
+        ? "Save your changes first · this runs what's saved on the keypad"
+        : !playback.canPress
+          ? (playback.pressDisabledReason ?? "Remote press is unavailable")
+          : null;
+  const runButton = runPlaying ? (
+    <Tooltip side="bottom" content="Stop the macro this key is playing">
+      <Button
+        size="sm"
+        variant="danger-solid"
+        loading={stoppingRun}
+        onClick={() => {
+          setStoppingRun(true);
+          playback
+            .stopPlayback()
+            .catch((e) => toast.error("Could not stop playback", String(e)))
+            .finally(() => setStoppingRun(false));
+        }}
+      >
+        <Square size={13} aria-hidden fill="currentColor" /> Stop
+      </Button>
+    </Tooltip>
+  ) : (
+    <Tooltip
+      side="bottom"
+      content={runBlocked ?? "Presses the key on the keypad, exactly like pressing it by hand"}
+    >
+      <Button
+        size="sm"
+        variant="primary"
+        disabled={!!runBlocked}
+        loading={pressing}
+        onClick={() => {
+          if (typeof selected !== "number") return;
+          setPressing(true);
+          playback
+            .pressKey(selected, { layer })
+            .catch((e) => toast.error("The keypad didn't run the key", e instanceof Error ? e.message : String(e)))
+            .finally(() => setPressing(false));
+        }}
+      >
+        <CirclePlay size={14} aria-hidden /> Run on keypad
+      </Button>
+    </Tooltip>
+  );
+
   const visibleAssignments = new Map<number, Assignment>();
   const pendingKeys = new Set<number>();
   for (let k = 1; k <= cfg.key_count; k++) {
@@ -804,53 +856,62 @@ export function KeysPage() {
 
   return (
     <div className="flex flex-col gap-4">
-      <TestModeBanner what="key" />
-      <div className="grid grid-cols-[1fr_1fr] gap-4 items-start">
+      {/* Keypad column fixed and narrow (tiles stay keypad-sized), the editor
+          takes the rest — it's where the work happens. */}
+      <div className="grid grid-cols-[360px_minmax(0,1fr)] 2xl:grid-cols-[420px_minmax(0,1fr)] gap-4 items-start">
       <Card
         title="Keypad"
+        description={<TestModeNotice />}
         actions={
-          <div className="flex gap-1 items-center">
-            {layers > 1 &&
-              Array.from({ length: layers }, (_, i) => (
-                <Button
-                  key={i}
-                  variant={layer === i ? "primary" : "default"}
-                  onClick={() => {
-                    setLayer(i);
-                    setDraft(null);
-                    void send({ t: "set_layer", layer: "abcdefgh"[i] });
-                  }}
-                >
-                  {layerLabel(i)}
-                </Button>
-              ))}
-            <Button
-              title="Re-read every assignment from the keypad (normally not needed — the app remembers them)"
-              onClick={() => {
-                keysCache.invalidate(drive.path);
-                void reload(true);
-              }}
-            >
-              <RefreshCw size={14} aria-hidden />
-            </Button>
-          </div>
+          <IconButton
+            label="Re-read every assignment from the keypad · normally not needed, the app remembers them"
+            onClick={() => {
+              keysCache.invalidate(drive.path);
+              void reload(true);
+            }}
+          >
+            <RefreshCw size={16} aria-hidden />
+          </IconButton>
         }
       >
-        {isVision && namesSupported && layers > 1 && (
-          <div className="mb-3 flex items-center gap-2">
-            <label htmlFor="layer-name" className="text-xs font-medium text-fg-muted shrink-0">
-              Layer {layerLabel(layer)} name
-            </label>
-            <Input
-              id="layer-name"
-              value={layerNameDraft}
-              maxLength={16}
-              placeholder={`Layer ${layerLabel(layer)}`}
-              className="flex-1"
-              aria-label={`On-screen name for layer ${layerLabel(layer)}`}
-              onChange={(e) => setLayerNameDraft(e.target.value)}
-              onBlur={() => void saveLayerName(layerNameDraft)}
+        {layers > 1 && (
+          // Layer picker + the active layer's on-screen name, one compact row.
+          <div className="mb-4 flex items-end gap-2">
+            <div className="flex shrink-0 flex-col gap-1.5">
+            <span className={FIELD_LABEL}>Layer</span>
+            <SegmentedControl
+              ariaLabel="Layer"
+              value={String(layer)}
+              options={Array.from({ length: layers }, (_, i) => ({
+                value: String(i),
+                label: layerLabel(i),
+                title: cfg.layer_names?.[i] ? `Layer ${layerLabel(i)} · ${cfg.layer_names[i]}` : `Layer ${layerLabel(i)}`,
+              }))}
+              onChange={(v) => {
+                const i = Number(v);
+                setLayer(i);
+                setDraft(null);
+                void send({ t: "set_layer", layer: "abcdefgh"[i] });
+              }}
+              className="[&>button]:min-w-9"
             />
+            </div>
+            {isVision && namesSupported && (
+              <label className="flex min-w-0 flex-1 flex-col gap-1.5">
+              <span className={FIELD_LABEL}>Name on screen</span>
+              <Input
+                id="layer-name"
+                value={layerNameDraft}
+                maxLength={16}
+                placeholder={`Layer ${layerLabel(layer)}`}
+                className="w-full"
+                title="Shown on the keypad's screen · saved when you leave the field"
+                aria-label={`On-screen name for layer ${layerLabel(layer)}`}
+                onChange={(e) => setLayerNameDraft(e.target.value)}
+                onBlur={() => void saveLayerName(layerNameDraft)}
+              />
+              </label>
+            )}
           </div>
         )}
         <Keypad
@@ -867,18 +928,22 @@ export function KeysPage() {
           loading={pendingKeys}
         />
         {isVision && (
-          <div className="mt-4 border-t border-line pt-3">
-            <p className="text-xs font-semibold tracking-wide text-fg-muted mb-2">
-              Module controls
-            </p>
+          <div className="mt-5 flex flex-col gap-2.5 border-t border-line pt-4">
+            <div className="flex flex-col gap-0.5">
+              <span className={FIELD_LABEL}>Module controls</span>
+              <p className="text-label text-fg-faint">
+                Encoder and buttons · set per screen and gesture
+              </p>
+            </div>
             <div className="grid grid-cols-2 gap-2">
-              {MODULE_SLOTS.map((s) => {
+              {MODULE_SLOTS.map((s, i) => {
                 const a = assignments.get(slotKey(s, layer));
                 const overrides = (["home", "menu"] as const).filter((c) =>
                   assignments.get(slotKey(s, layer, c)),
                 );
                 const isLoading = pending.has(slotKey(s, layer));
                 const isSelected = selected === s;
+                const odd = MODULE_SLOTS.length % 2 === 1 && i === MODULE_SLOTS.length - 1;
                 return (
                   <button
                     key={s}
@@ -890,45 +955,75 @@ export function KeysPage() {
                     }}
                     aria-pressed={isSelected}
                     aria-busy={isLoading}
-                    className={`rounded-xl border-2 px-3 py-2 flex flex-col items-start gap-0.5 text-left transition-all
-                      ${isSelected ? "border-accent bg-panel2" : "border-line bg-panel2 hover:border-fg-faint"}`}
+                    // same surface, border and selection as the key tiles above
+                    className={`hz-control relative min-w-0 rounded-card border px-3 py-2.5 flex flex-col items-start gap-0.5 text-left transition-[background-color,border-color,box-shadow] duration-[120ms] ease-standard
+                      ${odd ? "col-span-2" : ""}
+                      ${isSelected ? "border-accent bg-selected shadow-ring" : "border-line-strong bg-raised hover:border-stone-350"}`}
                   >
-                    <span className="text-sm font-semibold text-fg">{MODULE_SLOT_LABELS[s]}</span>
-                    <span className="text-[10px] text-fg-muted leading-tight">
+                    <span className="text-[13px] font-strong text-fg">{MODULE_SLOT_LABELS[s]}</span>
+                    <span className="text-label text-fg-muted leading-tight line-clamp-2">
                       {isLoading ? (
                         <Spinner size={12} className="text-fg-faint" />
+                      ) : a ? (
+                        describeSlotAssignment(a)
                       ) : (
-                        (a ? describeSlotAssignment(a) : `Built-in: ${SLOT_BUILTINS.grid[s]}`) +
-                        (overrides.length
-                          ? ` · +${overrides.map((c) => (c === "home" ? "layer screen" : "settings")).join(", ")}`
-                          : "")
+                        <span className="text-fg-faint">Built-in · {SLOT_BUILTINS.grid[s]}</span>
                       )}
                     </span>
+                    {!isLoading && overrides.length > 0 && (
+                      <span className="text-label text-fg-faint leading-tight">
+                        +{" "}
+                        {overrides.map((c) => (c === "home" ? "layer screen" : "settings")).join(", ")}
+                      </span>
+                    )}
+                    {a && (
+                      <span
+                        aria-hidden
+                        title="Customized"
+                        className="absolute top-2 right-2 size-1.5 rounded-full bg-accent"
+                      />
+                    )}
                   </button>
                 );
               })}
             </div>
-            <p className="text-xs text-fg-faint mt-2">
-              Every control can be reassigned, per context (key grid / layer screen / settings
-              menu) and per gesture (tap, double press, long press). “Built-in” is the on-device
-              menu navigation — itself just one of the choices; pick “Do nothing” to turn a
-              control off entirely.
-              {layers > 1 && " A layer without its own grid assignment falls back to Layer A's."}{" "}
-              Keystroke/media/mouse assignments work standalone; open/command/sound/webhook ones
-              run only while the MKYADA app is connected.
-            </p>
+            <details className="group/how">
+              <summary className="flex w-fit cursor-pointer list-none items-center gap-1 rounded-control text-label font-medium text-fg-muted hover:text-fg [&::-webkit-details-marker]:hidden">
+                <ChevronRight
+                  size={13}
+                  aria-hidden
+                  className="transition-transform duration-[120ms] ease-standard group-open/how:rotate-90"
+                />
+                How module controls work
+              </summary>
+              <ul className="mt-2 flex list-disc flex-col gap-1 pl-5 text-label text-fg-muted marker:text-fg-faint">
+                <li>
+                  Each control has its own setting per screen (key grid, layer screen, settings
+                  menu) and per gesture (tap, double press, long press).
+                </li>
+                <li>
+                  “Built-in” is the on-device menu navigation. Pick “Do nothing” to turn a control off.
+                </li>
+                {layers > 1 && (
+                  <li>A layer without its own key-grid assignment uses Layer A's.</li>
+                )}
+                <li>
+                  Keystroke, media and mouse actions work standalone. Open app, command, sound
+                  and webhook actions need the MKYADA app running.
+                </li>
+              </ul>
+            </details>
           </div>
         )}
         {pending.size > 0 && (
-          <p className="text-xs text-fg-muted mt-3 flex items-center gap-1.5">
+          <p className="text-label text-fg-muted mt-3 flex items-center gap-1.5">
             <Spinner size={12} />
             Loading saved macros from the keypad… {loadTotal - pending.size}/{loadTotal}
           </p>
         )}
-        <p className="text-xs text-fg-faint mt-3">
-          Press physical keys to test wiring — they light up live.
-          {cfg.layer_key && ` Key ${cfg.layer_key} is the layer switch.`}
-        </p>
+        {cfg.layer_key ? (
+          <p className="text-label text-fg-faint mt-3">Key {cfg.layer_key} is the layer switch.</p>
+        ) : null}
       </Card>
 
       <Card
@@ -942,78 +1037,107 @@ export function KeysPage() {
         actions={
           selected !== null &&
           current && (
-            <div className="flex gap-1.5">
-              {typeof selected === "number" && (
-                <Button
-                  title={
-                    draft
-                      ? "Save or revert your edits first"
-                      : "Put this key's action on another key — moving onto a used key swaps the two"
-                  }
-                  disabled={!!draft}
-                  onClick={() => setMoving(true)}
-                >
-                  <ArrowRightLeft size={14} aria-hidden /> Move…
-                </Button>
-              )}
+            // Run on keypad is the one primary action; Edit in Recorder stays
+            // visible on recorded keys, the rest lives in the overflow menu so
+            // the header never wraps under the title.
+            <div className="flex items-center gap-1.5">
               {current.kind === "recorded" && typeof selected === "number" && (
-                <Button
-                  title="Open this macro in the Recorder's editor — tweak it and save it back"
-                  onClick={() => {
-                    stashRecorderEdit({
-                      macro: migrateMacro(current.macro),
-                      key: selected,
-                      layer,
-                    });
-                    nav("recorder");
-                  }}
-                >
-                  <SquarePen size={14} aria-hidden /> Edit in Recorder
-                </Button>
+                <Tooltip side="bottom" content="Open this macro in the Recorder's editor · tweak it and save it back">
+                  <Button
+                    size="sm"
+                    onClick={() => {
+                      stashRecorderEdit({
+                        macro: migrateMacro(current.macro),
+                        key: selected,
+                        layer,
+                      });
+                      nav("recorder");
+                    }}
+                  >
+                    <SquarePen size={14} aria-hidden /> Edit in Recorder
+                  </Button>
+                </Tooltip>
               )}
-              <Button onClick={() => void testPlay(selected)}>
-                <Play size={14} aria-hidden /> Test
-              </Button>
+              <OverflowMenu
+                label={`More actions for ${slotTitle(selected)}`}
+                items={[
+                  ...(typeof selected === "number"
+                    ? [
+                        {
+                          label: "Move…",
+                          icon: <ArrowRightLeft size={15} aria-hidden />,
+                          hint: draft
+                            ? "Save or revert your edits first"
+                            : "Put this action on another key · a used key swaps with it",
+                          disabled: !!draft,
+                          onSelect: () => setMoving(true),
+                        },
+                      ]
+                    : []),
+                  {
+                    label: "Play file",
+                    icon: <Play size={15} aria-hidden />,
+                    hint: "Plays the saved file once from the app · skips double / long press, hold and re-press",
+                    onSelect: () => void testPlay(selected),
+                  },
+                ]}
+              />
+              {runButton}
             </div>
           )
         }
       >
+        {status &&
+          (/^(Device error|Couldn't|Still reading)/.test(status) ? (
+            <Alert tone="warning" className="mb-4">
+              {status}
+            </Alert>
+          ) : (
+            <p className="text-label text-fg-faint mb-3">{status}</p>
+          ))}
         {selected === null ? (
-          <p className="text-fg-faint text-sm">
-            Click a key on the left to configure what it does.
-          </p>
+          <EmptyState
+            icon={<MousePointerClick size={28} aria-hidden />}
+            title="Pick a key"
+            description="Click a key on the left to choose what it does."
+          />
         ) : (
           <div className="flex flex-col gap-4">
             {isSlot && (
               <div className="flex flex-col gap-1.5">
-                <div className="flex gap-1">
-                  {CTX_META.map((c) => {
-                    const has = !!assignments.get(keyOf(selected, layer, c.id));
-                    return (
-                      <Button
-                        key={c.id}
-                        variant={ctx === c.id ? "primary" : "default"}
-                        onClick={() => {
-                          setSlotCtx(c.id);
-                          setDraft(null);
-                          setChangedNotice(null);
-                        }}
-                      >
+                <SegmentedControl
+                  ariaLabel="Where this assignment applies"
+                  value={ctx}
+                  options={CTX_META.map((c) => ({
+                    value: c.id,
+                    label: (
+                      <>
                         {c.label}
-                        {has ? " •" : ""}
-                      </Button>
-                    );
-                  })}
-                </div>
-                <p className="text-xs text-fg-faint">
-                  {CTX_META.find((c) => c.id === ctx)!.hint}. Built-in action here:{" "}
-                  {SLOT_BUILTINS[ctx][selected as ModuleSlot]}.
+                        {assignments.get(keyOf(selected, layer, c.id)) && (
+                          <span
+                            aria-label="customized"
+                            className="size-1.5 rounded-full bg-accent"
+                          />
+                        )}
+                      </>
+                    ),
+                  }))}
+                  onChange={(id) => {
+                    setSlotCtx(id);
+                    setDraft(null);
+                    setChangedNotice(null);
+                  }}
+                  className="self-start"
+                />
+                <p className="text-label text-fg-faint">
+                  {CTX_META.find((c) => c.id === ctx)!.hint} · Built-in here:{" "}
+                  {SLOT_BUILTINS[ctx][selected as ModuleSlot]}
                 </p>
                 {!fwOk && (
-                  <p className="text-xs text-warning">
+                  <Alert tone="warning">
                     Per-context overrides, PSH assignments and slot key logic need firmware
-                    0.9.0 — update on the Devices page.
-                  </p>
+                    0.9.0 · update on the Devices page.
+                  </Alert>
                 )}
               </div>
             )}
@@ -1021,24 +1145,29 @@ export function KeysPage() {
               changedNotice.slot === selected &&
               changedNotice.layer === layer &&
               changedNotice.ctx === ctx && (
-              <div className="flex items-center gap-3 bg-warning-bg border border-warning-line rounded-lg px-3 py-2">
-                <span className="text-sm text-fg flex-1">
-                  This macro's speed was changed on the device — reload it here? Your unsaved
-                  edits would be discarded.
-                </span>
-                <Button
-                  onClick={() => {
-                    setDraft(null);
-                    setChangedNotice(null);
-                    void refreshSlot(selected, layer, ctx);
-                  }}
-                >
-                  Reload
-                </Button>
-                <Button variant="ghost" onClick={() => setChangedNotice(null)}>
-                  Keep my edits
-                </Button>
-              </div>
+              <Alert
+                tone="warning"
+                title="Speed changed on the keypad"
+                actions={
+                  <>
+                    <Button
+                      size="sm"
+                      onClick={() => {
+                        setDraft(null);
+                        setChangedNotice(null);
+                        void refreshSlot(selected, layer, ctx);
+                      }}
+                    >
+                      Reload
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => setChangedNotice(null)}>
+                      Keep my edits
+                    </Button>
+                  </>
+                }
+              >
+                Reload it here? Your unsaved edits would be discarded.
+              </Alert>
             )}
             <AssignmentPanel
               value={
@@ -1071,7 +1200,6 @@ export function KeysPage() {
             />
           </div>
         )}
-        {status && <p className="text-xs text-fg-faint mt-3">{status}</p>}
       </Card>
       </div>
       {moving && typeof selected === "number" && current && (
@@ -1128,16 +1256,16 @@ function MoveDialog({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-scrim"
       onMouseDown={(e) => e.target === e.currentTarget && onClose()}
     >
       <div
         role="dialog"
         aria-modal="true"
         aria-label="Move this action to another key"
-        className="bg-panel border border-line rounded-xl shadow-2xl w-[30rem] max-w-[92vw] p-5 flex flex-col gap-3"
+        className="bg-panel border border-line rounded-dialog shadow-overlay w-[30rem] max-w-[92vw] p-5 flex flex-col gap-3"
       >
-        <h2 className="text-base font-semibold text-fg">
+        <h2 className="text-title font-semibold text-fg">
           Move “{what}” to another key
         </h2>
         {layers > 1 && (
@@ -1165,7 +1293,7 @@ function MoveDialog({
           }}
           assignments={shown}
         />
-        <p className="text-xs text-fg-faint min-h-8">
+        <p className="text-label text-fg-faint min-h-8">
           {target === null
             ? "Pick the key this action should live on."
             : isSelf
@@ -1173,7 +1301,7 @@ function MoveDialog({
               : occupied
                 ? `Key ${target} already has “${
                     shown.get(target)!.label || describeAssignment(shown.get(target)!)
-                  }” — Move swaps the two, Copy replaces it.`
+                  }”. Move swaps the two, Copy replaces it.`
                 : `Key ${target}${layers > 1 ? ` on layer ${layerLabel(targetLayer)}` : ""} is empty.`}
         </p>
         <div className="flex justify-end gap-2">
